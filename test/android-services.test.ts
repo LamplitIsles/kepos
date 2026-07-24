@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { readHomeRegistry } from "../src/android/registry-client.js";
+import { readHomeRegistry } from "../src/runtime/registry-client.js";
 import {
   AndroidRegistryState,
   createAndroidRegistrySnapshot,

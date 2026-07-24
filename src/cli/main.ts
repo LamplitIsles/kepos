@@ -47,7 +47,7 @@ import {
 import {
   acquireSubscriberRuntimeLock,
   type SubscriberRuntimeLock,
-} from "./runtime-lock.js";
+} from "../runtime/subscriber-lock.js";
 import { waitForSignal } from "./signals.js";
 import {
   loadCliConfig,
