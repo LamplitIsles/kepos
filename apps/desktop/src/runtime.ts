@@ -96,7 +96,7 @@ export async function startDesktopRuntime(
   let registryError: string | undefined;
   let refreshedGeneration: number | undefined;
   let stopped = false;
-  let pollTask: Promise<void> = Promise.resolve();
+  let pollTask: Promise<void> | undefined;
 
   async function runPoll(): Promise<void> {
     if (stopped) return;
@@ -134,8 +134,11 @@ export async function startDesktopRuntime(
 
   return {
     poll(): Promise<void> {
-      const task = pollTask.then(runPoll);
-      pollTask = task.catch(() => undefined);
+      if (pollTask !== undefined) return pollTask;
+      const task = runPoll().finally(() => {
+        if (pollTask === task) pollTask = undefined;
+      });
+      pollTask = task;
       return task;
     },
     async stop(): Promise<void> {

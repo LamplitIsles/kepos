@@ -472,6 +472,48 @@ test("desktop runtime suppresses a late poll snapshot after stop", async () => {
   ]);
 });
 
+test("desktop runtime coalesces overlapping registry polls", async () => {
+  let generation = 1;
+  let resolveRegistry: ((value: HomeRegistry) => void) | undefined;
+  let registryReads = 0;
+  const desktop = await startDesktopRuntime(
+    {
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [],
+      onSnapshot: () => {},
+    },
+    {
+      acquireSubscriberLock: async () => ({ release: async () => {} }),
+      startSubscriber: async () => runningSubscriber(
+        () => subscriberStatus("connected", generation),
+        [],
+      ),
+      readRegistry: async () => {
+        registryReads++;
+        if (registryReads === 1) return registry;
+        return new Promise((resolve) => {
+          resolveRegistry = resolve;
+        });
+      },
+    },
+  );
+
+  generation = 2;
+  const first = desktop.poll();
+  const second = desktop.poll();
+  const third = desktop.poll();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(first, second);
+  assert.equal(second, third);
+  assert.equal(registryReads, 2);
+  resolveRegistry?.(registry);
+  await Promise.all([first, second, third]);
+  assert.equal(registryReads, 2);
+  await desktop.stop();
+});
+
 test("desktop runtime cleans up when a stopping snapshot fails", async () => {
   const events: string[] = [];
   const desktop = await startDesktopRuntime(
