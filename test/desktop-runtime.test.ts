@@ -389,6 +389,45 @@ test("desktop runtime cleans up when its initial running snapshot fails", async 
   assert.deepEqual(events, ["subscriber:stop", "lock:release"]);
 });
 
+test("desktop runtime keeps its lock until failed startup shutdown finishes", async () => {
+  const events: string[] = [];
+  let finishStop: (() => void) | undefined;
+  const startTask = startDesktopRuntime(
+    {
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [],
+      onSnapshot: (snapshot) => {
+        if (snapshot.phase === "running") throw new Error("snapshot failed");
+      },
+    },
+    {
+      acquireSubscriberLock: async () => ({
+        release: async () => {
+          events.push("lock:release");
+        },
+      }),
+      startSubscriber: async () => ({
+        ...runningSubscriber(() => subscriberStatus("connected", 1), events),
+        stop: async () => {
+          events.push("stop:start");
+          await new Promise<void>((resolve) => {
+            finishStop = resolve;
+          });
+          events.push("stop:finish");
+        },
+      }),
+      readRegistry: async () => registry,
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(events, ["stop:start"]);
+  finishStop?.();
+  await assert.rejects(startTask, /snapshot failed/);
+  assert.deepEqual(events, ["stop:start", "stop:finish", "lock:release"]);
+});
+
 test("desktop runtime suppresses a late poll snapshot after stop", async () => {
   let generation = 1;
   let resolveRegistry: ((value: HomeRegistry) => void) | undefined;

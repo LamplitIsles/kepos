@@ -51,10 +51,16 @@ export async function startDesktopRuntime(
     error: unknown,
     started?: RunningSubscriber,
   ): Promise<void> => {
-    await Promise.allSettled([
-      started?.stop(),
-      lock.release(),
-    ]);
+    try {
+      await started?.stop();
+    } catch {
+      // Keep the original startup error, but never release identity early.
+    }
+    try {
+      await lock.release();
+    } catch {
+      // Keep the original startup error after attempting ordered cleanup.
+    }
     try {
       options.onSnapshot({
         type: "snapshot",
