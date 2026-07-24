@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "workspaces": [
+    "apps/*",
     "packages/*"
   ],
   "license": "Apache-2.0",
@@ -57,8 +58,8 @@
     "check": "npm run build:packages && npm run typecheck && npm run test:coverage && npm run check:home",
     "check:home": "npm run build:home && git diff --exit-code -- home/styles.css",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build:packages && node --import tsx --test",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-include=\"packages/*/src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info",
+    "test": "npm run build:packages && node --import tsx --test \"test/**/*.test.ts\"",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-include=\"packages/*/src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info \"test/**/*.test.ts\"",
     "build:home": "tailwindcss -i home/styles.input.css -o home/styles.css --minify",
     "kepos": "tsx src/cli/main.ts"
   },

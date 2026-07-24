@@ -30,7 +30,12 @@ test("package metadata owns the supported runtime and canonical checks", async (
     packageJson.scripts?.check,
     "npm run build:packages && npm run typecheck && npm run test:coverage && npm run check:home",
   );
+  assert.match(
+    packageJson.scripts?.test ?? "",
+    /--test "test\/\*\*\/\*\.test\.ts"/u,
+  );
   const coverage = packageJson.scripts?.["test:coverage"] ?? "";
+  assert.match(coverage, /"test\/\*\*\/\*\.test\.ts"/u);
   assert.match(coverage, /--test-coverage-include="src\/\*\*\/\*\.ts"/u);
   assert.match(coverage, /--test-coverage-lines=90/u);
   assert.match(coverage, /--test-coverage-branches=80/u);
