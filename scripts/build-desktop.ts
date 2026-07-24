@@ -86,6 +86,16 @@ export function desktopBuildCommands(
         "darwin-arm64",
         "--out",
         frameworks,
+        path.join(repository, "node_modules", "bare-process"),
+      ],
+    },
+    {
+      command: "bare-link",
+      arguments: [
+        "--host",
+        "darwin-arm64",
+        "--out",
+        frameworks,
         path.join(repository, "node_modules", "bare-app-kit"),
       ],
     },
@@ -114,7 +124,16 @@ export async function runDesktopBuild(repository: string): Promise<void> {
   const frameworks = await readdir(
     path.join(desktopAppBundle(repository), "Contents", "Frameworks"),
   );
-  for (const required of ["bare-app-kit.", "bare-web-kit."]) {
+  for (const required of [
+    "bare-abort.",
+    "bare-app-kit.",
+    "bare-hrtime.",
+    "bare-posix.",
+    "bare-signals.",
+    "bare-stdio.",
+    "bare-tty.",
+    "bare-web-kit.",
+  ]) {
     if (!frameworks.some((name) => name.startsWith(required))) {
       throw new Error(`desktop app is missing ${required} framework`);
     }

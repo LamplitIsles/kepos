@@ -102,6 +102,23 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
           "Contents",
           "Frameworks",
         ),
+        path.join(repository, "node_modules", "bare-process"),
+      ],
+    },
+    {
+      command: "bare-link",
+      arguments: [
+        "--host",
+        "darwin-arm64",
+        "--out",
+        path.join(
+          repository,
+          "dist",
+          "desktop",
+          "Kepos.app",
+          "Contents",
+          "Frameworks",
+        ),
         path.join(repository, "node_modules", "bare-app-kit"),
       ],
     },
