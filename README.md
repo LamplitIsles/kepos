@@ -12,8 +12,15 @@ independent Protomux channels for Home, SSH, Navidrome, and other services.
 - Node.js 22
 - npm 10
 
-Install dependencies with `npm ci`. Use the canonical `kepos` CLI below to
-create publisher and subscriber state.
+Desktop development pins the current `tta-lab` Bare UI forks as Git
+submodules. Initialize them before installing dependencies:
+
+```sh
+git submodule update --init --recursive
+npm ci
+```
+
+Use the canonical `kepos` CLI below to create publisher and subscriber state.
 
 ## Nix publisher
 

@@ -19,6 +19,7 @@ test("Nix package is locked and carries its own Node runtime", async () => {
 
   assert.match(packageSource, /importNpmLock\.buildNodeModules/);
   assert.match(packageSource, /removeAttrs rootPackage \["devDependencies" "workspaces"\]/);
+  assert.match(packageSource, /!lib\.hasPrefix "apps\/" path/);
   assert.match(packageSource, /nodejs_22/);
   assert.doesNotMatch(packageSource, /sourceDir/);
 });

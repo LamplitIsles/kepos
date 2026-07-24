@@ -43,7 +43,7 @@ test("Android host boundaries are explicit extraction seams", async () => {
   );
   const workflow = await readProjectFile(".github/workflows/check.yml");
 
-  assert.deepEqual(rootPackage.workspaces, ["packages/*"]);
+  assert.deepEqual(rootPackage.workspaces, ["apps/*", "packages/*"]);
   assert.equal(
     rootPackage.scripts?.["android:fetch-bare-kit"],
     "tsx scripts/fetch-bare-kit.ts",

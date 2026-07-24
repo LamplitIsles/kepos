@@ -1,0 +1,11 @@
+{
+  "name": "@tta-lab/kepos-desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "bare-native": "file:../../vendor/holepunch/bare-native",
+    "bare-web-kit": "file:../../vendor/holepunch/bare-web-kit",
+    "bare-win-ui": "file:../../vendor/holepunch/bare-win-ui"
+  }
+}
