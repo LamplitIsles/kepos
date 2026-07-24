@@ -28,7 +28,7 @@ test("package metadata owns the supported runtime and canonical checks", async (
   });
   assert.equal(
     packageJson.scripts?.check,
-    "npm run build:packages && npm run typecheck && npm run test:coverage && npm run check:home",
+    "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage && npm run check:home",
   );
   assert.match(
     packageJson.scripts?.test ?? "",

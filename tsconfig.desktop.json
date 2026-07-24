@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".build/desktop",
+    "rootDir": "."
+  },
+  "files": [
+    "apps/desktop/src/main.ts",
+    "src/types/vendor.d.ts"
+  ]
+}
