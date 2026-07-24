@@ -8,7 +8,7 @@ export interface DesktopService {
   id: string;
   name: string;
   access: "http" | "ssh" | "tcp";
-  action: "open" | "copy-command" | "copy-url" | "info";
+  action: "open" | "copy-command" | "copy-url";
   icon:
     | "build"
     | "git"

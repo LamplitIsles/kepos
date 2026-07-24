@@ -1,6 +1,6 @@
 import type { HomeRegistryService } from "../home/registry.js";
 
-export type ServiceAction = "open" | "copy-command" | "copy-url" | "info";
+export type ServiceAction = "open" | "copy-command" | "copy-url";
 export type ServiceIcon =
   | "build"
   | "git"
@@ -23,24 +23,39 @@ export interface ServicePresentation {
 
 interface BuiltInServiceHandler {
   action: ServiceAction;
+  httpUrl?: "open" | "origin";
   icon: ServiceIcon;
   sortGroup: 0 | 1 | 2;
 }
 
 export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
-  ente: { action: "copy-url", icon: "photos", sortGroup: 2 },
-  "ente-storage": { action: "info", icon: "storage", sortGroup: 2 },
-  forgejo: { action: "open", icon: "git", sortGroup: 0 },
-  navidrome: { action: "copy-url", icon: "music", sortGroup: 2 },
+  ente: {
+    action: "copy-url",
+    httpUrl: "origin",
+    icon: "photos",
+    sortGroup: 2,
+  },
+  "ente-storage": {
+    action: "copy-url",
+    httpUrl: "origin",
+    icon: "storage",
+    sortGroup: 2,
+  },
+  forgejo: { action: "open", httpUrl: "open", icon: "git", sortGroup: 0 },
+  navidrome: {
+    action: "copy-url",
+    httpUrl: "origin",
+    icon: "music",
+    sortGroup: 2,
+  },
   ssh: { action: "copy-command", icon: "terminal", sortGroup: 1 },
-  woodpecker: { action: "open", icon: "build", sortGroup: 0 },
+  woodpecker: {
+    action: "open",
+    httpUrl: "open",
+    icon: "build",
+    sortGroup: 0,
+  },
 } satisfies Readonly<Record<string, BuiltInServiceHandler>>);
-
-const fallbackHandler: BuiltInServiceHandler = {
-  action: "info",
-  icon: "port",
-  sortGroup: 2,
-};
 
 export function createServicePresentations(
   services: readonly HomeRegistryService[],
@@ -49,18 +64,21 @@ export function createServicePresentations(
 ): ServicePresentation[] {
   return services
     .filter(({ id }) => id !== "home")
-    .map((service, registryIndex) => {
+    .flatMap((service, registryIndex) => {
       const handler = handlerFor(service.id);
-      return {
-        presentation: createPresentation(
-          service,
-          handler,
-          gatewayPort,
-          localPorts.get(service.id),
-        ),
+      if (handler === undefined) return [];
+      const presentation = createPresentation(
+        service,
+        handler,
+        gatewayPort,
+        localPorts.get(service.id),
+      );
+      if (presentation === undefined) return [];
+      return [{
+        presentation,
         registryIndex,
         sortGroup: handler.sortGroup,
-      };
+      }];
     })
     .sort(
       (left, right) =>
@@ -70,12 +88,10 @@ export function createServicePresentations(
     .map(({ presentation }) => presentation);
 }
 
-function handlerFor(id: string): BuiltInServiceHandler {
-  return (
-    BUILT_IN_SERVICE_HANDLERS[
-      id as keyof typeof BUILT_IN_SERVICE_HANDLERS
-    ] ?? fallbackHandler
-  );
+function handlerFor(id: string): BuiltInServiceHandler | undefined {
+  return BUILT_IN_SERVICE_HANDLERS[
+    id as keyof typeof BUILT_IN_SERVICE_HANDLERS
+  ];
 }
 
 function createPresentation(
@@ -83,19 +99,13 @@ function createPresentation(
   handler: BuiltInServiceHandler,
   gatewayPort: number,
   localPort?: number,
-): ServicePresentation {
-  if (handler.action === "open") {
-    return {
-      id: service.id,
-      name: service.name,
-      access: "http",
-      action: handler.action,
-      icon: handler.icon,
-      url: serviceUrl(service.id, gatewayPort, true),
-    };
-  }
-  if (handler.action === "copy-url") {
-    const url = serviceUrl(service.id, gatewayPort, false);
+): ServicePresentation | undefined {
+  if (handler.httpUrl !== undefined) {
+    const url = serviceUrl(
+      service.id,
+      gatewayPort,
+      handler.httpUrl === "open",
+    );
     return {
       id: service.id,
       name: service.name,
@@ -103,25 +113,17 @@ function createPresentation(
       action: handler.action,
       icon: handler.icon,
       url,
-      copyText: url,
+      ...(handler.action === "copy-url" ? { copyText: url } : {}),
     };
   }
-  if (handler.action === "copy-command" && localPort !== undefined) {
-    return {
-      id: service.id,
-      name: service.name,
-      access: "ssh",
-      action: handler.action,
-      icon: handler.icon,
-      copyText: `ssh -p ${localPort} 127.0.0.1`,
-    };
-  }
+  if (handler.action !== "copy-command" || localPort === undefined) return;
   return {
     id: service.id,
     name: service.name,
-    access: handler.action === "copy-command" ? "ssh" : "tcp",
-    action: "info",
+    access: "ssh",
+    action: handler.action,
     icon: handler.icon,
+    copyText: `ssh -p ${localPort} 127.0.0.1`,
   };
 }
 

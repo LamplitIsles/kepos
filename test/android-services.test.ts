@@ -47,13 +47,6 @@ test("Android registry snapshot applies shared service actions, icons, URLs, and
         url: "http://woodpecker.localhost:17480/",
       },
       {
-        id: "ssh",
-        name: "SSH",
-        access: "ssh",
-        action: "info",
-        icon: "terminal",
-      },
-      {
         id: "navidrome",
         name: "Navidrome",
         access: "http",
@@ -65,9 +58,11 @@ test("Android registry snapshot applies shared service actions, icons, URLs, and
       {
         id: "ente-storage",
         name: "Ente Storage",
-        access: "tcp",
-        action: "info",
+        access: "http",
+        action: "copy-url",
         icon: "storage",
+        url: "http://ente-storage.localhost:17480",
+        copyText: "http://ente-storage.localhost:17480",
       },
       {
         id: "ente",
@@ -102,7 +97,7 @@ test("Android registry snapshot preserves publisher service order", () => {
   );
 });
 
-test("Android treats an unknown TCP service conservatively", () => {
+test("Android omits services without a built-in action", () => {
   const registry: HomeRegistry = {
     schemaVersion: 2,
     revision: 1,
@@ -113,15 +108,7 @@ test("Android treats an unknown TCP service conservatively", () => {
     ],
   };
 
-  assert.deepEqual(createAndroidRegistrySnapshot(registry, 17_480).services, [
-    {
-      id: "postgres",
-      name: "PostgreSQL",
-      access: "tcp",
-      action: "info",
-      icon: "port",
-    },
-  ]);
+  assert.deepEqual(createAndroidRegistrySnapshot(registry, 17_480).services, []);
 });
 
 test("Android reads the publisher registry through its local HTTP surface", async () => {

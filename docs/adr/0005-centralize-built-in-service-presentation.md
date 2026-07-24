@@ -26,15 +26,15 @@ The current policy is:
 | SSH | Copy command when a local port exists | Terminal |
 | Navidrome | Copy URL | Music |
 | Ente | Copy URL | Photos |
-| Ente Storage | No action | Storage |
+| Ente Storage | Copy URL | Storage |
 
-Services are shown in three stable groups: open, copy command, then copy URL or
-information-only. Publisher registry order is preserved within each group.
-Unknown services are information-only and use the generic port icon.
+Services are shown in three stable groups: open, copy command, then copy URL.
+Publisher registry order is preserved within each group. Unknown services are
+omitted until they have a built-in action.
 
-URLs opened in a browser include a trailing slash. Navidrome and Ente copy
-their origin without a trailing slash because another app consumes that value
-as a server address.
+URLs opened in a browser include a trailing slash. Navidrome, Ente Photos, and
+Ente Storage copy their origin without a trailing slash because another app
+consumes that value as a server address.
 
 The Android Worklet sends the resolved action, icon, URL, and copy text through
 the existing snapshot protocol. Kotlin renders those values and does not infer
@@ -43,7 +43,7 @@ sending its snapshot to the WebView.
 
 SSH remains platform-aware. Desktop can copy a command when its subscriber has
 an explicit local SSH port. Android currently exposes no local SSH listener, so
-the same SSH entry is shown without an action there.
+SSH is omitted there.
 
 ## Consequences
 

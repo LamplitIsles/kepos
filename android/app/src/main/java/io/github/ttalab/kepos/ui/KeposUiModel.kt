@@ -16,7 +16,6 @@ enum class ServiceAction {
   OPEN,
   COPY_URL,
   COPY_COMMAND,
-  INFO,
 }
 
 enum class ServiceIcon {
@@ -74,17 +73,17 @@ data class KeposUiModel(
         destination = KeposDestination.SERVICES,
         publisherName = publisher.displayName,
         connection = snapshot.connection,
-        services = snapshot.services.map(::serviceUiModel),
+        services = snapshot.services.mapNotNull(::serviceUiModel),
         available = snapshot.connection == "connected",
       )
     }
 
-    private fun serviceUiModel(service: ServiceSnapshot): ServiceUiModel {
+    private fun serviceUiModel(service: ServiceSnapshot): ServiceUiModel? {
       val action = when (service.action) {
         "open" -> ServiceAction.OPEN
         "copy-url" -> ServiceAction.COPY_URL
         "copy-command" -> ServiceAction.COPY_COMMAND
-        else -> ServiceAction.INFO
+        else -> return null
       }
       val icon = when (service.icon) {
         "music" -> ServiceIcon.MUSIC

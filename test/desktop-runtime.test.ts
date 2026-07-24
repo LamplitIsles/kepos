@@ -97,10 +97,12 @@ test("desktop runtime uses the shared service handlers and action order", async 
       {
         id: "ente-storage",
         name: "Ente Storage",
-        access: "tcp",
-        action: "info",
+        access: "http",
+        action: "copy-url",
         icon: "storage",
         available: true,
+        url: "http://ente-storage.localhost:17480",
+        copyText: "http://ente-storage.localhost:17480",
       },
       {
         id: "ente",

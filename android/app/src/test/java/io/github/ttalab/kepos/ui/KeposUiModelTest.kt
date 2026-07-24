@@ -44,7 +44,7 @@ class KeposUiModelTest {
 
     assertEquals(KeposDestination.SERVICES, model.destination)
     assertEquals("kosmos", model.publisherName)
-    assertEquals(listOf("forgejo", "navidrome", "ssh"), model.services.map { it.id })
+    assertEquals(listOf("forgejo", "navidrome"), model.services.map { it.id })
   }
 
   @Test
@@ -55,12 +55,10 @@ class KeposUiModelTest {
     assertEquals(ServiceIcon.GIT, services[0].icon)
     assertEquals(ServiceAction.COPY_URL, services[1].action)
     assertEquals(ServiceIcon.MUSIC, services[1].icon)
-    assertEquals(ServiceAction.INFO, services[2].action)
-    assertEquals(ServiceIcon.TERMINAL, services[2].icon)
   }
 
   @Test
-  fun unknownServicesRemainConservativeWithGenericIcons() {
+  fun servicesWithoutAnActionAreOmitted() {
     val snapshot = connectedSnapshot().copy(
       services = listOf(
         ServiceSnapshot(
@@ -75,14 +73,11 @@ class KeposUiModelTest {
 
     val services = KeposUiModel.from(snapshot).services
 
-    assertEquals(ServiceIcon.PORT, services[0].icon)
-    assertEquals(ServiceAction.INFO, services[0].action)
-    assertEquals(ServiceIcon.PORT, services[1].icon)
-    assertEquals(ServiceAction.INFO, services[1].action)
+    assertEquals(emptyList<ServiceUiModel>(), services)
   }
 
   @Test
-  fun enteCopiesItsUrlWhileEnteStorageHasNoOpenAction() {
+  fun entePhotosAndStorageBothCopyTheirUrls() {
     val snapshot = connectedSnapshot().copy(
       services = listOf(
         ServiceSnapshot(
@@ -97,9 +92,11 @@ class KeposUiModelTest {
         ServiceSnapshot(
           id = "ente-storage",
           name = "Ente Storage",
-          access = "tcp",
-          action = "info",
+          access = "http",
+          action = "copy-url",
           icon = "storage",
+          url = "http://ente-storage.localhost:17480",
+          copyText = "http://ente-storage.localhost:17480",
         ),
       ),
     )
@@ -109,8 +106,9 @@ class KeposUiModelTest {
     assertEquals(ServiceAction.COPY_URL, services[0].action)
     assertEquals(ServiceIcon.PHOTOS, services[0].icon)
     assertEquals("http://ente.localhost:17480", services[0].url)
-    assertEquals(ServiceAction.INFO, services[1].action)
+    assertEquals(ServiceAction.COPY_URL, services[1].action)
     assertEquals(ServiceIcon.STORAGE, services[1].icon)
+    assertEquals("http://ente-storage.localhost:17480", services[1].url)
   }
 
   private fun connectedSnapshot() = RuntimeSnapshot(
@@ -135,13 +133,6 @@ class KeposUiModelTest {
         icon = "music",
         url = "http://navidrome.localhost:17480",
         copyText = "http://navidrome.localhost:17480",
-      ),
-      ServiceSnapshot(
-        id = "ssh",
-        name = "SSH",
-        access = "ssh",
-        action = "info",
-        icon = "terminal",
       ),
     ),
   )

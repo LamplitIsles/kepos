@@ -186,13 +186,6 @@ class KeposScreenTest {
         url = "http://forgejo.localhost:17480/",
       ),
       ServiceSnapshot(
-        id = "ssh",
-        name = "SSH",
-        access = "ssh",
-        action = "info",
-        icon = "terminal",
-      ),
-      ServiceSnapshot(
         id = "woodpecker",
         name = "Woodpecker",
         access = "http",

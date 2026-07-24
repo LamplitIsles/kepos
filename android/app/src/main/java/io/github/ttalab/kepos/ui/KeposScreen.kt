@@ -224,7 +224,6 @@ private fun ServiceHome(
             ServiceAction.COPY_URL,
             ServiceAction.COPY_COMMAND,
             -> service.copyText?.let(onCopyText)
-            ServiceAction.INFO -> infoService = service.id
           }
         },
         onCopyAddress = { service.url?.let(onCopyText) },
@@ -481,14 +480,12 @@ private fun ServiceActionButton(
     ServiceAction.OPEN -> "Open"
     ServiceAction.COPY_URL -> "Copy URL"
     ServiceAction.COPY_COMMAND -> "Copy command"
-    ServiceAction.INFO -> "Details"
   }
   val icon = when (service.action) {
     ServiceAction.OPEN -> Lucide.ExternalLink
     ServiceAction.COPY_URL,
     ServiceAction.COPY_COMMAND,
     -> Lucide.Copy
-    ServiceAction.INFO -> Lucide.Unplug
   }
   OutlinedButton(
     onClick = onAction,
