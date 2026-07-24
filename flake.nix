@@ -23,6 +23,25 @@
       pkgs = pkgsFor system;
     in rec {
       kepos = pkgs.callPackage ./nix/package.nix {};
+      container-image = pkgs.dockerTools.buildImage {
+        name = "ghcr.io/tta-lab/kepos-neo";
+        tag = "local";
+        copyToRoot = pkgs.buildEnv {
+          name = "kepos-container-root";
+          paths = [kepos];
+        };
+        extraCommands = ''
+          mkdir -m 1777 tmp
+        '';
+        config = {
+          Entrypoint = ["${kepos}/bin/kepos"];
+          User = "10000:10000";
+          Labels = {
+            "org.opencontainers.image.source" = "https://github.com/tta-lab/kepos-neo";
+            "org.opencontainers.image.licenses" = "Apache-2.0";
+          };
+        };
+      };
       default = kepos;
     });
 
@@ -40,6 +59,7 @@
     checks = forAllSystems (system: let
       pkgs = pkgsFor system;
       package = self.packages.${system}.kepos;
+      containerImage = self.packages.${system}.container-image;
       home = home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
         modules = [
@@ -83,6 +103,20 @@
     in {
       inherit package;
       home-manager-module = moduleCheck;
+      container-image = pkgs.runCommand "kepos-container-image-check" {
+        nativeBuildInputs = [pkgs.gawk pkgs.jq pkgs.gnutar];
+      } ''
+        mkdir image
+        tar -xf ${containerImage} -C image
+        config="$(jq -r '.[0].Config' image/manifest.json)"
+        layer="$(jq -r '.[0].Layers[-1]' image/manifest.json)"
+        jq -e \
+          --arg entrypoint "${package}/bin/kepos" \
+          '.config.Entrypoint == [$entrypoint] and .config.User == "10000:10000"' \
+          "image/$config" >/dev/null
+        test "$(tar -tvf "image/$layer" ./tmp/ | awk 'NR == 1 { print $1 }')" = drwxrwxrwt
+        touch "$out"
+      '';
     });
 
     formatter = forAllSystems (system: (pkgsFor system).alejandra);

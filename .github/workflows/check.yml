@@ -81,7 +81,7 @@ jobs:
 
   nix:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -93,6 +93,61 @@ jobs:
 
       - name: Check Nix flake
         run: nix flake check --print-build-logs
+
+      - name: Export container image
+        if: github.event_name == 'push'
+        run: |
+          image_path="$(nix build .#container-image --no-link --print-out-paths)"
+          cp --dereference "$image_path" kepos-container-image.tar.gz
+
+      - name: Store container image
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: container-image-${{ github.sha }}
+          path: kepos-container-image.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-container:
+    if: github.event_name == 'push'
+    needs:
+      - android
+      - check
+      - nix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download container image
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: container-image-${{ github.sha }}
+
+      - name: Publish container image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          image=ghcr.io/tta-lab/kepos-neo
+          sha_tag="sha-${GITHUB_SHA}"
+
+          docker load --input kepos-container-image.tar.gz
+          docker tag "$image:local" "$image:$sha_tag"
+          docker tag "$image:local" "$image:main"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          docker push "$image:$sha_tag"
+          docker push "$image:main"
+
+          digest="$(docker buildx imagetools inspect "$image:$sha_tag" --format '{{.Manifest.Digest}}')"
+          {
+            echo '### Kepos container image'
+            echo
+            echo "\`$image@$digest\`"
+          } >>"$GITHUB_STEP_SUMMARY"
 
   upload-coverage:
     if: github.event_name == 'push'
