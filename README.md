@@ -70,6 +70,28 @@ The package and CLI app are also available directly:
 nix run github:tta-lab/kepos-neo -- --help
 ```
 
+## Container image
+
+The Nix flake builds the same headless Linux CLI as a non-root container image:
+
+```sh
+nix build .#container-image
+docker load < result
+docker run --rm ghcr.io/tta-lab/kepos-neo:local --help
+```
+
+Every push to `main` publishes the `linux/amd64` image to GHCR with both
+`main` and immutable `sha-<git-commit>` tags. Deployments should pin the digest
+printed in the GitHub Actions summary:
+
+```text
+ghcr.io/tta-lab/kepos-neo@sha256:<digest>
+```
+
+GHCR creates a new package as private. After its first publication, an
+organization owner must make `kepos-neo` public once so a fresh cluster can
+pull it without registry credentials.
+
 ## Identity and keys
 
 Every publisher and subscriber has a cryptographic public/private key pair.
