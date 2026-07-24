@@ -7,7 +7,7 @@
 }: let
   rootPackage = builtins.fromJSON (builtins.readFile ../package.json);
   rootLock = builtins.fromJSON (builtins.readFile ../package-lock.json);
-  # Android workspaces and build tools share the root lock but are not part of
+  # App and package workspaces share the root lock but are not part of
   # the headless CLI closure. Keep one lockfile and select its production graph.
   package = removeAttrs rootPackage ["devDependencies" "workspaces"];
   packageLock =
@@ -20,6 +20,7 @@
             == ""
             || (!(entry.dev or false)
               && !(entry.link or false)
+              && !lib.hasPrefix "apps/" path
               && !lib.hasPrefix "packages/" path)
         )
         rootLock.packages
