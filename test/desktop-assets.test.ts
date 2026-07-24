@@ -25,7 +25,8 @@ test("desktop UI is a self-contained dark Kepos service console", () => {
 test("desktop UI derives actions from snapshots without hard-coded endpoints", () => {
   const html = renderDesktopUi();
 
-  assert.match(html, /service\.id === "navidrome"/);
+  assert.match(html, /service\.action === "copy-url"/);
+  assert.match(html, /icons\[service\.icon\]/);
   assert.match(html, /service\.copyText/);
   assert.match(html, /service\.url/);
   assert.match(html, /type: "openService", serviceId: service\.id/);

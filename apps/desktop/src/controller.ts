@@ -55,7 +55,7 @@ export function createDesktopController(
       ({ id }) => id === command.serviceId,
     );
     if (
-      service?.access !== "http" ||
+      service?.action !== "open" ||
       !service.available ||
       service.url === undefined
     ) {

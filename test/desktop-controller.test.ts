@@ -15,17 +15,30 @@ const initial: DesktopSnapshot = {
   gatewayPort: 17_480,
   services: [
     {
+      id: "forgejo",
+      name: "Forgejo",
+      access: "http",
+      action: "open",
+      icon: "git",
+      available: true,
+      url: "http://forgejo.localhost:17480/",
+    },
+    {
       id: "navidrome",
       name: "Navidrome",
       access: "http",
+      action: "copy-url",
+      icon: "music",
       available: true,
-      url: "http://navidrome.localhost:17480/",
-      copyText: "http://navidrome.localhost:17480/",
+      url: "http://navidrome.localhost:17480",
+      copyText: "http://navidrome.localhost:17480",
     },
     {
       id: "ssh",
       name: "SSH",
       access: "ssh",
+      action: "copy-command",
+      icon: "terminal",
       available: true,
       copyText: "ssh -p 2222 127.0.0.1",
     },
@@ -68,9 +81,14 @@ test("desktop controller opens only a current validated HTTP service", async () 
   });
 
   await controller.receive(
-    '{"type":"openService","serviceId":"navidrome"}',
+    '{"type":"openService","serviceId":"forgejo"}',
   );
-  assert.deepEqual(opened, ["http://navidrome.localhost:17480/"]);
+  assert.deepEqual(opened, ["http://forgejo.localhost:17480/"]);
+
+  await assert.rejects(
+    controller.receive('{"type":"openService","serviceId":"navidrome"}'),
+    /not an available HTTP service/,
+  );
 
   await assert.rejects(
     controller.receive('{"type":"openService","serviceId":"ssh"}'),
@@ -105,7 +123,7 @@ test("desktop controller serializes commands and quits once", async () => {
   });
 
   const first = controller.receive(
-    '{"type":"openService","serviceId":"navidrome"}',
+    '{"type":"openService","serviceId":"forgejo"}',
   );
   const second = controller.receive('{"type":"showHome"}');
   const third = controller.receive('{"type":"quit"}');

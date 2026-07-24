@@ -295,27 +295,36 @@ export function renderDesktopUi(): string {
         .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 
-      const icon = (service) => {
-        if (service.id === "navidrome") return '<svg viewBox="0 0 24 24"><path d="M9 18V5l10-2v13M9 9l10-2M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm10-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg>';
-        if (service.id === "ssh") return '<svg viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></svg>';
-        return '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>';
+      const icons = {
+        build: '<svg viewBox="0 0 24 24"><path d="m15 12-8.5 8.5a2.1 2.1 0 0 1-3-3L12 9m6-6 3 3-6.5 6.5-3-3Z"/></svg>',
+        git: '<svg viewBox="0 0 24 24"><circle cx="6" cy="4" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="20" r="2"/><path d="M6 6v12M8 8c2 0 3 2 3 4s1 4 5 4V8"/></svg>',
+        music: '<svg viewBox="0 0 24 24"><path d="M9 18V5l10-2v13M9 9l10-2M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm10-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg>',
+        photos: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m4 17 5-5 4 4 2-2 5 4"/></svg>',
+        storage: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>',
+        terminal: '<svg viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></svg>',
+        web: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>',
+        port: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4.5 7.5 7.5 4 7.5-4M12 12v9"/></svg>'
       };
 
+      const icon = (service) => icons[service.icon] || icons.port;
+
       const primaryLabel = (service) => {
-        if (service.access === "ssh") return "Copy command";
-        if (service.id === "navidrome") return "Copy URL";
-        return "Open";
+        if (service.action === "copy-command") return "Copy command";
+        if (service.action === "copy-url") return "Copy URL";
+        return service.action === "open" ? "Open" : "";
       };
 
       const renderService = (service) => {
         const address = service.url || service.copyText || "Local endpoint pending";
-        const action = service.access === "http" && service.id !== "navidrome" ? "open" : "copy";
+        const action = service.action === "open" ? "open" : "copy";
+        const actionButton = service.action === "info" ? '' :
+          '<button class="action" type="button" data-action="' + action + '" data-service="' + escapeHtml(service.id) + '"' +
+          (service.available ? '' : ' disabled') + '>' + primaryLabel(service) + '</button>';
         return '<article class="service' + (service.available ? '' : ' unavailable') + '">' +
           '<div class="service-icon">' + icon(service) + '</div>' +
           '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2>' +
           '<p class="service-address">' + escapeHtml(address) + '</p></div>' +
-          '<div class="actions"><button class="action" type="button" data-action="' + action + '" data-service="' + escapeHtml(service.id) + '"' +
-          (service.available ? '' : ' disabled') + '>' + primaryLabel(service) + '</button></div></article>';
+          '<div class="actions">' + actionButton + '</div></article>';
       };
 
       const render = () => {

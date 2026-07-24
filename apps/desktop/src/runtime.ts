@@ -1,5 +1,6 @@
 import type { HomeRegistry } from "../../../src/home/registry.js";
 import { readHomeRegistry } from "../../../src/runtime/registry-client.js";
+import { createServicePresentations } from "../../../src/runtime/service-handlers.js";
 import {
   acquireSubscriberRuntimeLock,
   type SubscriberRuntimeLock,
@@ -179,32 +180,14 @@ function createServices(
   gatewayPort: number,
   connected: boolean,
 ): DesktopService[] {
-  return registry.services
-    .filter(({ id }) => id !== "home")
-    .map((service): DesktopService => {
-      if (service.id === "ssh") {
-        const port = status.services.find(({ id }) => id === service.id)?.port;
-        return {
-          id: service.id,
-          name: service.name,
-          access: "ssh",
-          available: connected && port !== undefined,
-          ...(port === undefined
-            ? {}
-            : { copyText: `ssh -p ${port} 127.0.0.1` }),
-        };
-      }
-
-      const url = `http://${service.id}.localhost:${gatewayPort}/`;
-      return {
-        id: service.id,
-        name: service.name,
-        access: "http",
-        available: connected,
-        url,
-        copyText: url,
-      };
-    });
+  const localPorts = new Map(
+    status.services.map(({ id, port }) => [id, port] as const),
+  );
+  return createServicePresentations(
+    registry.services,
+    gatewayPort,
+    localPorts,
+  ).map((service) => ({ ...service, available: connected }));
 }
 
 function errorMessage(error: unknown): string {

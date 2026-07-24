@@ -23,6 +23,101 @@ const registry: HomeRegistry = {
   ],
 };
 
+test("desktop runtime uses the shared service handlers and action order", async () => {
+  const snapshots: unknown[] = [];
+  const richRegistry: HomeRegistry = {
+    ...registry,
+    services: [
+      { id: "home", name: "Home", kind: "tcp" },
+      { id: "navidrome", name: "Navidrome", kind: "tcp" },
+      { id: "ente-storage", name: "Ente Storage", kind: "tcp" },
+      { id: "ssh", name: "SSH", kind: "tcp" },
+      { id: "forgejo", name: "Forgejo", kind: "tcp" },
+      { id: "ente", name: "Ente Photos", kind: "tcp" },
+      { id: "woodpecker", name: "Woodpecker", kind: "tcp" },
+    ],
+  };
+  const desktop = await startDesktopRuntime(
+    {
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [{ id: "ssh", localPort: 2222 }],
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    {
+      acquireSubscriberLock: async () => ({ release: async () => {} }),
+      startSubscriber: async () => runningSubscriber(
+        () => subscriberStatus("connected"),
+        [],
+      ),
+      readRegistry: async () => richRegistry,
+    },
+  );
+
+  assert.deepEqual(
+    (snapshots.at(-1) as { services: unknown[] }).services,
+    [
+      {
+        id: "forgejo",
+        name: "Forgejo",
+        access: "http",
+        action: "open",
+        icon: "git",
+        available: true,
+        url: "http://forgejo.localhost:17480/",
+      },
+      {
+        id: "woodpecker",
+        name: "Woodpecker",
+        access: "http",
+        action: "open",
+        icon: "build",
+        available: true,
+        url: "http://woodpecker.localhost:17480/",
+      },
+      {
+        id: "ssh",
+        name: "SSH",
+        access: "ssh",
+        action: "copy-command",
+        icon: "terminal",
+        available: true,
+        copyText: "ssh -p 2222 127.0.0.1",
+      },
+      {
+        id: "navidrome",
+        name: "Navidrome",
+        access: "http",
+        action: "copy-url",
+        icon: "music",
+        available: true,
+        url: "http://navidrome.localhost:17480",
+        copyText: "http://navidrome.localhost:17480",
+      },
+      {
+        id: "ente-storage",
+        name: "Ente Storage",
+        access: "tcp",
+        action: "info",
+        icon: "storage",
+        available: true,
+      },
+      {
+        id: "ente",
+        name: "Ente Photos",
+        access: "http",
+        action: "copy-url",
+        icon: "photos",
+        available: true,
+        url: "http://ente.localhost:17480",
+        copyText: "http://ente.localhost:17480",
+      },
+    ],
+  );
+
+  await desktop.stop();
+});
+
 test("desktop runtime publishes real services across reconnect generations", async () => {
   const events: string[] = [];
   const snapshots: unknown[] = [];
@@ -73,19 +168,23 @@ test("desktop runtime publishes real services across reconnect generations", asy
       gatewayPort: 17_480,
       services: [
         {
-          id: "navidrome",
-          name: "Navidrome",
-          access: "http",
-          available: true,
-          url: "http://navidrome.localhost:17480/",
-          copyText: "http://navidrome.localhost:17480/",
-        },
-        {
           id: "ssh",
           name: "SSH",
           access: "ssh",
+          action: "copy-command",
+          icon: "terminal",
           available: true,
           copyText: "ssh -p 2222 127.0.0.1",
+        },
+        {
+          id: "navidrome",
+          name: "Navidrome",
+          access: "http",
+          action: "copy-url",
+          icon: "music",
+          available: true,
+          url: "http://navidrome.localhost:17480",
+          copyText: "http://navidrome.localhost:17480",
         },
       ],
     },
@@ -129,19 +228,23 @@ test("desktop runtime publishes real services across reconnect generations", asy
     gatewayPort: 17_480,
     services: [
       {
-        id: "navidrome",
-        name: "Navidrome",
-        access: "http",
-        available: false,
-        url: "http://navidrome.localhost:17480/",
-        copyText: "http://navidrome.localhost:17480/",
-      },
-      {
         id: "ssh",
         name: "SSH",
         access: "ssh",
+        action: "copy-command",
+        icon: "terminal",
         available: false,
         copyText: "ssh -p 2222 127.0.0.1",
+      },
+      {
+        id: "navidrome",
+        name: "Navidrome",
+        access: "http",
+        action: "copy-url",
+        icon: "music",
+        available: false,
+        url: "http://navidrome.localhost:17480",
+        copyText: "http://navidrome.localhost:17480",
       },
     ],
   });

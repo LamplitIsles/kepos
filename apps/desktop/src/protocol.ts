@@ -8,6 +8,16 @@ export interface DesktopService {
   id: string;
   name: string;
   access: "http" | "ssh" | "tcp";
+  action: "open" | "copy-command" | "copy-url" | "info";
+  icon:
+    | "build"
+    | "git"
+    | "music"
+    | "photos"
+    | "port"
+    | "storage"
+    | "terminal"
+    | "web";
   available: boolean;
   copyText?: string;
   url?: string;

@@ -58,6 +58,8 @@ import com.composables.icons.lucide.Copy
 import com.composables.icons.lucide.ExternalLink
 import com.composables.icons.lucide.GitBranch
 import com.composables.icons.lucide.Hammer
+import com.composables.icons.lucide.Images
+import com.composables.icons.lucide.DatabaseBackup
 import com.composables.icons.lucide.EllipsisVertical
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.RefreshCw
@@ -220,8 +222,8 @@ private fun ServiceHome(
           when (service.action) {
             ServiceAction.OPEN -> service.url?.let(onOpenUrl)
             ServiceAction.COPY_URL,
-            ServiceAction.COPY_ADDRESS,
-            -> service.url?.let(onCopyText)
+            ServiceAction.COPY_COMMAND,
+            -> service.copyText?.let(onCopyText)
             ServiceAction.INFO -> infoService = service.id
           }
         },
@@ -478,13 +480,13 @@ private fun ServiceActionButton(
   val label = when (service.action) {
     ServiceAction.OPEN -> "Open"
     ServiceAction.COPY_URL -> "Copy URL"
-    ServiceAction.COPY_ADDRESS -> "Copy"
+    ServiceAction.COPY_COMMAND -> "Copy command"
     ServiceAction.INFO -> "Details"
   }
   val icon = when (service.action) {
     ServiceAction.OPEN -> Lucide.ExternalLink
     ServiceAction.COPY_URL,
-    ServiceAction.COPY_ADDRESS,
+    ServiceAction.COPY_COMMAND,
     -> Lucide.Copy
     ServiceAction.INFO -> Lucide.Unplug
   }
@@ -789,6 +791,8 @@ private fun serviceIcon(icon: ServiceIcon): ImageVector = when (icon) {
   ServiceIcon.TERMINAL -> Lucide.SquareTerminal
   ServiceIcon.GIT -> Lucide.GitBranch
   ServiceIcon.BUILD -> Lucide.Hammer
+  ServiceIcon.PHOTOS -> Lucide.Images
+  ServiceIcon.STORAGE -> Lucide.DatabaseBackup
   ServiceIcon.WEB -> Lucide.ExternalLink
   ServiceIcon.PORT -> Lucide.BoxIcon
 }

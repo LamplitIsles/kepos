@@ -60,7 +60,7 @@ class KeposUiModelTest {
   }
 
   @Test
-  fun unknownServicesRemainUsableWithGenericIcons() {
+  fun unknownServicesRemainConservativeWithGenericIcons() {
     val snapshot = connectedSnapshot().copy(
       services = listOf(
         ServiceSnapshot(
@@ -75,10 +75,42 @@ class KeposUiModelTest {
 
     val services = KeposUiModel.from(snapshot).services
 
-    assertEquals(ServiceIcon.WEB, services[0].icon)
-    assertEquals(ServiceAction.OPEN, services[0].action)
+    assertEquals(ServiceIcon.PORT, services[0].icon)
+    assertEquals(ServiceAction.INFO, services[0].action)
     assertEquals(ServiceIcon.PORT, services[1].icon)
     assertEquals(ServiceAction.INFO, services[1].action)
+  }
+
+  @Test
+  fun enteCopiesItsUrlWhileEnteStorageHasNoOpenAction() {
+    val snapshot = connectedSnapshot().copy(
+      services = listOf(
+        ServiceSnapshot(
+          id = "ente",
+          name = "Ente Photos",
+          access = "http",
+          action = "copy-url",
+          icon = "photos",
+          url = "http://ente.localhost:17480",
+          copyText = "http://ente.localhost:17480",
+        ),
+        ServiceSnapshot(
+          id = "ente-storage",
+          name = "Ente Storage",
+          access = "tcp",
+          action = "info",
+          icon = "storage",
+        ),
+      ),
+    )
+
+    val services = KeposUiModel.from(snapshot).services
+
+    assertEquals(ServiceAction.COPY_URL, services[0].action)
+    assertEquals(ServiceIcon.PHOTOS, services[0].icon)
+    assertEquals("http://ente.localhost:17480", services[0].url)
+    assertEquals(ServiceAction.INFO, services[1].action)
+    assertEquals(ServiceIcon.STORAGE, services[1].icon)
   }
 
   private fun connectedSnapshot() = RuntimeSnapshot(
@@ -91,15 +123,26 @@ class KeposUiModelTest {
         id = "forgejo",
         name = "Forgejo",
         access = "http",
+        action = "open",
+        icon = "git",
         url = "http://forgejo.localhost:17480/",
       ),
       ServiceSnapshot(
         id = "navidrome",
         name = "Navidrome",
         access = "http",
-        url = "http://navidrome.localhost:17480/",
+        action = "copy-url",
+        icon = "music",
+        url = "http://navidrome.localhost:17480",
+        copyText = "http://navidrome.localhost:17480",
       ),
-      ServiceSnapshot(id = "ssh", name = "SSH", access = "tcp"),
+      ServiceSnapshot(
+        id = "ssh",
+        name = "SSH",
+        access = "ssh",
+        action = "info",
+        icon = "terminal",
+      ),
     ),
   )
 }

@@ -230,7 +230,10 @@ class BareRuntime(
     id = data.getValue("id").jsonPrimitive.content,
     name = data.getValue("name").jsonPrimitive.content,
     access = data.getValue("access").jsonPrimitive.content,
+    action = data["action"]?.jsonPrimitive?.content ?: "info",
+    icon = data["icon"]?.jsonPrimitive?.content ?: "port",
     url = data["url"]?.jsonPrimitive?.content,
+    copyText = data["copyText"]?.jsonPrimitive?.content,
   )
 
   private fun receiveResponse(runtimeId: String, response: ResponseEnvelope) {

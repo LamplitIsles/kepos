@@ -11,7 +11,7 @@ import { startHomeServer } from "../src/home/server.js";
 
 const publisherKey = "ab".repeat(32);
 
-test("Android registry snapshot hides Home and exposes usable service addresses", () => {
+test("Android registry snapshot applies shared service actions, icons, URLs, and order", () => {
   const registry: HomeRegistry = {
     schemaVersion: 2,
     revision: 1,
@@ -19,8 +19,11 @@ test("Android registry snapshot hides Home and exposes usable service addresses"
     services: [
       { id: "home", name: "Home", kind: "tcp" },
       { id: "navidrome", name: "Navidrome", kind: "tcp" },
-      { id: "forgejo", name: "Forgejo", kind: "tcp" },
+      { id: "ente-storage", name: "Ente Storage", kind: "tcp" },
       { id: "ssh", name: "SSH", kind: "tcp" },
+      { id: "forgejo", name: "Forgejo", kind: "tcp" },
+      { id: "ente", name: "Ente Photos", kind: "tcp" },
+      { id: "woodpecker", name: "Woodpecker", kind: "tcp" },
     ],
   };
 
@@ -28,21 +31,52 @@ test("Android registry snapshot hides Home and exposes usable service addresses"
     publisher: { displayName: "kosmos", publisherKey },
     services: [
       {
-        id: "navidrome",
-        name: "Navidrome",
-        access: "http",
-        url: "http://navidrome.localhost:17480/",
-      },
-      {
         id: "forgejo",
         name: "Forgejo",
         access: "http",
+        action: "open",
+        icon: "git",
         url: "http://forgejo.localhost:17480/",
+      },
+      {
+        id: "woodpecker",
+        name: "Woodpecker",
+        access: "http",
+        action: "open",
+        icon: "build",
+        url: "http://woodpecker.localhost:17480/",
       },
       {
         id: "ssh",
         name: "SSH",
+        access: "ssh",
+        action: "info",
+        icon: "terminal",
+      },
+      {
+        id: "navidrome",
+        name: "Navidrome",
+        access: "http",
+        action: "copy-url",
+        icon: "music",
+        url: "http://navidrome.localhost:17480",
+        copyText: "http://navidrome.localhost:17480",
+      },
+      {
+        id: "ente-storage",
+        name: "Ente Storage",
         access: "tcp",
+        action: "info",
+        icon: "storage",
+      },
+      {
+        id: "ente",
+        name: "Ente Photos",
+        access: "http",
+        action: "copy-url",
+        icon: "photos",
+        url: "http://ente.localhost:17480",
+        copyText: "http://ente.localhost:17480",
       },
     ],
   });
@@ -80,7 +114,13 @@ test("Android treats an unknown TCP service conservatively", () => {
   };
 
   assert.deepEqual(createAndroidRegistrySnapshot(registry, 17_480).services, [
-    { id: "postgres", name: "PostgreSQL", access: "tcp" },
+    {
+      id: "postgres",
+      name: "PostgreSQL",
+      access: "tcp",
+      action: "info",
+      icon: "port",
+    },
   ]);
 });
 

@@ -43,12 +43,12 @@ test("desktop host acquires its singleton before opening one control window", as
 
   harness.webViews[0]?.emit(
     "message",
-    JSON.stringify({ type: "openService", serviceId: "navidrome" }),
+    JSON.stringify({ type: "openService", serviceId: "forgejo" }),
   );
   await harness.flushCommands();
   assert.equal(harness.windows.length, 1);
   assert.deepEqual(harness.webViews[0]?.externalUrls, [
-    "http://navidrome.localhost:17480/",
+    "http://forgejo.localhost:17480/",
   ]);
 
   await host.shutdown();
@@ -208,12 +208,23 @@ function createHarness(options: HarnessOptions = {}) {
         gatewayPort: 17_480,
         services: [
           {
+            id: "forgejo",
+            name: "Forgejo",
+            access: "http",
+            action: "open",
+            icon: "git",
+            available: true,
+            url: "http://forgejo.localhost:17480/",
+          },
+          {
             id: "navidrome",
             name: "Navidrome",
             access: "http",
+            action: "copy-url",
+            icon: "music",
             available: true,
-            url: "http://navidrome.localhost:17480/",
-            copyText: "http://navidrome.localhost:17480/",
+            url: "http://navidrome.localhost:17480",
+            copyText: "http://navidrome.localhost:17480",
           },
         ],
       });
