@@ -142,9 +142,59 @@ test("native close and UI quit share one ordered shutdown", async () => {
   );
 });
 
+test("closing during startup stops a runtime that resolves late", async () => {
+  let resolveRuntime: ((runtime: RunningDesktopRuntime) => void) | undefined;
+  const harness = createHarness({
+    startRuntime: () => new Promise((resolve) => {
+      resolveRuntime = resolve;
+    }),
+  });
+  const startTask = startDesktopHost(
+    {
+      homeDirectory: "/Users/neil",
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [],
+    },
+    harness.dependencies,
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  harness.windows[0]?.emit("willClose");
+  resolveRuntime?.(harness.runtime);
+  await startTask;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(harness.events.includes("runtime:stop"), true);
+  assert.equal(harness.schedules.length, 0);
+  assert.equal(harness.webViews[0]?.destroyed, true);
+  assert.equal(harness.events.includes("singleton:release"), true);
+});
+
+test("shutdown completes cleanup after runtime stop fails", async () => {
+  const harness = createHarness({ runtimeStopFailure: "stop failed" });
+  const host = await startDesktopHost(
+    {
+      homeDirectory: "/Users/neil",
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [],
+    },
+    harness.dependencies,
+  );
+
+  await assert.rejects(host.shutdown(), /stop failed/);
+  assert.equal(harness.webViews[0]?.destroyed, true);
+  assert.equal(harness.windows[0]?.closed, true);
+  assert.equal(harness.events.includes("singleton:release"), true);
+  assert.equal(harness.events.includes("exit:1"), true);
+});
+
 interface HarnessOptions {
   singletonFailure?: string;
   subscriberLockFailure?: string;
+  runtimeStopFailure?: string;
+  startRuntime?: DesktopHostDependencies["startRuntime"];
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -163,6 +213,9 @@ function createHarness(options: HarnessOptions = {}) {
     stop: async () => {
       events.push("runtime:stop");
       events.push("subscriber-lock:release");
+      if (options.runtimeStopFailure) {
+        throw new Error(options.runtimeStopFailure);
+      }
     },
   };
   const dependencies: DesktopHostDependencies = {
@@ -198,7 +251,7 @@ function createHarness(options: HarnessOptions = {}) {
       webViews.push(view);
       return view;
     },
-    startRuntime: async (runtimeStartOptions) => {
+    startRuntime: options.startRuntime ?? (async (runtimeStartOptions) => {
       runtimeOptions = runtimeStartOptions;
       runtimeStartOptions.onSnapshot({
         type: "snapshot",
@@ -229,7 +282,7 @@ function createHarness(options: HarnessOptions = {}) {
         ],
       });
       return runtime;
-    },
+    }),
     schedulePoll: (callback) => {
       schedules.push(callback);
       return () => events.push("schedule:cancel");
@@ -243,6 +296,7 @@ function createHarness(options: HarnessOptions = {}) {
     windows,
     webViews,
     schedules,
+    runtime,
     async flushCommands() {
       await new Promise((resolve) => setTimeout(resolve, 0));
       if (runtimeOptions === undefined) throw new Error("runtime did not start");

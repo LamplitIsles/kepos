@@ -120,6 +120,7 @@ function fakeCli(): {
           role: "subscriber" as const,
           state: "running" as const,
           connection: "connected" as const,
+          connectionGeneration: 1,
           publisherKey: "11".repeat(32),
           homeUrl: "http://127.0.0.1:4000",
           services: options.services.map(({ id, localPort }) => ({

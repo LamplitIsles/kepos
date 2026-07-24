@@ -72,6 +72,7 @@ export async function startDesktopHost(
   const mainWindow = dependencies.createWindow(720, 620);
   const mainWebView = dependencies.createWebView();
   let runtime: RunningDesktopRuntime | undefined;
+  let runtimeStartTask: Promise<RunningDesktopRuntime> | undefined;
   let cancelPoll: (() => void) | undefined;
   let shutdownPromise: Promise<void> | undefined;
   let mainWindowClosed = false;
@@ -85,14 +86,36 @@ export async function startDesktopHost(
 
   function shutdown(): Promise<void> {
     shutdownPromise ??= (async () => {
-      cancelPoll?.();
+      let failure: unknown;
+      const cleanup = async (step: () => void | Promise<void>): Promise<void> => {
+        try {
+          await step();
+        } catch (error) {
+          failure ??= error;
+        }
+      };
+
+      await cleanup(() => cancelPoll?.());
       cancelPoll = undefined;
-      await runtime?.stop();
+      let runtimeToStop = runtime;
+      if (runtimeToStop === undefined && runtimeStartTask !== undefined) {
+        try {
+          runtimeToStop = await runtimeStartTask;
+        } catch {
+          // The runtime owns release of its subscriber lock on startup failure.
+        }
+      }
+      await cleanup(() => runtimeToStop?.stop());
       runtime = undefined;
-      mainWebView.destroy();
-      await singleton.release();
-      if (!mainWindowClosed) mainWindow.close();
-      dependencies.exit(0);
+      await cleanup(() => {
+        mainWebView.destroy();
+      });
+      await cleanup(() => singleton.release());
+      await cleanup(() => {
+        if (!mainWindowClosed) mainWindow.close();
+      });
+      await cleanup(() => dependencies.exit(failure === undefined ? 0 : 1));
+      if (failure !== undefined) throw failure;
     })();
     return shutdownPromise;
   }
@@ -111,25 +134,29 @@ export async function startDesktopHost(
   });
   mainWindow.on("willClose", () => {
     mainWindowClosed = true;
+    if (shutdownPromise !== undefined) return;
     void shutdown().catch((error: unknown) => {
       console.error(error);
-      dependencies.exit(1);
     });
   });
   mainWindow.content(mainWebView);
   mainWebView.loadHTML(renderDesktopUi());
 
   try {
-    runtime = await dependencies.startRuntime({
+    runtimeStartTask = dependencies.startRuntime({
       stateDir: options.stateDir,
       gatewayPort: options.gatewayPort,
       services: options.services,
       subscriberLock,
       onSnapshot: (snapshot) => controller.publish(snapshot),
     });
-    cancelPoll = dependencies.schedulePoll(() => {
-      void runtime?.poll().catch((error: unknown) => console.error(error));
-    });
+    const startedRuntime = await runtimeStartTask;
+    if (shutdownPromise === undefined) {
+      runtime = startedRuntime;
+      cancelPoll = dependencies.schedulePoll(() => {
+        void runtime?.poll().catch((error: unknown) => console.error(error));
+      });
+    }
   } catch {
     // startDesktopRuntime already publishes a safe failed snapshot and releases
     // the subscriber-state lock. Keep the window open so the user can read it.

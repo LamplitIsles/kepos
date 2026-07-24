@@ -124,7 +124,7 @@ test("desktop runtime publishes real services across reconnect generations", asy
   const events: string[] = [];
   const snapshots: unknown[] = [];
   let registryReads = 0;
-  let status = subscriberStatus("connected");
+  let status = subscriberStatus("connected", 1);
   const running = runningSubscriber(() => status, events);
   const dependencies: DesktopRuntimeDependencies = {
     acquireSubscriberLock: async () => ({
@@ -193,7 +193,7 @@ test("desktop runtime publishes real services across reconnect generations", asy
   ]);
   assert.equal(registryReads, 1);
 
-  status = subscriberStatus("reconnecting");
+  status = subscriberStatus("reconnecting", 1);
   await desktop.poll();
   assert.deepEqual(
     (snapshots.at(-1) as { services: Array<{ available: boolean }> }).services.map(
@@ -202,7 +202,7 @@ test("desktop runtime publishes real services across reconnect generations", asy
     [false, false],
   );
 
-  status = subscriberStatus("connected");
+  status = subscriberStatus("connected", 2);
   await desktop.poll();
   assert.equal(registryReads, 2);
   assert.deepEqual(
@@ -252,6 +252,73 @@ test("desktop runtime publishes real services across reconnect generations", asy
   });
 });
 
+test("desktop runtime starts while its publisher is unavailable", async () => {
+  let startOptions: Parameters<DesktopRuntimeDependencies["startSubscriber"]>[0]
+    | undefined;
+  let registryReads = 0;
+  const snapshots: unknown[] = [];
+  const desktop = await startDesktopRuntime(
+    {
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [],
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    {
+      acquireSubscriberLock: async () => ({ release: async () => {} }),
+      startSubscriber: async (options) => {
+        startOptions = options;
+        return runningSubscriber(
+          () => subscriberStatus("reconnecting", 0),
+          [],
+        );
+      },
+      readRegistry: async () => {
+        registryReads++;
+        return registry;
+      },
+    },
+  );
+
+  assert.equal(startOptions?.waitForPublisher, false);
+  assert.equal(registryReads, 0);
+  assert.equal(
+    (snapshots.at(-1) as { connection: string }).connection,
+    "reconnecting",
+  );
+  await desktop.stop();
+});
+
+test("desktop runtime refreshes after a reconnect missed between polls", async () => {
+  let generation = 1;
+  let registryReads = 0;
+  const desktop = await startDesktopRuntime(
+    {
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [],
+      onSnapshot: () => {},
+    },
+    {
+      acquireSubscriberLock: async () => ({ release: async () => {} }),
+      startSubscriber: async () => runningSubscriber(
+        () => subscriberStatus("connected", generation),
+        [],
+      ),
+      readRegistry: async () => {
+        registryReads++;
+        return registry;
+      },
+    },
+  );
+
+  assert.equal(registryReads, 1);
+  generation = 2;
+  await desktop.poll();
+  assert.equal(registryReads, 2);
+  await desktop.stop();
+});
+
 test("desktop runtime releases its subscriber lock when startup fails", async () => {
   const events: string[] = [];
   const snapshots: unknown[] = [];
@@ -291,11 +358,13 @@ test("desktop runtime releases its subscriber lock when startup fails", async ()
 
 function subscriberStatus(
   connection: SubscriberRuntimeStatus["connection"],
+  connectionGeneration = connection === "connected" ? 1 : 0,
 ): SubscriberRuntimeStatus {
   return {
     role: "subscriber",
     state: connection === "stopped" ? "stopped" : "running",
     connection,
+    connectionGeneration,
     publisherKey,
     homeUrl: "http://home.localhost:17480",
     services: [{ id: "ssh", port: 2222 }],

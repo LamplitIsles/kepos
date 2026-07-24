@@ -58,6 +58,7 @@ export async function startDesktopRuntime(
       stateDir: options.stateDir,
       gatewayPort: options.gatewayPort,
       services: options.services,
+      waitForPublisher: false,
     });
   } catch (error) {
     await lock.release();
@@ -73,15 +74,17 @@ export async function startDesktopRuntime(
 
   let registry: HomeRegistry | undefined;
   let registryError: string | undefined;
-  let refreshRequired = true;
+  let refreshedGeneration: number | undefined;
   let stopped = false;
   let pollTask: Promise<void> = Promise.resolve();
 
   async function runPoll(): Promise<void> {
     if (stopped) return;
     const status = running.status();
-    if (status.connection !== "connected") refreshRequired = true;
-    if (status.connection === "connected" && refreshRequired) {
+    if (
+      status.connection === "connected" &&
+      status.connectionGeneration !== refreshedGeneration
+    ) {
       try {
         const next = await dependencies.readRegistry(running.home.port);
         if (next.publisher.publisherKey !== running.publisherKey) {
@@ -89,7 +92,7 @@ export async function startDesktopRuntime(
         }
         registry = next;
         registryError = undefined;
-        refreshRequired = false;
+        refreshedGeneration = status.connectionGeneration;
       } catch (error) {
         registryError = errorMessage(error);
       }
