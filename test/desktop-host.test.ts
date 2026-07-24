@@ -190,11 +190,40 @@ test("shutdown completes cleanup after runtime stop fails", async () => {
   assert.equal(harness.events.includes("exit:1"), true);
 });
 
+for (const nativeFailure of ["window", "webview", "content", "load"] as const) {
+  test(`desktop host releases both locks when native ${nativeFailure} setup fails`, async () => {
+    const harness = createHarness({ nativeFailure });
+
+    await assert.rejects(
+      startDesktopHost(
+        {
+          homeDirectory: "/Users/neil",
+          stateDir: "/state/subscriber",
+          gatewayPort: 17_480,
+          services: [],
+        },
+        harness.dependencies,
+      ),
+      new RegExp(`${nativeFailure} failed`),
+    );
+
+    assert.equal(
+      harness.events.filter((event) => event === "subscriber-lock:release").length,
+      1,
+    );
+    assert.equal(
+      harness.events.filter((event) => event === "singleton:release").length,
+      1,
+    );
+  });
+}
+
 interface HarnessOptions {
   singletonFailure?: string;
   subscriberLockFailure?: string;
   runtimeStopFailure?: string;
   startRuntime?: DesktopHostDependencies["startRuntime"];
+  nativeFailure?: "window" | "webview" | "content" | "load";
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -241,13 +270,15 @@ function createHarness(options: HarnessOptions = {}) {
     },
     createWindow: (width, height) => {
       events.push(`window:create:${width}x${height}`);
-      const window = new FakeWindow(events);
+      if (options.nativeFailure === "window") throw new Error("window failed");
+      const window = new FakeWindow(events, options.nativeFailure === "content");
       windows.push(window);
       return window;
     },
     createWebView: () => {
       events.push("webview:create");
-      const view = new FakeWebView(events);
+      if (options.nativeFailure === "webview") throw new Error("webview failed");
+      const view = new FakeWebView(events, options.nativeFailure === "load");
       webViews.push(view);
       return view;
     },
@@ -307,11 +338,15 @@ function createHarness(options: HarnessOptions = {}) {
 class FakeWindow extends EventEmitter implements DesktopNativeWindow {
   closed = false;
 
-  constructor(private readonly events: string[]) {
+  constructor(
+    private readonly events: string[],
+    private readonly contentFailure = false,
+  ) {
     super();
   }
 
   content(_view: DesktopNativeWebView): this {
+    if (this.contentFailure) throw new Error("content failed");
     this.events.push("window:content");
     return this;
   }
@@ -331,11 +366,15 @@ class FakeWebView extends EventEmitter implements DesktopNativeWebView {
   externalUrls: string[] = [];
   messages: string[] = [];
 
-  constructor(private readonly events: string[]) {
+  constructor(
+    private readonly events: string[],
+    private readonly loadFailure = false,
+  ) {
     super();
   }
 
   loadHTML(html: string): this {
+    if (this.loadFailure) throw new Error("load failed");
     this.html = html;
     return this;
   }

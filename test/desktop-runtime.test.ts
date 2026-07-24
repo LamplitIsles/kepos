@@ -356,6 +356,112 @@ test("desktop runtime releases its subscriber lock when startup fails", async ()
   });
 });
 
+test("desktop runtime cleans up when its initial running snapshot fails", async () => {
+  const events: string[] = [];
+  let snapshots = 0;
+  await assert.rejects(
+    startDesktopRuntime(
+      {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+        onSnapshot: () => {
+          snapshots++;
+          if (snapshots === 2) throw new Error("snapshot failed");
+        },
+      },
+      {
+        acquireSubscriberLock: async () => ({
+          release: async () => {
+            events.push("lock:release");
+          },
+        }),
+        startSubscriber: async () => runningSubscriber(
+          () => subscriberStatus("connected", 1),
+          events,
+        ),
+        readRegistry: async () => registry,
+      },
+    ),
+    /snapshot failed/,
+  );
+
+  assert.deepEqual(events, ["subscriber:stop", "lock:release"]);
+});
+
+test("desktop runtime suppresses a late poll snapshot after stop", async () => {
+  let generation = 1;
+  let resolveRegistry: ((value: HomeRegistry) => void) | undefined;
+  let registryReads = 0;
+  const snapshots: Array<{ phase: string; connection: string }> = [];
+  const desktop = await startDesktopRuntime(
+    {
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [],
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    {
+      acquireSubscriberLock: async () => ({ release: async () => {} }),
+      startSubscriber: async () => runningSubscriber(
+        () => subscriberStatus("connected", generation),
+        [],
+      ),
+      readRegistry: async () => {
+        registryReads++;
+        if (registryReads === 1) return registry;
+        return new Promise((resolve) => {
+          resolveRegistry = resolve;
+        });
+      },
+    },
+  );
+
+  generation = 2;
+  const pollTask = desktop.poll();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await desktop.stop();
+  resolveRegistry?.(registry);
+  await pollTask;
+
+  assert.deepEqual(snapshots.slice(-2).map(({ phase, connection }) => ({
+    phase,
+    connection,
+  })), [
+    { phase: "stopping", connection: "connected" },
+    { phase: "stopped", connection: "stopped" },
+  ]);
+});
+
+test("desktop runtime cleans up when a stopping snapshot fails", async () => {
+  const events: string[] = [];
+  const desktop = await startDesktopRuntime(
+    {
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [],
+      onSnapshot: (snapshot) => {
+        if (snapshot.phase === "stopping") throw new Error("snapshot failed");
+      },
+    },
+    {
+      acquireSubscriberLock: async () => ({
+        release: async () => {
+          events.push("lock:release");
+        },
+      }),
+      startSubscriber: async () => runningSubscriber(
+        () => subscriberStatus("connected", 1),
+        events,
+      ),
+      readRegistry: async () => registry,
+    },
+  );
+
+  await assert.rejects(desktop.stop(), /snapshot failed/);
+  assert.deepEqual(events, ["subscriber:stop", "lock:release"]);
+});
+
 function subscriberStatus(
   connection: SubscriberRuntimeStatus["connection"],
   connectionGeneration = connection === "connected" ? 1 : 0,

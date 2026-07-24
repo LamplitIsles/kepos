@@ -69,8 +69,17 @@ export async function startDesktopHost(
     await singleton.release();
     throw error;
   }
-  const mainWindow = dependencies.createWindow(720, 620);
-  const mainWebView = dependencies.createWebView();
+  let createdWindow: DesktopNativeWindow | undefined;
+  let createdWebView: DesktopNativeWebView | undefined;
+  try {
+    createdWindow = dependencies.createWindow(720, 620);
+    createdWebView = dependencies.createWebView();
+  } catch (error) {
+    await cleanNativeSetup(createdWindow, createdWebView, subscriberLock, singleton);
+    throw error;
+  }
+  const mainWindow = createdWindow;
+  const mainWebView = createdWebView;
   let runtime: RunningDesktopRuntime | undefined;
   let runtimeStartTask: Promise<RunningDesktopRuntime> | undefined;
   let cancelPoll: (() => void) | undefined;
@@ -127,11 +136,18 @@ export async function startDesktopHost(
     showHome: async () => undefined,
     quit: shutdown,
   });
-  mainWebView.on("message", (message) => {
-    void controller.receive(message).catch((error: unknown) => {
-      console.error(error);
+  try {
+    mainWebView.on("message", (message) => {
+      void controller.receive(message).catch((error: unknown) => {
+        console.error(error);
+      });
     });
-  });
+    mainWindow.content(mainWebView);
+    mainWebView.loadHTML(renderDesktopUi());
+  } catch (error) {
+    await cleanNativeSetup(mainWindow, mainWebView, subscriberLock, singleton);
+    throw error;
+  }
   mainWindow.on("willClose", () => {
     mainWindowClosed = true;
     if (shutdownPromise !== undefined) return;
@@ -139,9 +155,8 @@ export async function startDesktopHost(
       console.error(error);
     });
   });
-  mainWindow.content(mainWebView);
-  mainWebView.loadHTML(renderDesktopUi());
 
+  let startedRuntime: RunningDesktopRuntime;
   try {
     runtimeStartTask = dependencies.startRuntime({
       stateDir: options.stateDir,
@@ -150,19 +165,46 @@ export async function startDesktopHost(
       subscriberLock,
       onSnapshot: (snapshot) => controller.publish(snapshot),
     });
-    const startedRuntime = await runtimeStartTask;
-    if (shutdownPromise === undefined) {
-      runtime = startedRuntime;
-      cancelPoll = dependencies.schedulePoll(() => {
-        void runtime?.poll().catch((error: unknown) => console.error(error));
-      });
-    }
+    startedRuntime = await runtimeStartTask;
   } catch {
     // startDesktopRuntime already publishes a safe failed snapshot and releases
     // the subscriber-state lock. Keep the window open so the user can read it.
+    return { shutdown };
+  }
+  if (shutdownPromise === undefined) {
+    runtime = startedRuntime;
+    try {
+      cancelPoll = dependencies.schedulePoll(() => {
+        void runtime?.poll().catch((error: unknown) => console.error(error));
+      });
+    } catch (error) {
+      await shutdown().catch(() => undefined);
+      throw error;
+    }
   }
 
   return { shutdown };
+}
+
+async function cleanNativeSetup(
+  mainWindow: DesktopNativeWindow | undefined,
+  mainWebView: DesktopNativeWebView | undefined,
+  subscriberLock: SubscriberRuntimeLock,
+  singleton: SubscriberRuntimeLock,
+): Promise<void> {
+  const steps = [
+    () => mainWebView?.destroy(),
+    () => mainWindow?.close(),
+    () => subscriberLock.release(),
+    () => singleton.release(),
+  ];
+  for (const step of steps) {
+    try {
+      await step();
+    } catch {
+      // Preserve the native setup error after attempting every cleanup step.
+    }
+  }
 }
 
 export const defaultDesktopHostDependencies = {

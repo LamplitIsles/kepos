@@ -42,18 +42,39 @@ export async function startDesktopRuntime(
   options: StartDesktopRuntimeOptions,
   dependencies: DesktopRuntimeDependencies = defaultDependencies,
 ): Promise<RunningDesktopRuntime> {
-  options.onSnapshot({
-    type: "snapshot",
-    phase: "starting",
-    connection: "connecting",
-    services: [],
-  });
-
   const lock =
     options.subscriberLock ??
     (await dependencies.acquireSubscriberLock(options.stateDir));
   let running: RunningSubscriber;
+
+  const cleanFailedStart = async (
+    error: unknown,
+    started?: RunningSubscriber,
+  ): Promise<void> => {
+    await Promise.allSettled([
+      started?.stop(),
+      lock.release(),
+    ]);
+    try {
+      options.onSnapshot({
+        type: "snapshot",
+        phase: "failed",
+        connection: "stopped",
+        services: [],
+        error: errorMessage(error),
+      });
+    } catch {
+      // The original startup failure is more useful than a failed UI update.
+    }
+  };
+
   try {
+    options.onSnapshot({
+      type: "snapshot",
+      phase: "starting",
+      connection: "connecting",
+      services: [],
+    });
     running = await dependencies.startSubscriber({
       stateDir: options.stateDir,
       gatewayPort: options.gatewayPort,
@@ -61,14 +82,7 @@ export async function startDesktopRuntime(
       waitForPublisher: false,
     });
   } catch (error) {
-    await lock.release();
-    options.onSnapshot({
-      type: "snapshot",
-      phase: "failed",
-      connection: "stopped",
-      services: [],
-      error: errorMessage(error),
-    });
+    await cleanFailedStart(error);
     throw error;
   }
 
@@ -87,6 +101,7 @@ export async function startDesktopRuntime(
     ) {
       try {
         const next = await dependencies.readRegistry(running.home.port);
+        if (stopped) return;
         if (next.publisher.publisherKey !== running.publisherKey) {
           throw new Error("Home registry publisher does not match the connection");
         }
@@ -94,15 +109,22 @@ export async function startDesktopRuntime(
         registryError = undefined;
         refreshedGeneration = status.connectionGeneration;
       } catch (error) {
+        if (stopped) return;
         registryError = errorMessage(error);
       }
     }
+    if (stopped) return;
     options.onSnapshot(
       createSnapshot("running", status, running.home.port, registry, registryError),
     );
   }
 
-  await runPoll();
+  try {
+    await runPoll();
+  } catch (error) {
+    await cleanFailedStart(error, running);
+    throw error;
+  }
 
   return {
     poll(): Promise<void> {
@@ -113,36 +135,35 @@ export async function startDesktopRuntime(
     async stop(): Promise<void> {
       if (stopped) return;
       stopped = true;
-      options.onSnapshot(
+      let failure: unknown;
+      const cleanup = async (step: () => void | Promise<void>): Promise<void> => {
+        try {
+          await step();
+        } catch (error) {
+          failure ??= error;
+        }
+      };
+
+      await cleanup(() => options.onSnapshot(
         createSnapshot(
           "stopping",
           running.status(),
           running.home.port,
           registry,
         ),
-      );
-
-      let failure: unknown;
-      try {
-        await running.stop();
-      } catch (error) {
-        failure = error;
-      }
-      try {
-        await lock.release();
-      } catch (error) {
-        failure ??= error;
-      }
+      ));
+      await cleanup(() => running.stop());
+      await cleanup(() => lock.release());
 
       const status = running.status();
-      options.onSnapshot(
+      await cleanup(() => options.onSnapshot(
         createSnapshot(
           "stopped",
           { ...status, connection: "stopped", state: "stopped" },
           running.home.port,
           registry,
         ),
-      );
+      ));
       if (failure !== undefined) throw failure;
     },
   };
