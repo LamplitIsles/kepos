@@ -191,7 +191,9 @@ The build compiles the pinned Bare WebKit fork before packaging
 shows the publisher's validated Registry. HTTP `OPEN` actions use the macOS
 default browser, Navidrome copies its canonical `*.localhost` URL for Navic,
 and SSH copies its explicit loopback command. No Node or Electron child process
-is used.
+is used. [ADR 0004](docs/adr/0004-two-level-subscriber-runtime-locking.md)
+defines how the desktop singleton and shared subscriber-state lock prevent
+competing hosts.
 
 ## Persistent multiplex CLI
 
