@@ -3,7 +3,8 @@ package io.github.ttalab.kepos
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -20,7 +21,7 @@ import org.junit.Test
 
 class KeposScreenTest {
   @get:Rule
-  val compose = createComposeRule()
+  val compose = createAndroidComposeRule<ComponentActivity>()
 
   @Test
   fun serviceHomeUsesRealRegistryAndServiceActions() {
@@ -37,8 +38,11 @@ class KeposScreenTest {
       )
     }
 
-    compose.onNodeWithText("kosmos").assertIsDisplayed()
-    compose.onNodeWithText("Your services").assertIsDisplayed()
+    compose.onNodeWithText("Remote services").assertIsDisplayed()
+    compose.onNodeWithText("3 SERVICES").assertIsDisplayed()
+    compose.onNodeWithText("CONNECTED").assertIsDisplayed()
+    compose.onAllNodesWithText("Your services").assertCountEquals(0)
+    compose.onAllNodesWithText("kosmos").assertCountEquals(0)
     compose.onNodeWithText("Woodpecker").assertIsDisplayed()
     compose.onAllNodesWithText("http://navidrome.localhost:17480").assertCountEquals(0)
     compose.onAllNodesWithText("http://forgejo.localhost:17480/").assertCountEquals(0)
@@ -71,6 +75,30 @@ class KeposScreenTest {
     compose.onNodeWithText("Change publisher").assertIsDisplayed()
     compose.onNodeWithText("DIAGNOSTICS").performScrollTo().assertIsDisplayed()
     compose.onNodeWithText("Stop service").performScrollTo().assertIsDisplayed()
+  }
+
+  @Test
+  fun systemBackReturnsFromSettingsToServices() {
+    compose.setContent {
+      KeposScreen(
+        snapshot = connectedSnapshot(),
+        onStart = {},
+        onStop = {},
+        onConfigure = {},
+        onCopyText = {},
+        onOpenUrl = {},
+      )
+    }
+
+    compose.onNodeWithContentDescription("Settings").performClick()
+    compose.onNodeWithText("Settings").assertIsDisplayed()
+
+    compose.runOnUiThread {
+      compose.activity.onBackPressedDispatcher.onBackPressed()
+    }
+
+    compose.onNodeWithText("Remote services").assertIsDisplayed()
+    compose.onAllNodesWithText("Settings").assertCountEquals(0)
   }
 
   @Test

@@ -1,5 +1,6 @@
 package io.github.ttalab.kepos.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,7 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -39,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -80,6 +82,14 @@ fun KeposScreen(
   var changingPublisher by rememberSaveable { mutableStateOf(false) }
   var confirmChange by rememberSaveable { mutableStateOf(false) }
 
+  BackHandler(enabled = changingPublisher) {
+    changingPublisher = false
+    showSettings = true
+  }
+  BackHandler(enabled = showSettings) {
+    showSettings = false
+  }
+
   KeposTheme {
     Surface(
       modifier = Modifier.fillMaxSize(),
@@ -89,7 +99,10 @@ fun KeposScreen(
         changingPublisher -> SetupScreen(
           title = "Change publisher",
           subtitle = "Enter the public key for the publisher this phone should trust.",
-          onBack = { changingPublisher = false },
+          onBack = {
+            changingPublisher = false
+            showSettings = true
+          },
           onConfigure = { key ->
             changingPublisher = false
             onConfigure(key)
@@ -183,36 +196,17 @@ private fun ServiceHome(
   ) {
     item {
       BrandBar(onSettings)
-      Spacer(Modifier.height(24.dp))
-      PublisherNode(
-        name = checkNotNull(model.publisherName),
+      Spacer(Modifier.height(30.dp))
+      ServiceHeader(
         connection = model.connection,
+        serviceCount = model.services.size,
       )
-      Spacer(Modifier.height(28.dp))
-      Text(
-        text = "Your services",
-        style = MaterialTheme.typography.headlineMedium.copy(
-          fontSize = 28.sp,
-          lineHeight = 30.sp,
-        ),
-      )
-      Text(
-        text = if (model.services.isEmpty()) "Nothing is published yet."
-        else "One private connection. ${model.services.size} local endpoints.",
-        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
-        color = KeposPalette.Muted,
-        style = MaterialTheme.typography.bodyMedium.copy(
-          fontSize = 13.sp,
-          lineHeight = 18.sp,
-        ),
-      )
+      Spacer(Modifier.height(14.dp))
     }
-    itemsIndexed(model.services, key = { _, service -> service.id }) { index, service ->
-      ServiceRailItem(
+    items(model.services, key = { service -> service.id }) { service ->
+      ServiceListItem(
         service = service,
         available = model.available,
-        first = index == 0,
-        last = index == model.services.lastIndex,
         modifier = Modifier.alpha(contentAlpha),
         onAction = {
           when (service.action) {
@@ -283,120 +277,112 @@ private fun PortalMark() {
 }
 
 @Composable
-private fun PublisherNode(name: String, connection: String?) {
-  Row(verticalAlignment = Alignment.CenterVertically) {
+private fun ServiceHeader(connection: String?, serviceCount: Int) {
+  Column {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.Bottom,
+    ) {
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = "SUBSCRIBER",
+          color = KeposPalette.Lime,
+          style = MaterialTheme.typography.labelMedium,
+        )
+        Text(
+          text = "Remote services",
+          modifier = Modifier.padding(top = 4.dp),
+          style = MaterialTheme.typography.headlineLarge.copy(
+            fontSize = 34.sp,
+            lineHeight = 38.sp,
+          ),
+        )
+      }
+      ConnectionStatus(connection)
+    }
+    Text(
+      text = if (serviceCount == 1) "1 SERVICE" else "$serviceCount SERVICES",
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 12.dp, bottom = 10.dp),
+      color = KeposPalette.Muted,
+      style = MaterialTheme.typography.labelMedium,
+    )
     Box(
       modifier = Modifier
-        .size(36.dp)
-        .background(KeposPalette.Lime, RoundedCornerShape(4.dp)),
-      contentAlignment = Alignment.Center,
-    ) {
-      Canvas(Modifier.size(11.dp)) {
-        drawCircle(KeposPalette.Ink)
-      }
-    }
-    Spacer(Modifier.width(14.dp))
-    Column {
-      Text(
-        text = statusLabel(connection).uppercase(),
-        color = if (connection == "connected") KeposPalette.Lime else KeposPalette.Muted,
-        style = MaterialTheme.typography.labelMedium,
-      )
-      Text(
-        text = name,
-        modifier = Modifier.padding(top = 2.dp),
-        style = MaterialTheme.typography.displayLarge.copy(
-          fontSize = 42.sp,
-          lineHeight = 42.sp,
-        ),
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
-    }
+        .fillMaxWidth()
+        .height(1.dp)
+        .background(KeposPalette.Line),
+    )
   }
 }
 
 @Composable
-private fun ServiceRailItem(
+private fun ConnectionStatus(connection: String?) {
+  Row(
+    modifier = Modifier.padding(bottom = 7.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Canvas(Modifier.size(7.dp)) {
+      drawCircle(
+        if (connection == "connected") KeposPalette.Lime else KeposPalette.Muted,
+      )
+    }
+    Spacer(Modifier.width(8.dp))
+    Text(
+      text = statusLabel(connection).uppercase(),
+      color = if (connection == "connected") KeposPalette.Lime else KeposPalette.Muted,
+      style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp),
+    )
+  }
+}
+
+@Composable
+private fun ServiceListItem(
   service: ServiceUiModel,
   available: Boolean,
-  first: Boolean,
-  last: Boolean,
   modifier: Modifier = Modifier,
   onAction: () -> Unit,
 ) {
-  Row(modifier = modifier.fillMaxWidth()) {
-    Box(
-      modifier = Modifier
-        .width(34.dp)
-        .height(82.dp),
-      contentAlignment = Alignment.Center,
-    ) {
-      Canvas(Modifier.fillMaxSize()) {
-        val x = size.width / 2
-        val center = size.height / 2
-        if (!first) {
-          drawLine(
-            KeposPalette.Line,
-            Offset(x, 0f),
-            Offset(x, center),
-            strokeWidth = 1.dp.toPx(),
-          )
-        }
-        if (!last) {
-          drawLine(
-            KeposPalette.Line,
-            Offset(x, center),
-            Offset(x, size.height),
-            strokeWidth = 1.dp.toPx(),
-          )
-        }
+  Row(
+    modifier = modifier
+      .fillMaxWidth()
+      .height(66.dp)
+      .drawBehind {
         drawLine(
-          KeposPalette.Line,
-          Offset(x, center),
-          Offset(size.width, center),
+          color = KeposPalette.Line,
+          start = Offset(0f, size.height),
+          end = Offset(size.width, size.height),
           strokeWidth = 1.dp.toPx(),
         )
-        drawCircle(
-          color = if (available) KeposPalette.Lime else KeposPalette.Muted,
-          radius = 4.dp.toPx(),
-          center = Offset(x, center),
-        )
-      }
-    }
-    Surface(
+      },
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Box(
       modifier = Modifier
-        .fillMaxWidth()
-        .height(76.dp)
-        .padding(bottom = 6.dp)
-        .border(1.dp, KeposPalette.Line, RoundedCornerShape(5.dp)),
-      shape = RoundedCornerShape(5.dp),
-      color = KeposPalette.Panel,
+        .size(34.dp)
+        .border(1.dp, KeposPalette.Line, RoundedCornerShape(2.dp)),
+      contentAlignment = Alignment.Center,
     ) {
-      Row(
-        modifier = Modifier.padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Icon(
-          imageVector = serviceIcon(service.icon),
-          contentDescription = null,
-          tint = KeposPalette.Lime,
-          modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(9.dp))
-        Text(
-          text = service.name,
-          modifier = Modifier.weight(1f),
-          style = MaterialTheme.typography.titleLarge.copy(
-            fontSize = 18.sp,
-            lineHeight = 22.sp,
-          ),
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-        ServiceActionButton(service, available, onAction)
-      }
+      Icon(
+        imageVector = serviceIcon(service.icon),
+        contentDescription = null,
+        tint = KeposPalette.LimeSoft,
+        modifier = Modifier.size(18.dp),
+      )
     }
+    Spacer(Modifier.width(13.dp))
+    Text(
+      text = service.name,
+      modifier = Modifier.weight(1f),
+      style = MaterialTheme.typography.titleLarge.copy(
+        fontSize = 15.sp,
+        lineHeight = 20.sp,
+      ),
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+    ServiceActionButton(service, available, onAction)
   }
 }
 
@@ -725,7 +711,7 @@ private fun serviceIcon(icon: ServiceIcon): ImageVector = when (icon) {
 }
 
 private fun statusLabel(connection: String?): String = when (connection) {
-  "connected" -> "Connected directly"
+  "connected" -> "Connected"
   "reconnecting" -> "Reconnecting…"
   "connecting" -> "Connecting…"
   else -> "Offline"
