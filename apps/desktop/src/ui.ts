@@ -57,22 +57,36 @@ export function renderDesktopUi(): string {
 
     button, summary { font: inherit; }
     button { color: inherit; }
+    [hidden] { display: none !important; }
     .shell {
       display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      grid-template-columns: 176px minmax(0, 1fr);
       width: 100vw;
       height: 100vh;
-      padding: 30px 32px 24px;
     }
-
-    header {
+    .sidebar {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      padding: 28px 18px 22px;
+      border-right: 1px solid var(--line);
+      background: rgba(17, 24, 12, .76);
+    }
+    .workspace {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      padding: 28px 30px 22px;
+    }
+    .workspace-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding-bottom: 22px;
+      min-height: 32px;
+      padding-bottom: 18px;
       border-bottom: 1px solid var(--line);
     }
-
     .brand { display: flex; align-items: center; gap: 12px; }
     .brand-mark {
       width: 30px;
@@ -83,6 +97,57 @@ export function renderDesktopUi(): string {
     }
     .wordmark { font-size: 15px; font-weight: 700; letter-spacing: .22em; }
     .edition { margin-left: 1px; color: var(--muted); font-size: 9px; letter-spacing: .16em; }
+    .role-nav { display: grid; gap: 8px; margin-top: 48px; }
+    .role-tab {
+      position: relative;
+      display: grid;
+      width: 100%;
+      gap: 5px;
+      padding: 13px 12px 12px 16px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      text-align: left;
+      transition: border-color 130ms ease, background 130ms ease, color 130ms ease;
+    }
+    .role-tab::before {
+      position: absolute;
+      top: 16px;
+      left: 0;
+      width: 2px;
+      height: 24px;
+      background: transparent;
+      content: "";
+    }
+    .role-tab:hover, .role-tab:focus-visible { color: var(--cream); outline: none; }
+    .role-tab.selected {
+      border-color: var(--line);
+      background: rgba(183, 238, 69, .055);
+      color: var(--cream);
+    }
+    .role-tab.selected::before { background: var(--green); }
+    .role-name { font-size: 11px; font-weight: 700; letter-spacing: .02em; }
+    .role-kind { color: var(--green); font-size: 8px; letter-spacing: .16em; text-transform: uppercase; }
+    .role-state {
+      overflow: hidden;
+      font-size: 8px;
+      letter-spacing: .08em;
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .role-tab[data-state="failed"] .role-state { color: var(--danger); }
+    .role-tab[data-state="connected"] .role-state { color: var(--green-soft); }
+    .sidebar-note {
+      margin-top: auto;
+      color: rgba(168, 173, 158, .68);
+      font-size: 8px;
+      letter-spacing: .12em;
+      line-height: 1.7;
+      text-transform: uppercase;
+    }
+    .view-title { color: var(--muted); font-size: 9px; letter-spacing: .15em; text-transform: uppercase; }
 
     .status {
       display: flex;
@@ -100,13 +165,19 @@ export function renderDesktopUi(): string {
       background: var(--muted);
       box-shadow: 0 0 0 4px rgba(168, 173, 158, .08);
     }
-    .status[data-state="connected"] { color: var(--green-soft); }
+    .status[data-state="connected"], .status[data-state="running"] { color: var(--green-soft); }
     .status[data-state="connected"] .status-dot {
+      background: var(--green);
+      box-shadow: 0 0 13px rgba(183, 238, 69, .62);
+    }
+    .status[data-state="running"] .status-dot {
       background: var(--green);
       box-shadow: 0 0 13px rgba(183, 238, 69, .62);
     }
     .status[data-state="connecting"] .status-dot,
     .status[data-state="reconnecting"] .status-dot { animation: pulse 1.3s ease-in-out infinite; }
+    .status[data-state="failed"] { color: var(--danger); }
+    .status[data-state="failed"] .status-dot { background: var(--danger); }
 
     .intro {
       display: flex;
@@ -126,11 +197,35 @@ export function renderDesktopUi(): string {
     h1 em { color: var(--green); font-weight: 400; }
     .count { color: var(--muted); font-size: 10px; letter-spacing: .12em; }
 
-    .services {
+    .surfaces {
       min-height: 0;
       overflow-y: auto;
       border-top: 1px solid var(--soft-line);
     }
+    .surface-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 38px;
+      border-bottom: 1px solid var(--soft-line);
+      color: var(--muted);
+      font-size: 9px;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+    .surface-head strong { color: var(--cream); font-weight: 600; }
+    .publisher-summary { display: flex; align-items: center; gap: 12px; }
+    .publisher-key {
+      max-width: 280px;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 9px;
+      text-overflow: ellipsis;
+      text-transform: none;
+      user-select: text;
+      white-space: nowrap;
+    }
+    .key-copy { min-width: auto; padding: 6px 8px; }
     .service {
       display: grid;
       grid-template-columns: 38px minmax(0, 1fr) auto;
@@ -143,6 +238,7 @@ export function renderDesktopUi(): string {
     .service:nth-child(2) { animation-delay: 35ms; }
     .service:nth-child(3) { animation-delay: 70ms; }
     .service:nth-child(4) { animation-delay: 105ms; }
+    .service.published { grid-template-columns: 38px minmax(0, 1fr); }
     .service-icon {
       display: grid;
       width: 34px;
@@ -256,39 +352,84 @@ export function renderDesktopUi(): string {
 </head>
 <body>
   <main class="shell">
-    <header>
-      <div class="brand">${keposMark}<div><div class="wordmark">KEPOS</div><div class="edition">DESKTOP / SUBSCRIBER</div></div></div>
-      <div class="status" data-role="connection" data-state="connecting"><span class="status-dot"></span><span data-role="connection-label">Starting</span></div>
-    </header>
-    <section class="intro" aria-labelledby="service-heading">
-      <div><p class="eyebrow">LOCAL SURFACE / DIRECT</p><h1 id="service-heading">Far away. <em>Here.</em></h1></div>
-      <div class="count" data-role="service-count">0 SERVICES</div>
+    <aside class="sidebar">
+      <div class="brand">${keposMark}<div><div class="wordmark">KEPOS</div><div class="edition">DESKTOP / DIRECT</div></div></div>
+      <nav class="role-nav" data-role="role-nav" aria-label="Kepos roles">
+        <button class="role-tab" type="button" data-role-tab="subscriber" hidden>
+          <span class="role-kind">Subscriber</span>
+          <span class="role-name">Remote services</span>
+          <span class="role-state" data-role="connection">Connecting</span>
+        </button>
+        <button class="role-tab" type="button" data-role-tab="publisher" hidden>
+          <span class="role-kind">Publisher</span>
+          <span class="role-name">Shared services</span>
+          <span class="role-state" data-role="sharing">Starting</span>
+        </button>
+      </nav>
+      <div class="sidebar-note">One app<br>Independent identities<br>Direct links</div>
+    </aside>
+    <section class="workspace">
+      <header class="workspace-header">
+        <span class="view-title" data-role="view-title">Remote services</span>
+        <div class="status" data-role="view-status" data-state="connecting"><span class="status-dot"></span><span data-role="view-status-label">Connecting</span></div>
+      </header>
+      <section class="intro" aria-labelledby="service-heading">
+        <div><p class="eyebrow" data-role="eyebrow">LOCAL SURFACE / DIRECT</p><h1 id="service-heading" data-role="headline">Far away. <em>Here.</em></h1></div>
+        <div class="count" data-role="service-count">0 SERVICES</div>
+      </section>
+      <div class="surfaces">
+        <section class="surface" data-role="remote-surface">
+          <div class="surface-head"><strong>Available here</strong><span data-role="remote-label">Remote publisher</span></div>
+          <div class="services" data-role="services" aria-live="polite"><div class="empty">Finding your private services…</div></div>
+        </section>
+        <section class="surface" data-role="publisher-surface" hidden>
+          <div class="surface-head">
+            <strong>Available remotely</strong>
+            <div class="publisher-summary"><span data-role="subscriber-count">0 connected</span><span class="publisher-key" data-role="publisher-key">Publisher key pending</span><button class="action key-copy" type="button" data-action="copy-publisher-key" disabled>Copy key</button></div>
+          </div>
+          <div class="services" data-role="shared-services" aria-live="polite"><div class="empty">Starting local publisher…</div></div>
+        </section>
+      </div>
+      <footer>
+        <span>ONE LINK · MANY LOCAL ADDRESSES</span>
+        <details data-role="settings">
+          <summary>Settings</summary>
+          <div class="settings-card">
+            <p class="setting-label">Remote publisher</p><p class="setting-value" data-role="publisher">Not available</p>
+            <p class="setting-label">Gateway</p><p class="setting-value" data-role="gateway">Not available</p>
+            <p class="setting-label">Local sharing</p><p class="setting-value" data-role="local-publisher">Not configured</p>
+            <button class="action quit" type="button" data-command="quit">Quit Kepos</button>
+          </div>
+        </details>
+      </footer>
     </section>
-    <section class="services" data-role="services" aria-live="polite"><div class="empty">Finding your private services…</div></section>
-    <footer>
-      <span>ONE LINK · MANY LOCAL ADDRESSES</span>
-      <details data-role="settings">
-        <summary>Settings</summary>
-        <div class="settings-card">
-          <p class="setting-label">Publisher</p><p class="setting-value" data-role="publisher">Not available</p>
-          <p class="setting-label">Gateway</p><p class="setting-value" data-role="gateway">Not available</p>
-          <button class="action quit" type="button" data-command="quit">Quit Kepos</button>
-        </div>
-      </details>
-    </footer>
   </main>
   <div class="toast" data-role="toast">Copied</div>
   <script>
     (() => {
       "use strict";
       let snapshot = null;
+      let selectedRole = "subscriber";
       let toastTimer;
+      const roleButtons = Array.from(document.querySelectorAll('[data-role-tab]'));
       const servicesNode = document.querySelector('[data-role="services"]');
+      const sharedServicesNode = document.querySelector('[data-role="shared-services"]');
+      const remoteSurfaceNode = document.querySelector('[data-role="remote-surface"]');
+      const publisherSurfaceNode = document.querySelector('[data-role="publisher-surface"]');
       const countNode = document.querySelector('[data-role="service-count"]');
-      const statusNode = document.querySelector('[data-role="connection"]');
-      const statusLabel = document.querySelector('[data-role="connection-label"]');
+      const connectionNode = document.querySelector('[data-role="connection"]');
+      const sharingNode = document.querySelector('[data-role="sharing"]');
+      const viewTitleNode = document.querySelector('[data-role="view-title"]');
+      const viewStatusNode = document.querySelector('[data-role="view-status"]');
+      const viewStatusLabel = document.querySelector('[data-role="view-status-label"]');
+      const headlineNode = document.querySelector('[data-role="headline"]');
+      const eyebrowNode = document.querySelector('[data-role="eyebrow"]');
       const publisherNode = document.querySelector('[data-role="publisher"]');
+      const localPublisherNode = document.querySelector('[data-role="local-publisher"]');
       const gatewayNode = document.querySelector('[data-role="gateway"]');
+      const publisherKeyNode = document.querySelector('[data-role="publisher-key"]');
+      const subscriberCountNode = document.querySelector('[data-role="subscriber-count"]');
+      const publisherKeyButton = document.querySelector('[data-action="copy-publisher-key"]');
       const toastNode = document.querySelector('[data-role="toast"]');
 
       const escapeHtml = (value) => String(value)
@@ -326,23 +467,94 @@ export function renderDesktopUi(): string {
           '<div class="actions">' + actionButton + '</div></article>';
       };
 
+      const renderPublishedService = (service) => {
+        const address = service.id + ' · 127.0.0.1:' + service.targetPort;
+        return '<article class="service published">' +
+          '<div class="service-icon">' + icons.port + '</div>' +
+          '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2>' +
+          '<p class="service-address">' + escapeHtml(address) + '</p></div></article>';
+      };
+
+      const selectRole = (role) => {
+        selectedRole = role;
+        render();
+      };
+
       const render = () => {
         if (!snapshot) return;
-        statusNode.dataset.state = snapshot.connection;
-        statusLabel.textContent = snapshot.connection;
-        const services = Array.isArray(snapshot.services) ? snapshot.services : [];
-        countNode.textContent = services.length + (services.length === 1 ? " SERVICE" : " SERVICES");
-        publisherNode.textContent = snapshot.publisher
-          ? snapshot.publisher.displayName + " · " + snapshot.publisher.keyFingerprint
-          : "Not available";
-        gatewayNode.textContent = snapshot.gatewayPort ? "localhost:" + snapshot.gatewayPort : "Not available";
-        if (snapshot.error) {
-          servicesNode.innerHTML = '<div class="error">' + escapeHtml(snapshot.error) + '</div>';
-          return;
+        const subscriber = snapshot.subscriber;
+        const publisher = snapshot.publisher;
+        const services = subscriber && Array.isArray(subscriber.services) ? subscriber.services : [];
+        if (selectedRole === 'subscriber' && !subscriber) selectedRole = 'publisher';
+        if (selectedRole === 'publisher' && !publisher) selectedRole = 'subscriber';
+        const showingSubscriber = selectedRole === 'subscriber' && subscriber;
+        const showingPublisher = selectedRole === 'publisher' && publisher;
+        for (const button of roleButtons) {
+          const role = button.dataset.roleTab;
+          const configured = Boolean(snapshot[role]);
+          button.hidden = !configured;
+          button.classList.toggle('selected', role === selectedRole);
+          button.setAttribute('aria-pressed', String(role === selectedRole));
         }
-        servicesNode.innerHTML = services.length
-          ? services.map(renderService).join('')
-          : '<div class="empty">Finding your private services…</div>';
+        remoteSurfaceNode.hidden = !showingSubscriber;
+        publisherSurfaceNode.hidden = !showingPublisher;
+        if (subscriber) {
+          const state = subscriber.phase === 'failed' ? 'failed' : subscriber.connection;
+          connectionNode.textContent = subscriber.phase === 'failed' ? 'Failed' : subscriber.connection;
+          connectionNode.closest('[data-role-tab]').dataset.state = state;
+        }
+        if (publisher) {
+          const state = publisher.phase === 'running' ? 'connected' : publisher.phase;
+          sharingNode.textContent = publisher.phase === 'running'
+            ? publisher.activeSubscribers + ' connected'
+            : publisher.phase;
+          sharingNode.closest('[data-role-tab]').dataset.state = state;
+        }
+        const activeState = showingSubscriber
+          ? (subscriber.phase === 'failed' ? 'failed' : subscriber.connection)
+          : showingPublisher
+            ? (publisher.phase === 'running' ? 'running' : publisher.phase)
+            : 'stopped';
+        const activeLabel = showingSubscriber
+          ? (subscriber.phase === 'failed' ? 'Subscriber failed' : subscriber.connection)
+          : showingPublisher
+            ? (publisher.phase === 'running' ? 'Sharing' : publisher.phase)
+            : 'Stopped';
+        viewStatusNode.dataset.state = activeState;
+        viewStatusLabel.textContent = activeLabel;
+        viewTitleNode.textContent = showingSubscriber ? 'Remote services' : 'Shared services';
+        const visibleCount = showingSubscriber
+          ? services.length
+          : showingPublisher
+            ? publisher.services.length
+            : 0;
+        countNode.textContent = visibleCount + (visibleCount === 1 ? " SERVICE" : " SERVICES");
+        headlineNode.innerHTML = showingSubscriber ? 'Far away. <em>Here.</em>' : 'From here. <em>Shared.</em>';
+        eyebrowNode.textContent = showingSubscriber ? 'LOCAL SURFACE / DIRECT' : 'LOCAL PUBLISHER / DIRECT';
+        publisherNode.textContent = subscriber && subscriber.remotePublisher
+          ? subscriber.remotePublisher.displayName + " · " + subscriber.remotePublisher.keyFingerprint
+          : "Not available";
+        gatewayNode.textContent = subscriber && subscriber.gatewayPort ? "localhost:" + subscriber.gatewayPort : "Not available";
+        localPublisherNode.textContent = publisher && publisher.displayName
+          ? publisher.displayName + ' · ' + (publisher.keyFingerprint || 'starting')
+          : publisher ? publisher.phase : 'Not configured';
+        if (subscriber) {
+          servicesNode.innerHTML = subscriber.error
+            ? '<div class="error">' + escapeHtml(subscriber.error) + '</div>'
+            : services.length
+              ? services.map(renderService).join('')
+              : '<div class="empty">Finding your private services…</div>';
+        }
+        if (publisher) {
+          subscriberCountNode.textContent = publisher.activeSubscribers + ' connected';
+          publisherKeyNode.textContent = publisher.publisherKey || 'Publisher key pending';
+          publisherKeyButton.disabled = !publisher.publisherKey;
+          sharedServicesNode.innerHTML = publisher.error
+            ? '<div class="error">' + escapeHtml(publisher.error) + '</div>'
+            : publisher.services.length
+              ? publisher.services.map(renderPublishedService).join('')
+              : '<div class="empty">No services configured</div>';
+        }
       };
 
       const send = (command) => window.bareNative.postMessage(JSON.stringify(command));
@@ -373,10 +585,15 @@ export function renderDesktopUi(): string {
       document.addEventListener('click', async (event) => {
         const button = event.target.closest('button');
         if (!button || button.disabled) return;
+        if (button.dataset.roleTab) { selectRole(button.dataset.roleTab); return; }
         if (button.dataset.command === 'quit') { send({ type: "quit" }); return; }
-        const service = snapshot && snapshot.services.find((item) => item.id === button.dataset.service);
-        if (!service || !service.available) return;
         try {
+          if (button.dataset.action === 'copy-publisher-key') {
+            if (snapshot && snapshot.publisher && snapshot.publisher.publisherKey) await copy(snapshot.publisher.publisherKey);
+            return;
+          }
+          const service = snapshot && snapshot.subscriber && snapshot.subscriber.services.find((item) => item.id === button.dataset.service);
+          if (!service || !service.available) return;
           if (button.dataset.action === 'copy' && service.copyText) { await copy(service.copyText); return; }
           if (button.dataset.action === 'open' && service.url) send({ type: "openService", serviceId: service.id });
         } catch { showToast('Copy failed'); }

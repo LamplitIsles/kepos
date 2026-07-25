@@ -2,8 +2,8 @@ import path from "node:path";
 
 import {
   acquireRuntimeLock,
-  type SubscriberRuntimeLock,
-} from "../../../src/runtime/subscriber-lock.js";
+  type RuntimeLock,
+} from "../../../src/runtime/runtime-lock.js";
 
 export function desktopSingletonLockPath(homeDirectory: string): string {
   return path.join(
@@ -17,7 +17,7 @@ export function desktopSingletonLockPath(homeDirectory: string): string {
 
 export function acquireDesktopSingleton(
   homeDirectory: string,
-): Promise<SubscriberRuntimeLock> {
+): Promise<RuntimeLock> {
   return acquireRuntimeLock({
     lockPath: desktopSingletonLockPath(homeDirectory),
     conflictMessage: "Kepos desktop is already running",

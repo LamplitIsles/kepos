@@ -17,6 +17,7 @@ interface Calls {
   setPublisherServices: unknown[];
   startPublisher: unknown[];
   startSubscriber: unknown[];
+  publisherLocks: string[];
   subscriberLocks: string[];
   stopped: string[];
   configPaths: Array<string | undefined>;
@@ -36,13 +37,16 @@ function fakeCli(): {
     setPublisherServices: [],
     startPublisher: [],
     startSubscriber: [],
+    publisherLocks: [],
     subscriberLocks: [],
     stopped: [],
     configPaths: [],
   };
   const stdout: string[] = [];
   const stderr: string[] = [];
-  const dependencies: CliDependencies = {
+  const dependencies: CliDependencies & {
+    acquirePublisherRuntimeLock(stateDir: string): Promise<{ release(): Promise<void> }>;
+  } = {
     stdout: (line) => stdout.push(line),
     stderr: (line) => stderr.push(line),
     loadConfig: async (configPath) => {
@@ -138,6 +142,14 @@ function fakeCli(): {
       return {
         release: async () => {
           calls.subscriberLocks.push(`release:${stateDir}`);
+        },
+      };
+    },
+    acquirePublisherRuntimeLock: async (stateDir) => {
+      calls.publisherLocks.push(`acquire:${stateDir}`);
+      return {
+        release: async () => {
+          calls.publisherLocks.push(`release:${stateDir}`);
         },
       };
     },
@@ -315,9 +327,34 @@ test("publisher run prints human status and awaits signal-safe stop", async () =
     { host: "203.91.75.19", port: 49738 },
   ]);
   assert.deepEqual(cli.calls.stopped, ["publisher"]);
+  assert.deepEqual(cli.calls.publisherLocks, [
+    `acquire:${path.resolve("./publisher")}`,
+    `release:${path.resolve("./publisher")}`,
+  ]);
   assert.match(cli.stdout.join("\n"), /Publisher running/);
   assert.match(cli.stdout.join("\n"), /outer\.connected/);
   assert.match(cli.stdout.join("\n"), /attempt=2/);
+});
+
+test("publisher run releases its identity lock when startup fails", async () => {
+  const cli = fakeCli();
+  cli.dependencies.startPublisher = async () => {
+    throw new Error("publisher failed");
+  };
+
+  await assert.rejects(
+    () =>
+      runCli(
+        ["publisher", "run", "--state", "./publisher"],
+        cli.dependencies,
+      ),
+    /publisher failed/,
+  );
+
+  assert.deepEqual(cli.calls.publisherLocks, [
+    `acquire:${path.resolve("./publisher")}`,
+    `release:${path.resolve("./publisher")}`,
+  ]);
 });
 
 test("run commands use TOML bootstrap unless the CLI overrides it", async () => {

@@ -4,53 +4,118 @@ import { test } from "node:test";
 
 import { parseDesktopOptions } from "../apps/desktop/src/options.js";
 
-test("desktop launch options require state and explicit local services", () => {
+test("desktop launch options accept subscriber-only mode", () => {
   assert.deepEqual(
     parseDesktopOptions([
-      "--state",
-      "~/.local/state/kepos-neo/subscriber",
-      "--service",
+      "--subscriber-state",
+      "./subscriber",
+      "--subscriber-service",
       "ssh:2222",
-      "--service",
+      "--subscriber-service",
       "postgres:15432",
     ]),
     {
-      stateDir: path.resolve("~/.local/state/kepos-neo/subscriber"),
-      gatewayPort: 17_480,
-      services: [
-        { id: "ssh", localPort: 2222 },
-        { id: "postgres", localPort: 15_432 },
-      ],
+      subscriber: {
+        stateDir: path.resolve("./subscriber"),
+        gatewayPort: 17_480,
+        services: [
+          { id: "ssh", localPort: 2222 },
+          { id: "postgres", localPort: 15_432 },
+        ],
+      },
     },
   );
 });
 
-test("desktop launch options reject missing, duplicate, and automatic ports", () => {
-  assert.throws(() => parseDesktopOptions([]), /--state/);
+test("desktop launch options accept publisher-only mode", () => {
+  assert.deepEqual(
+    parseDesktopOptions(["--publisher-state", "./publisher"]),
+    {
+      publisher: { stateDir: path.resolve("./publisher") },
+    },
+  );
+});
+
+test("desktop launch options accept simultaneous publisher and subscriber roles", () => {
+  assert.deepEqual(
+    parseDesktopOptions([
+      "--publisher-state",
+      "./publisher",
+      "--subscriber-state",
+      "./subscriber",
+      "--subscriber-service",
+      "ssh:2222",
+    ]),
+    {
+      publisher: { stateDir: path.resolve("./publisher") },
+      subscriber: {
+        stateDir: path.resolve("./subscriber"),
+        gatewayPort: 17_480,
+        services: [{ id: "ssh", localPort: 2222 }],
+      },
+    },
+  );
+});
+
+test("desktop launch options require at least one role", () => {
+  assert.throws(() => parseDesktopOptions([]), /at least one role/);
+});
+
+test("desktop launch options reject services without subscriber state", () => {
   assert.throws(
     () =>
       parseDesktopOptions([
-        "--state",
+        "--publisher-state",
+        "./publisher",
+        "--subscriber-service",
+        "ssh:2222",
+      ]),
+    /subscriber service requires --subscriber-state/,
+  );
+});
+
+test("desktop launch options reject duplicate role state and service ids", () => {
+  assert.throws(
+    () =>
+      parseDesktopOptions([
+        "--publisher-state",
+        "first",
+        "--publisher-state",
+        "second",
+      ]),
+    /--publisher-state may be set only once/,
+  );
+  assert.throws(
+    () =>
+      parseDesktopOptions([
+        "--subscriber-state",
+        "subscriber",
+        "--subscriber-service",
+        "ssh:2222",
+        "--subscriber-service",
+        "ssh:2223",
+      ]),
+    /unique ids/,
+  );
+});
+
+test("desktop launch options reject legacy, unknown, and invalid options", () => {
+  assert.throws(
+    () => parseDesktopOptions(["--state", "state"]),
+    /unknown option/,
+  );
+  assert.throws(
+    () => parseDesktopOptions(["--subscriber-state", "state", "--unknown", "x"]),
+    /unknown option/,
+  );
+  assert.throws(
+    () =>
+      parseDesktopOptions([
+        "--subscriber-state",
         "state",
-        "--service",
+        "--subscriber-service",
         "ssh:0",
       ]),
     /port/,
-  );
-  assert.throws(
-    () =>
-      parseDesktopOptions([
-        "--state",
-        "state",
-        "--service",
-        "ssh:2222",
-        "--service",
-        "ssh:2223",
-      ]),
-    /unique/,
-  );
-  assert.throws(
-    () => parseDesktopOptions(["--state", "state", "--unknown", "x"]),
-    /unknown option/,
   );
 });

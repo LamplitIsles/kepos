@@ -23,17 +23,41 @@ export interface DesktopService {
   url?: string;
 }
 
-export interface DesktopSnapshot {
-  type: "snapshot";
-  phase: "starting" | "running" | "stopping" | "stopped" | "failed";
+export type RolePhase =
+  | "starting"
+  | "running"
+  | "failed"
+  | "stopping"
+  | "stopped";
+
+export interface DesktopSubscriberRole {
+  phase: RolePhase;
   connection: DesktopConnection;
-  publisher?: {
+  remotePublisher?: {
     displayName: string;
     keyFingerprint: string;
   };
   gatewayPort?: number;
   services: DesktopService[];
   error?: string;
+}
+
+export interface DesktopPublisherRole {
+  phase: RolePhase;
+  displayName?: string;
+  publisherKey?: string;
+  keyFingerprint?: string;
+  activeSubscribers: number;
+  acceptedConnections: number;
+  services: Array<{ id: string; name: string; targetPort: number }>;
+  error?: string;
+}
+
+export interface DesktopSnapshot {
+  type: "snapshot";
+  appPhase: "starting" | "running" | "stopping" | "stopped";
+  subscriber?: DesktopSubscriberRole;
+  publisher?: DesktopPublisherRole;
 }
 
 export type DesktopCommand =

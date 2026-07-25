@@ -9,6 +9,14 @@
   "license": "Apache-2.0",
   "type": "module",
   "imports": {
+    "node:crypto": {
+      "bare": "bare-crypto",
+      "default": "node:crypto"
+    },
+    "node:events": {
+      "bare": "bare-events",
+      "default": "node:events"
+    },
     "node:fs/promises": {
       "bare": "bare-fs/promises",
       "default": "node:fs/promises"
@@ -32,6 +40,10 @@
     "node:stream": {
       "bare": "bare-stream",
       "default": "node:stream"
+    },
+    "node:url": {
+      "bare": "bare-url",
+      "default": "node:url"
     }
   },
   "packageManager": "npm@10.9.8",
@@ -73,11 +85,14 @@
   },
   "dependencies": {
     "b4a": "^1.8.1",
+    "bare-crypto": "^1.15.3",
+    "bare-events": "^2.9.1",
     "bare-fs": "^4.7.4",
     "bare-http1": "^4.5.7",
     "bare-net": "^2.3.2",
     "bare-path": "^3.1.1",
     "bare-stream": "^2.13.3",
+    "bare-url": "^2.4.6",
     "compact-encoding": "^3.3.0",
     "hypercore-crypto": "^3.7.0",
     "hyperdht": "^6.33.0",

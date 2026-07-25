@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -16,7 +15,16 @@ const registryPath = "/.well-known/kepos/services.json";
 const benchmarkPath = "/.well-known/kepos/benchmark";
 const benchmarkChunk = Buffer.alloc(64 * 1024);
 const maxBenchmarkBytes = 64 * 1024 * 1024;
-const defaultHomeDirectory = fileURLToPath(new URL("../../home/", import.meta.url));
+const homeTemplatePath = fileURLToPath(
+  typeof import.meta.asset === "function"
+    ? import.meta.asset("../../home/index.html")
+    : new URL("../../home/index.html", import.meta.url),
+);
+const homeStylesPath = fileURLToPath(
+  typeof import.meta.asset === "function"
+    ? import.meta.asset("../../home/styles.css")
+    : new URL("../../home/styles.css", import.meta.url),
+);
 
 export interface RunningHomeServer {
   host: typeof host;
@@ -86,8 +94,8 @@ async function startHomeServerWithRegistry(
   const registryBody = `${JSON.stringify(registry, null, 2)}\n`;
   const registryEtag = `"${createHash("sha256").update(registryBody).digest("hex")}"`;
   const [homeTemplate, homeCss] = await Promise.all([
-    readFile(path.join(defaultHomeDirectory, "index.html"), "utf8"),
-    readFile(path.join(defaultHomeDirectory, "styles.css")),
+    readFile(homeTemplatePath, "utf8"),
+    readFile(homeStylesPath),
   ]);
 
   const server = createServer((request, response) => {

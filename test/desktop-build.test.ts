@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import {
+  copyDesktopAssets,
   desktopAppBundle,
   desktopBuildCommands,
 } from "../scripts/build-desktop.js";
@@ -147,4 +149,65 @@ test("desktop output is ignored without ignoring desktop source", async () => {
 
   assert.match(gitignore, /^dist\/desktop\/$/m);
   assert.doesNotMatch(gitignore, /^apps\/desktop\/$/m);
+});
+
+test("desktop publisher maps every Home Node dependency to Bare", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(repository, "package.json"), "utf8"),
+  ) as {
+    dependencies?: Record<string, string>;
+    imports?: Record<string, { bare?: string; default?: string }>;
+  };
+
+  for (const [nodeModule, bareModule] of [
+    ["node:crypto", "bare-crypto"],
+    ["node:events", "bare-events"],
+    ["node:url", "bare-url"],
+  ]) {
+    assert.deepEqual(packageJson.imports?.[nodeModule], {
+      bare: bareModule,
+      default: nodeModule,
+    });
+    assert.equal(typeof packageJson.dependencies?.[bareModule], "string");
+  }
+});
+
+test("desktop publisher packages both Home static assets", async () => {
+  const source = await readFile(
+    path.join(repository, "src", "home", "server.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /import\.meta\.asset\("\.\.\/\.\.\/home\/index\.html"\)/);
+  assert.match(source, /import\.meta\.asset\("\.\.\/\.\.\/home\/styles\.css"\)/);
+});
+
+test("desktop build stages Home assets beside compiled modules", async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), "kepos-desktop-assets-"));
+  try {
+    await mkdir(path.join(fixture, "home"));
+    await Promise.all([
+      writeFile(path.join(fixture, "home", "index.html"), "home fixture"),
+      writeFile(path.join(fixture, "home", "styles.css"), "css fixture"),
+    ]);
+
+    await copyDesktopAssets(fixture);
+
+    assert.equal(
+      await readFile(
+        path.join(fixture, ".build", "desktop", "home", "index.html"),
+        "utf8",
+      ),
+      "home fixture",
+    );
+    assert.equal(
+      await readFile(
+        path.join(fixture, ".build", "desktop", "home", "styles.css"),
+        "utf8",
+      ),
+      "css fixture",
+    );
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
 });

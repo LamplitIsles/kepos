@@ -30,9 +30,12 @@ The app launched with:
 
 ```sh
 dist/desktop/Kepos.app/Contents/MacOS/Kepos \
-  --state ~/.local/state/kepos-neo/mux-navidrome-subscriber \
-  --service ssh:2222
+  --subscriber-state ~/.local/state/kepos-neo/mux-navidrome-subscriber \
+  --subscriber-service ssh:2222
 ```
+
+These are the current role-explicit names for the same subscriber-only launch;
+the original spike predated publisher support.
 
 Observed results:
 

@@ -36,7 +36,7 @@ export interface RuntimeLockFileOperations {
   unlink(filePath: string): Promise<void>;
 }
 
-export interface SubscriberRuntimeLock {
+export interface RuntimeLock {
   release: () => Promise<void>;
 }
 
@@ -54,9 +54,17 @@ export function subscriberRuntimeLockPath(stateDir: string): string {
   );
 }
 
+export function publisherRuntimeLockPath(stateDir: string): string {
+  const resolvedStateDir = path.resolve(stateDir);
+  return path.join(
+    path.dirname(resolvedStateDir),
+    `.${path.basename(resolvedStateDir)}.publisher.runtime.lock`,
+  );
+}
+
 export async function acquireSubscriberRuntimeLock(
   stateDir: string,
-): Promise<SubscriberRuntimeLock> {
+): Promise<RuntimeLock> {
   await mkdir(stateDir, { mode: 0o700, recursive: true });
   return acquireRuntimeLock({
     lockPath: subscriberRuntimeLockPath(stateDir),
@@ -65,9 +73,20 @@ export async function acquireSubscriberRuntimeLock(
   });
 }
 
+export async function acquirePublisherRuntimeLock(
+  stateDir: string,
+): Promise<RuntimeLock> {
+  await mkdir(stateDir, { mode: 0o700, recursive: true });
+  return acquireRuntimeLock({
+    lockPath: publisherRuntimeLockPath(stateDir),
+    conflictMessage: "Publisher identity is already in use",
+    description: "publisher runtime lock",
+  });
+}
+
 export async function acquireRuntimeLock(
   options: AcquireRuntimeLockOptions,
-): Promise<SubscriberRuntimeLock> {
+): Promise<RuntimeLock> {
   const { lockPath, conflictMessage } = options;
   const description = options.description ?? "runtime lock";
   await mkdir(path.dirname(lockPath), { mode: 0o700, recursive: true });

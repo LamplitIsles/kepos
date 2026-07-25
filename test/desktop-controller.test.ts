@@ -6,43 +6,46 @@ import type { DesktopSnapshot } from "../apps/desktop/src/protocol.js";
 
 const initial: DesktopSnapshot = {
   type: "snapshot",
-  phase: "running",
-  connection: "connected",
-  publisher: {
-    displayName: "kosmos",
-    keyFingerprint: "e499c38286e33f48",
+  appPhase: "running",
+  subscriber: {
+    phase: "running",
+    connection: "connected",
+    remotePublisher: {
+      displayName: "kosmos",
+      keyFingerprint: "e499c38286e33f48",
+    },
+    gatewayPort: 17_480,
+    services: [
+      {
+        id: "forgejo",
+        name: "Forgejo",
+        access: "http",
+        action: "open",
+        icon: "git",
+        available: true,
+        url: "http://forgejo.localhost:17480/",
+      },
+      {
+        id: "navidrome",
+        name: "Navidrome",
+        access: "http",
+        action: "copy-url",
+        icon: "music",
+        available: true,
+        url: "http://navidrome.localhost:17480",
+        copyText: "http://navidrome.localhost:17480",
+      },
+      {
+        id: "ssh",
+        name: "SSH",
+        access: "ssh",
+        action: "copy-command",
+        icon: "terminal",
+        available: true,
+        copyText: "ssh -p 2222 127.0.0.1",
+      },
+    ],
   },
-  gatewayPort: 17_480,
-  services: [
-    {
-      id: "forgejo",
-      name: "Forgejo",
-      access: "http",
-      action: "open",
-      icon: "git",
-      available: true,
-      url: "http://forgejo.localhost:17480/",
-    },
-    {
-      id: "navidrome",
-      name: "Navidrome",
-      access: "http",
-      action: "copy-url",
-      icon: "music",
-      available: true,
-      url: "http://navidrome.localhost:17480",
-      copyText: "http://navidrome.localhost:17480",
-    },
-    {
-      id: "ssh",
-      name: "SSH",
-      access: "ssh",
-      action: "copy-command",
-      icon: "terminal",
-      available: true,
-      copyText: "ssh -p 2222 127.0.0.1",
-    },
-  ],
 };
 
 test("desktop controller sends the latest snapshot after page readiness", async () => {
@@ -55,16 +58,22 @@ test("desktop controller sends the latest snapshot after page readiness", async 
     quit: async () => {},
   });
 
-  controller.publish({ ...initial, connection: "reconnecting" });
+  controller.publish({
+    ...initial,
+    subscriber: { ...initial.subscriber!, connection: "reconnecting" },
+  });
   assert.deepEqual(sent, []);
 
   await controller.receive('{"type":"ready"}');
   assert.deepEqual(sent.map((message) => JSON.parse(message)), [
-    { ...initial, connection: "reconnecting" },
+    {
+      ...initial,
+      subscriber: { ...initial.subscriber!, connection: "reconnecting" },
+    },
   ]);
 
-  controller.publish({ ...initial, connection: "connected" });
-  controller.publish({ ...initial, connection: "connected" });
+  controller.publish(initial);
+  controller.publish(initial);
   assert.equal(sent.length, 2);
 });
 
