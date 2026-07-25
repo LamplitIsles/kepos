@@ -76,7 +76,7 @@ export function renderDesktopUi(): string {
       display: grid;
       min-width: 0;
       min-height: 0;
-      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      grid-template-rows: auto minmax(0, 1fr) auto;
       padding: 28px 30px 22px;
     }
     .workspace-header {
@@ -139,15 +139,9 @@ export function renderDesktopUi(): string {
     }
     .role-tab[data-state="failed"] .role-state { color: var(--danger); }
     .role-tab[data-state="connected"] .role-state { color: var(--green-soft); }
-    .sidebar-note {
-      margin-top: auto;
-      color: rgba(168, 173, 158, .68);
-      font-size: 8px;
-      letter-spacing: .12em;
-      line-height: 1.7;
-      text-transform: uppercase;
-    }
-    .view-title { color: var(--muted); font-size: 9px; letter-spacing: .15em; text-transform: uppercase; }
+    .view-label { display: flex; align-items: baseline; gap: 10px; }
+    .view-title { color: var(--cream); font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+    .count { color: var(--muted); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
 
     .status {
       display: flex;
@@ -179,28 +173,10 @@ export function renderDesktopUi(): string {
     .status[data-state="failed"] { color: var(--danger); }
     .status[data-state="failed"] .status-dot { background: var(--danger); }
 
-    .intro {
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      padding: 25px 0 18px;
-    }
-    .eyebrow { margin: 0 0 6px; color: var(--green); font-size: 9px; letter-spacing: .2em; }
-    h1 {
-      margin: 0;
-      font-family: var(--display);
-      font-size: clamp(30px, 5vw, 44px);
-      font-weight: 400;
-      letter-spacing: -.035em;
-      line-height: .95;
-    }
-    h1 em { color: var(--green); font-weight: 400; }
-    .count { color: var(--muted); font-size: 10px; letter-spacing: .12em; }
-
     .surfaces {
       min-height: 0;
       overflow-y: auto;
-      border-top: 1px solid var(--soft-line);
+      padding-top: 18px;
     }
     .surface-head {
       display: flex;
@@ -299,7 +275,7 @@ export function renderDesktopUi(): string {
     footer {
       display: flex;
       align-items: end;
-      justify-content: space-between;
+      justify-content: flex-end;
       padding-top: 16px;
       color: var(--muted);
       font-size: 9px;
@@ -353,7 +329,7 @@ export function renderDesktopUi(): string {
 <body>
   <main class="shell">
     <aside class="sidebar">
-      <div class="brand">${keposMark}<div><div class="wordmark">KEPOS</div><div class="edition">DESKTOP / DIRECT</div></div></div>
+      <div class="brand">${keposMark}<div><div class="wordmark">KEPOS</div><div class="edition">DESKTOP</div></div></div>
       <nav class="role-nav" data-role="role-nav" aria-label="Kepos roles">
         <button class="role-tab" type="button" data-role-tab="subscriber" hidden>
           <span class="role-kind">Subscriber</span>
@@ -366,17 +342,12 @@ export function renderDesktopUi(): string {
           <span class="role-state" data-role="sharing">Starting</span>
         </button>
       </nav>
-      <div class="sidebar-note">One app<br>Independent identities<br>Direct links</div>
     </aside>
     <section class="workspace">
       <header class="workspace-header">
-        <span class="view-title" data-role="view-title">Remote services</span>
+        <div class="view-label"><span class="view-title" data-role="view-title">Remote services</span><span class="count" data-role="service-count">0 services</span></div>
         <div class="status" data-role="view-status" data-state="connecting"><span class="status-dot"></span><span data-role="view-status-label">Connecting</span></div>
       </header>
-      <section class="intro" aria-labelledby="service-heading">
-        <div><p class="eyebrow" data-role="eyebrow">LOCAL SURFACE / DIRECT</p><h1 id="service-heading" data-role="headline">Far away. <em>Here.</em></h1></div>
-        <div class="count" data-role="service-count">0 SERVICES</div>
-      </section>
       <div class="surfaces">
         <section class="surface" data-role="remote-surface">
           <div class="surface-head"><strong>Available here</strong><span data-role="remote-label">Remote publisher</span></div>
@@ -391,7 +362,6 @@ export function renderDesktopUi(): string {
         </section>
       </div>
       <footer>
-        <span>ONE LINK · MANY LOCAL ADDRESSES</span>
         <details data-role="settings">
           <summary>Settings</summary>
           <div class="settings-card">
@@ -422,8 +392,6 @@ export function renderDesktopUi(): string {
       const viewTitleNode = document.querySelector('[data-role="view-title"]');
       const viewStatusNode = document.querySelector('[data-role="view-status"]');
       const viewStatusLabel = document.querySelector('[data-role="view-status-label"]');
-      const headlineNode = document.querySelector('[data-role="headline"]');
-      const eyebrowNode = document.querySelector('[data-role="eyebrow"]');
       const publisherNode = document.querySelector('[data-role="publisher"]');
       const localPublisherNode = document.querySelector('[data-role="local-publisher"]');
       const gatewayNode = document.querySelector('[data-role="gateway"]');
@@ -437,14 +405,14 @@ export function renderDesktopUi(): string {
         .replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 
       const icons = {
-        build: '<svg viewBox="0 0 24 24"><path d="m15 12-8.5 8.5a2.1 2.1 0 0 1-3-3L12 9m6-6 3 3-6.5 6.5-3-3Z"/></svg>',
-        git: '<svg viewBox="0 0 24 24"><circle cx="6" cy="4" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="20" r="2"/><path d="M6 6v12M8 8c2 0 3 2 3 4s1 4 5 4V8"/></svg>',
-        music: '<svg viewBox="0 0 24 24"><path d="M9 18V5l10-2v13M9 9l10-2M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm10-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg>',
-        photos: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m4 17 5-5 4 4 2-2 5 4"/></svg>',
-        storage: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>',
-        terminal: '<svg viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></svg>',
-        web: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>',
-        port: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4.5 7.5 7.5 4 7.5-4M12 12v9"/></svg>'
+        build: '<svg viewBox="0 0 24 24"><path d="m15 12-8.5 8.5a2.12 2.12 0 1 1-3-3L12 9"/><path d="M17.64 15 22 10.64"/><path d="m20.91 11.7-1.25-1.25a2.18 2.18 0 0 1 0-3.08l.52-.52a2.18 2.18 0 0 0-3.08 0L16 3.09a2.18 2.18 0 0 0-3.07 0L11.7 4.34a2.18 2.18 0 0 1 0 3.08l1.24 1.24"/></svg>',
+        git: '<svg viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>',
+        music: '<svg viewBox="0 0 24 24"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>',
+        photos: '<svg viewBox="0 0 24 24"><path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="m22 13-1.296-1.296a2.41 2.41 0 0 0-3.408 0L11 18"/><circle cx="12" cy="8" r="2"/><rect width="16" height="16" x="6" y="2" rx="2"/></svg>',
+        storage: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v7c0 1.66 4 3 9 3"/><path d="M3 12v7c0 1.66 4 3 9 3"/><path d="m16 19 2 2 4-4"/><path d="M21 12.35V5"/></svg>',
+        terminal: '<svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z"/><path d="m7 11 2-2-2-2"/><path d="m11 13 4 0"/></svg>',
+        web: '<svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="m10 14 11-11"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>',
+        port: '<svg viewBox="0 0 24 24"><path d="m21 8-9-5-9 5 9 5 9-5Z"/><path d="m3 8 9 5 9-5"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>'
       };
 
       const icon = (service) => icons[service.icon] || icons.port;
@@ -529,8 +497,6 @@ export function renderDesktopUi(): string {
             ? publisher.services.length
             : 0;
         countNode.textContent = visibleCount + (visibleCount === 1 ? " SERVICE" : " SERVICES");
-        headlineNode.innerHTML = showingSubscriber ? 'Far away. <em>Here.</em>' : 'From here. <em>Shared.</em>';
-        eyebrowNode.textContent = showingSubscriber ? 'LOCAL SURFACE / DIRECT' : 'LOCAL PUBLISHER / DIRECT';
         publisherNode.textContent = subscriber && subscriber.remotePublisher
           ? subscriber.remotePublisher.displayName + " · " + subscriber.remotePublisher.keyFingerprint
           : "Not available";

@@ -40,15 +40,16 @@ class KeposScreenTest {
     compose.onNodeWithText("kosmos").assertIsDisplayed()
     compose.onNodeWithText("Your services").assertIsDisplayed()
     compose.onNodeWithText("Woodpecker").assertIsDisplayed()
-    compose.onNodeWithText("http://woodpecker.localhost:17480/").assertIsDisplayed()
+    compose.onAllNodesWithText("http://navidrome.localhost:17480").assertCountEquals(0)
+    compose.onAllNodesWithText("http://forgejo.localhost:17480/").assertCountEquals(0)
+    compose.onAllNodesWithText("http://woodpecker.localhost:17480/").assertCountEquals(0)
     compose.onAllNodesWithText("Home").assertCountEquals(0)
     compose.onNodeWithText("Copy URL").performClick()
     assertEquals("http://navidrome.localhost:17480", copied)
     compose.onAllNodesWithText("Open")[0].performClick()
     assertEquals("http://forgejo.localhost:17480/", opened)
-    compose.onNodeWithContentDescription("More actions for Forgejo").performClick()
-    compose.onNodeWithText("Copy address").performClick()
-    assertEquals("http://forgejo.localhost:17480/", copied)
+    compose.onAllNodesWithText("Copy address").assertCountEquals(0)
+    compose.onAllNodesWithText("View details").assertCountEquals(0)
   }
 
   @Test

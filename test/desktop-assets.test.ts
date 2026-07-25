@@ -24,6 +24,30 @@ test("desktop UI is a self-contained dark Kepos service console", () => {
   assert.doesNotMatch(html, /prefers-color-scheme:\s*light/);
 });
 
+test("desktop UI stays operational instead of repeating product slogans", () => {
+  const html = renderDesktopUi();
+
+  assert.doesNotMatch(html, /Far away\. <em>Here\.<\/em>/);
+  assert.doesNotMatch(html, /From here\. <em>Shared\.<\/em>/);
+  assert.doesNotMatch(html, /LOCAL SURFACE \/ DIRECT/);
+  assert.doesNotMatch(html, /One app<br>Independent identities<br>Direct links/);
+  assert.doesNotMatch(html, /ONE LINK · MANY LOCAL ADDRESSES/);
+  assert.match(html, /data-role="service-count"/);
+});
+
+test("desktop service glyphs use the same Lucide choices as Android", () => {
+  const html = renderDesktopUi();
+
+  assert.match(html, /<path d="M2 10v3"\/>/);
+  assert.match(html, /<path d="M6 6v11"\/>/);
+  assert.match(html, /<path d="M10 3v18"\/>/);
+  assert.match(html, /<path d="M14 8v7"\/>/);
+  assert.match(html, /<path d="M18 5v13"\/>/);
+  assert.match(html, /<path d="M22 10v3"\/>/);
+  assert.match(html, /<path d="m7 11 2-2-2-2"\/>/);
+  assert.match(html, /<path d="m11 13 4 0"\/>/);
+});
+
 test("desktop UI renders subscriber and local publisher as separate roles", () => {
   const html = renderDesktopUi();
 
