@@ -81,3 +81,19 @@ test("desktop UI derives actions from snapshots without hard-coded endpoints", (
   assert.doesNotMatch(html, /127\.0\.0\.1:17480/);
   assert.doesNotMatch(html, /navidrome\.localhost:17480/);
 });
+
+test("desktop hides subscriber addresses but keeps publisher targets", () => {
+  const html = renderDesktopUi();
+  const subscriberRenderer = html.slice(
+    html.indexOf("const renderService ="),
+    html.indexOf("const renderPublishedService ="),
+  );
+  const publisherRenderer = html.slice(
+    html.indexOf("const renderPublishedService ="),
+    html.indexOf("const selectRole ="),
+  );
+
+  assert.doesNotMatch(subscriberRenderer, /service-address/);
+  assert.match(publisherRenderer, /service-address/);
+  assert.match(publisherRenderer, /127\.0\.0\.1:/);
+});

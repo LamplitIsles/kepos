@@ -52,9 +52,9 @@ The normal long-lived service flow is:
 
 ```text
 owner trusts Alice and Bob once
-  -> a publisher exposes its local Blog as the default home service
-  -> Alice and Bob open the Blog
-  -> the publisher may also expose Navidrome and other services
+  -> a publisher exposes Navidrome and other configured services
+  -> native clients read the reserved registry
+  -> Alice and Bob open the services they need
   -> both connect from their own authorized devices
   -> no owner login or online controller approves each connection
 ```
@@ -64,14 +64,15 @@ create a virtual network or make arbitrary device ports reachable.
 
 ### Local HTTP gateway
 
-MLP uses one local HTTP gateway for human-readable HTTP service URLs. It does
-not install a system DNS resolver or Android `VpnService`.
+MLP uses one local HTTP gateway for HTTP service URLs and machine-readable
+service discovery. It does not install a system DNS resolver or Android
+`VpnService`.
 
 Example local URLs:
 
 ```text
-http://home.localhost:17480/
 http://navidrome.localhost:17480/
+http://home.localhost:17480/.well-known/kepos/services.json
 ```
 
 - `*.localhost` keeps traffic on loopback without a custom DNS service.
@@ -82,11 +83,9 @@ http://navidrome.localhost:17480/
   HTTP bytes through a Protomux channel on the persistent P2P connection.
 - Supporting several publishers at once, including an identity-derived
   hostname suffix, remains deferred.
-- A Blog is an ordinary registered HTTP service. Kepos does not provide a
-  Blog engine, CMS, renderer, editor, content store, or content sync.
-- The first smoke uses a tiny static Blog fixture as the default `home`
-  service. The fixture is test/example content, not a product CMS.
-- A Blog may use ordinary links to other registered HTTP services.
+- `home` is reserved for the registry, health check, and benchmark endpoints.
+  Its root path has no human UI; Android and desktop clients render the
+  service directory natively.
 - Non-HTTP services such as RetroArch and Terraria still receive a local TCP
   port when the user clicks Connect.
 - `127.0.0.1:<port>` remains the compatibility fallback when a third-party

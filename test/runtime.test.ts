@@ -117,7 +117,7 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
       homeUrl: subscriber.home.url,
       services: [],
     } satisfies SubscriberRuntimeStatus);
-    assert.equal((await fetch(subscriber.home.url)).status, 200);
+    assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
     assert.equal(publisher.status().activeSubscribers, 1);
 
     await subscriber.stop();

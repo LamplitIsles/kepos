@@ -41,7 +41,6 @@ in
     src = lib.fileset.toSource {
       root = ../.;
       fileset = lib.fileset.unions [
-        ../home
         ../src
         ../LICENSE
         ../package-lock.json
@@ -58,7 +57,7 @@ in
 
       app="$out/lib/kepos-neo"
       mkdir -p "$app" "$out/bin"
-      cp -r home node_modules package.json src "$app/"
+      cp -r node_modules package.json src "$app/"
       makeWrapper ${lib.getExe nodejs_22} "$out/bin/kepos" \
         --add-flags "--import=$app/node_modules/tsx/dist/loader.mjs" \
         --add-flags "$app/src/cli/main.ts"

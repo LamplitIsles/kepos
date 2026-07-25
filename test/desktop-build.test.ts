@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 
-import {
-  copyDesktopAssets,
-  desktopAppBundle,
-  desktopBuildCommands,
-} from "../scripts/build-desktop.js";
+import { desktopAppBundle, desktopBuildCommands } from "../scripts/build-desktop.js";
 
 const repository = process.cwd();
 
@@ -173,42 +168,20 @@ test("desktop maps every added Node dependency to Bare", async () => {
   }
 });
 
-test("desktop publisher packages both Home static assets", async () => {
+test("desktop publisher requires no Home static assets", async () => {
   const source = await readFile(
     path.join(repository, "src", "home", "server.ts"),
     "utf8",
   );
+  const build = await readFile(
+    path.join(repository, "scripts", "build-desktop.ts"),
+    "utf8",
+  );
 
-  assert.match(source, /import\.meta\.asset\("\.\.\/\.\.\/home\/index\.html"\)/);
-  assert.match(source, /import\.meta\.asset\("\.\.\/\.\.\/home\/styles\.css"\)/);
-});
-
-test("desktop build stages Home assets beside compiled modules", async () => {
-  const fixture = await mkdtemp(path.join(tmpdir(), "kepos-desktop-assets-"));
-  try {
-    await mkdir(path.join(fixture, "home"));
-    await Promise.all([
-      writeFile(path.join(fixture, "home", "index.html"), "home fixture"),
-      writeFile(path.join(fixture, "home", "styles.css"), "css fixture"),
-    ]);
-
-    await copyDesktopAssets(fixture);
-
-    assert.equal(
-      await readFile(
-        path.join(fixture, ".build", "desktop", "home", "index.html"),
-        "utf8",
-      ),
-      "home fixture",
-    );
-    assert.equal(
-      await readFile(
-        path.join(fixture, ".build", "desktop", "home", "styles.css"),
-        "utf8",
-      ),
-      "css fixture",
-    );
-  } finally {
-    await rm(fixture, { recursive: true, force: true });
-  }
+  assert.doesNotMatch(source, /import\.meta\.asset|home\/index|home\/styles/);
+  assert.doesNotMatch(build, /copyDesktopAssets|\.build["'], ["']desktop["'], ["']home/);
+  assert.match(
+    build,
+    /rm\(path\.join\(repository, "\.build", "desktop"\)/,
+  );
 });

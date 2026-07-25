@@ -3,9 +3,9 @@
 [![CI](https://github.com/tta-lab/kepos-neo/actions/workflows/check.yml/badge.svg?branch=main&event=push)](https://github.com/tta-lab/kepos-neo/actions/workflows/check.yml)
 [![codecov](https://codecov.io/github/tta-lab/kepos-neo/graph/badge.svg?branch=main)](https://app.codecov.io/github/tta-lab/kepos-neo)
 
-Kepos Neo exposes a publisher's local Home page and configured TCP services to
-allowlisted subscribers. One persistent encrypted HyperDHT connection carries
-independent Protomux channels for Home, SSH, Navidrome, and other services.
+Kepos Neo exposes a publisher's configured TCP services to allowlisted
+subscribers. One persistent encrypted HyperDHT connection carries independent
+Protomux channels for the service registry, SSH, Navidrome, and other services.
 
 ## Requirements
 
@@ -351,7 +351,6 @@ service is available through the same listener and one persistent publisher
 connection:
 
 ```text
-http://home.localhost:17480/
 http://navidrome.localhost:17480/
 ```
 
@@ -360,10 +359,11 @@ do not need a subscriber `--service` option or a separate local process.
 `--service id:local-port` remains as a one-run override for raw TCP services
 such as SSH. If 17480 is occupied, select another gateway port:
 
-Home treats the reserved `ssh` service as raw TCP. Its local port belongs to
-the subscriber configuration, so the publisher Home does not guess or display
-an SSH command. Every other published service is presented as an HTTP link on
-the current gateway port.
+Kepos reserves `home` for machine-readable discovery. Native clients read its
+registry at
+`http://home.localhost:17480/.well-known/kepos/services.json`; the root path
+does not serve a human page. The reserved `ssh` service remains raw TCP, and
+its local port belongs to the subscriber configuration.
 
 ```sh
 npm run kepos -- subscriber run \

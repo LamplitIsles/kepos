@@ -424,14 +424,12 @@ export function renderDesktopUi(): string {
       };
 
       const renderService = (service) => {
-        const address = service.url || service.copyText || "Local endpoint pending";
         const action = service.action === "open" ? "open" : "copy";
         const actionButton = '<button class="action" type="button" data-action="' + action + '" data-service="' + escapeHtml(service.id) + '"' +
           (service.available ? '' : ' disabled') + '>' + primaryLabel(service) + '</button>';
         return '<article class="service' + (service.available ? '' : ' unavailable') + '">' +
           '<div class="service-icon">' + icon(service) + '</div>' +
-          '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2>' +
-          '<p class="service-address">' + escapeHtml(address) + '</p></div>' +
+          '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2></div>' +
           '<div class="actions">' + actionButton + '</div></article>';
       };
 
