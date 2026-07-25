@@ -3,6 +3,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   writeFile,
@@ -252,6 +253,9 @@ test("Android build embeds only bootstrap endpoints from the local Kepos config"
         "[subscriber]",
         "gateway_port = 17480",
         "",
+        "[publisher]",
+        'display_name = "incomplete and irrelevant to Android"',
+        "",
       ].join("\n"),
     );
 
@@ -273,6 +277,31 @@ test("Android build embeds only bootstrap endpoints from the local Kepos config"
       { host: "bootstrap-one.example", port: 49_737 },
       { host: "bootstrap-two.example", port: 49_738 },
     ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Android bootstrap generation removes stale generated assets", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "kepos-android-bootstrap-"));
+  try {
+    const outputDirectory = path.join(directory, "assets");
+    const outputPath = path.join(outputDirectory, "kepos-bootstrap.json");
+    await mkdir(outputDirectory, { recursive: true });
+    await writeFile(path.join(outputDirectory, "stale-full-config.json"), "secret");
+    const builder = await import("../scripts/android-bootstrap-config.js") as {
+      writeAndroidBootstrapAsset(options: {
+        outputPath: string;
+        environment: NodeJS.ProcessEnv;
+      }): Promise<void>;
+    };
+
+    await builder.writeAndroidBootstrapAsset({
+      outputPath,
+      environment: { XDG_CONFIG_HOME: path.join(directory, "missing") },
+    });
+
+    assert.deepEqual(await readdir(outputDirectory), ["kepos-bootstrap.json"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
