@@ -420,6 +420,86 @@ test("desktop runtime isolates subscriber startup failure from publisher", async
   await runtime.stop();
 });
 
+test("desktop runtime stops live roles before releasing locks after status failure", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  const runtime = await startDesktopRuntime(
+    {
+      publisher: { stateDir: "/state/publisher" },
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      startPublisher: async () =>
+        runningPublisher(() => {
+          throw new Error("publisher status failed");
+        }, events),
+      startSubscriber: async () =>
+        runningSubscriber(() => {
+          throw new Error("subscriber status failed");
+        }, events),
+    }),
+  );
+
+  assert.equal(events.includes("publisher:stop"), true);
+  assert.equal(events.includes("subscriber:stop"), true);
+  assert.ok(
+    events.indexOf("publisher:stop") <
+      events.indexOf("publisher-lock:release"),
+  );
+  assert.ok(
+    events.indexOf("subscriber:stop") <
+      events.indexOf("subscriber-lock:release"),
+  );
+  assert.equal(snapshots.at(-1)?.publisher?.phase, "failed");
+  assert.equal(snapshots.at(-1)?.subscriber?.phase, "failed");
+  await runtime.stop();
+});
+
+test("desktop reconfiguration rejects when a replacement role cannot start", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  let starts = 0;
+  const publisher = {
+    stateDir: "/state/publisher",
+    policy: {
+      displayName: "Before",
+      allow: [],
+      services: [],
+    },
+  };
+  const runtime = await startDesktopRuntime(
+    {
+      publisher,
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      startPublisher: async () => {
+        starts++;
+        if (starts === 2) throw new Error("replacement unavailable");
+        return runningPublisher(() => publisherStatus(0, 0), events);
+      },
+    }),
+  );
+
+  await assert.rejects(
+    runtime.reconfigure({
+      publisher: {
+        ...publisher,
+        policy: { ...publisher.policy, displayName: "After" },
+      },
+    }),
+    /replacement unavailable/,
+  );
+  assert.equal(snapshots.at(-1)?.publisher?.phase, "failed");
+  assert.equal(events.at(-1), "publisher-lock:release");
+  await runtime.stop();
+});
+
 test("desktop runtime coalesces overlapping polls and suppresses late snapshots", async () => {
   const snapshots: DesktopSnapshot[] = [];
   let generation = 1;

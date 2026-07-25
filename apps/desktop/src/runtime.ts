@@ -69,6 +69,10 @@ export interface RunningDesktopRuntime {
   stop(): Promise<void>;
 }
 
+type RoleStartResult =
+  | { ok: true }
+  | { ok: false; error: unknown };
+
 const defaultDependencies: DesktopRuntimeDependencies = {
   acquirePublisherLock: acquirePublisherRuntimeLock,
   acquireSubscriberLock: acquireSubscriberRuntimeLock,
@@ -110,8 +114,8 @@ export async function startDesktopRuntime(
   });
   const publish = (): void => options.onSnapshot(snapshot());
 
-  const startPublisherRole = async (): Promise<void> => {
-    if (!publisherOptions || !publisherRole) return;
+  const startPublisherRole = async (): Promise<RoleStartResult> => {
+    if (!publisherOptions || !publisherRole) return { ok: true };
     try {
       publisherLock ??= await dependencies.acquirePublisherLock(
         publisherOptions.stateDir,
@@ -149,6 +153,7 @@ export async function startDesktopRuntime(
         policy,
       });
       updatePublisherRole();
+      return { ok: true };
     } catch (error) {
       publisherRole = {
         ...publisherRole,
@@ -157,12 +162,13 @@ export async function startDesktopRuntime(
         acceptedConnections: 0,
         error: errorMessage(error),
       };
-      await releaseLock("publisher");
+      await cleanupPublisherRole();
+      return { ok: false, error };
     }
   };
 
-  const startSubscriberRole = async (): Promise<void> => {
-    if (!subscriberOptions || !subscriberRole) return;
+  const startSubscriberRole = async (): Promise<RoleStartResult> => {
+    if (!subscriberOptions || !subscriberRole) return { ok: true };
     try {
       subscriberLock ??= await dependencies.acquireSubscriberLock(
         subscriberOptions.stateDir,
@@ -176,6 +182,7 @@ export async function startDesktopRuntime(
         waitForPublisher: false,
       });
       await updateSubscriberRole();
+      return { ok: true };
     } catch (error) {
       subscriberRole = {
         phase: "failed",
@@ -183,7 +190,8 @@ export async function startDesktopRuntime(
         services: [],
         error: errorMessage(error),
       };
-      await releaseLock("subscriber");
+      await cleanupSubscriberRole();
+      return { ok: false, error };
     }
   };
 
@@ -354,11 +362,16 @@ export async function startDesktopRuntime(
     }
     if (stopped) return;
     publish();
-    await Promise.allSettled([
+    const startResults = await Promise.all([
       publisherChanged ? startPublisherRole() : undefined,
       subscriberChanged ? startSubscriberRole() : undefined,
     ]);
     if (!stopped) publish();
+    const failedStart = startResults.find(
+      (result): result is Extract<RoleStartResult, { ok: false }> =>
+        result !== undefined && !result.ok,
+    );
+    if (failedStart) throw failedStart.error;
   }
 
   try {
