@@ -401,7 +401,11 @@ export function createPublisherConnection(options: {
     mux: RunningMuxSubscriber;
     observe: EmitObservation;
   }> => {
-    if (pairing && options.now() >= pairing.expiresAt) {
+    if (
+      pairing &&
+      !pairingRequestAccepted &&
+      options.now() >= pairing.expiresAt
+    ) {
       throw new Error("Pairing invitation has expired");
     }
     const attempt = ++connectionAttempt;
@@ -540,7 +544,13 @@ export function createPublisherConnection(options: {
         } catch (error) {
           if (stopped) throw error;
           if (error instanceof TerminalPairingError) throw error;
-          if (pairing && options.now() >= pairing.expiresAt) throw error;
+          if (
+            pairing &&
+            !pairingRequestAccepted &&
+            options.now() >= pairing.expiresAt
+          ) {
+            throw error;
+          }
           const message =
             error instanceof Error ? error.message : String(error);
           failedAttemptObserve?.("outer.retry", {

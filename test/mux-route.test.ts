@@ -313,6 +313,7 @@ test("pairing reconnect confirms approval without resending the token", async ()
   const candidates = [first, restored];
   const authorizedModes: boolean[] = [];
   let approved = 0;
+  let now = 1_000;
   const connection = createPublisherConnection({
     connect: () => {
       const stream = candidates.shift();
@@ -327,12 +328,13 @@ test("pairing reconnect confirms approval without resending the token", async ()
         open: async () => new PassThrough(),
         pair: async (_request, pairingOptions) => {
           pairingOptions?.onPending?.();
+          now = 3_000;
           first.destroy();
           throw new Error("approval response was lost");
         },
       };
     },
-    now: () => 1_000,
+    now: () => now,
     pairing: {
       request: {
         token: Buffer.alloc(32).toString("base64url"),
