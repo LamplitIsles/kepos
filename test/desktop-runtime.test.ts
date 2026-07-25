@@ -219,6 +219,134 @@ test("desktop runtime starts both roles concurrently and polls publisher counter
   );
 });
 
+test("desktop runtime applies shared network and role policy", async () => {
+  const events: string[] = [];
+  let publisherStartOptions: Record<string, unknown> | undefined;
+  let subscriberStartOptions: Record<string, unknown> | undefined;
+  const bootstrap = [{ host: "bootstrap.example", port: 49_737 }];
+  const publisherPolicy = {
+    displayName: "Configured publisher",
+    allow: ["22".repeat(32)],
+    services: [{ id: "web", name: "Web", targetPort: 8_080 }],
+  };
+  const runtime = await startDesktopRuntime(
+    {
+      publisher: {
+        stateDir: "/state/publisher",
+        bootstrap,
+        policy: publisherPolicy,
+      },
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        bootstrap,
+        route: "public",
+        services: [],
+      },
+      onSnapshot: () => undefined,
+    },
+    dependencies(events, {
+      startPublisher: async (options) => {
+        publisherStartOptions = options as unknown as Record<string, unknown>;
+        return runningPublisher(() => publisherStatus(0, 0), events);
+      },
+      startSubscriber: async (options) => {
+        subscriberStartOptions = options as unknown as Record<string, unknown>;
+        return runningSubscriber(
+          () => subscriberStatus("connected", 1),
+          events,
+        );
+      },
+    }),
+  );
+
+  assert.deepEqual(publisherStartOptions?.bootstrap, bootstrap);
+  assert.deepEqual(publisherStartOptions?.policy, publisherPolicy);
+  assert.deepEqual(subscriberStartOptions?.bootstrap, bootstrap);
+  assert.equal(subscriberStartOptions?.route, "public");
+  await runtime.stop();
+});
+
+test("desktop runtime reconfigures only the changed role", async () => {
+  const events: string[] = [];
+  const subscriber = {
+    stateDir: "/state/subscriber",
+    gatewayPort: 17_480,
+    services: [{ id: "ssh", localPort: 2_222 }],
+  };
+  const publisher = {
+    stateDir: "/state/publisher",
+    policy: {
+      displayName: "Before",
+      allow: [],
+      services: [],
+    },
+  };
+  const runtime = await startDesktopRuntime(
+    {
+      publisher,
+      subscriber,
+      onSnapshot: () => undefined,
+    },
+    dependencies(events),
+  );
+  const before = events.length;
+  const configurable = runtime as typeof runtime & {
+    reconfigure(options: {
+      publisher?: typeof publisher;
+      subscriber?: typeof subscriber;
+    }): Promise<void>;
+  };
+
+  await configurable.reconfigure({
+    publisher: {
+      ...publisher,
+      policy: { ...publisher.policy, displayName: "After" },
+    },
+    subscriber,
+  });
+
+  assert.deepEqual(events.slice(before), [
+    "publisher:stop",
+    "publisher-lock:release",
+    "publisher-lock:acquire:/state/publisher",
+    "publisher-state:load:/state/publisher",
+    "publisher:start:/state/publisher",
+  ]);
+  assert.equal(events.slice(before).includes("subscriber:stop"), false);
+  await runtime.stop();
+});
+
+test("desktop reconfiguration attempts both role cleanups after one fails", async () => {
+  const events: string[] = [];
+  const runtime = await startDesktopRuntime(
+    {
+      publisher: { stateDir: "/state/publisher" },
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: () => undefined,
+    },
+    dependencies(events, {
+      startPublisher: async () => ({
+        ...runningPublisher(() => publisherStatus(0, 0), events),
+        stop: async () => {
+          events.push("publisher:stop");
+          throw new Error("publisher stop failed");
+        },
+      }),
+    }),
+  );
+
+  await assert.rejects(runtime.reconfigure({}), /publisher stop failed/);
+  assert.equal(events.includes("publisher-lock:release"), true);
+  assert.equal(events.includes("subscriber:stop"), true);
+  assert.equal(events.includes("subscriber-lock:release"), true);
+  await runtime.stop().catch(() => undefined);
+});
+
 test("desktop runtime isolates publisher startup failure from subscriber", async () => {
   const events: string[] = [];
   const snapshots: DesktopSnapshot[] = [];

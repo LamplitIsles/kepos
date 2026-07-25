@@ -82,6 +82,26 @@ git diff --check
 
 These checks are rerun on the final branch after recording this evidence.
 
+## Shared TOML launch
+
+After the initial role-flag smoke, an isolated HOME was prepared with:
+
+- `~/.config/kepos/config.toml` containing an enabled, Home-only publisher;
+- publisher identity at the fixed
+  `~/.local/state/kepos-neo/publisher` location;
+- no desktop role flags.
+
+The rebuilt packaged app loaded that TOML, started the publisher, and acquired
+the canonical publisher runtime lock. The log contained no option, config, or
+startup error. This isolated smoke did not read or modify the user's live Kepos
+identity.
+
+The live Mac subscriber identity was then moved, not copied, from its dogfood
+directory to the canonical `~/.local/state/kepos-neo/subscriber` directory. The
+shared TOML enabled subscriber with gateway port 17480 and SSH port 2222. A
+no-argument packaged launch acquired the canonical subscriber lock;
+`http://navidrome.localhost:17480/ping` and the loopback SSH probe both passed.
+
 ## Deferred work
 
 This spike does not add QR pairing, a tray/menu-bar process, publisher setup or

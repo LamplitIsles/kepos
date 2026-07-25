@@ -45,11 +45,36 @@ The first desktop publisher slice reads existing publisher state. State setup,
 service editing, allowlist editing, live pairing, and tray residence remain
 separate work.
 
+Desktop reads the same `~/.config/kepos/config.toml` policy as the CLI. The
+optional `enabled` field on each role table controls desktop auto-start; it does
+not prevent an explicit CLI run command. State locations are fixed rather than
+copied into TOML:
+
+```text
+~/.local/state/kepos-neo/publisher
+~/.local/state/kepos-neo/subscriber
+```
+
+This keeps identity locations predictable and keeps private identity material
+out of the shared policy file. A non-default TOML may be selected explicitly,
+but it still resolves the same state locations relative to the host's XDG state
+home.
+
+The desktop runtime accepts serialized in-process reconfiguration. A changed
+publisher configuration restarts only publisher; a changed subscriber
+configuration restarts only subscriber. Configuration writes validate the full
+candidate, atomically replace TOML, and then apply the desired configuration in
+memory. If runtime application fails, TOML remains the desired state and the UI
+must report that it was not applied rather than claiming success. A later
+configuration UI will use this boundary; this slice does not add editing
+controls or filesystem watching.
+
 ## Consequences
 
 - A desktop can consume remote services while sharing local services.
 - CLI and desktop cannot use the same publisher or subscriber state at once.
 - Two enabled roles create two local DHT owners and may use two UDP sockets.
+- Role combinations are configuration results, not separate product modes.
 - The desktop snapshot and UI must distinguish the remote publisher from the
   publisher owned by this machine.
 - Closing the window still quits both roles until tray support changes close to

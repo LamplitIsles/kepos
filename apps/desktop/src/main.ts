@@ -7,7 +7,7 @@ import {
   type DesktopNativeWebView,
   type DesktopNativeWindow,
 } from "./host.js";
-import { parseDesktopOptions } from "./options.js";
+import { loadDesktopOptions } from "./options.js";
 import {
   desktopLaunchArguments,
   terminateDesktopBeforeWindow,
@@ -16,7 +16,10 @@ import {
 async function main(): Promise<void> {
   const homeDirectory = process.env.HOME;
   if (!homeDirectory) throw new Error("HOME is required to run Kepos desktop");
-  const options = parseDesktopOptions(desktopLaunchArguments(process.argv));
+  const options = await loadDesktopOptions(desktopLaunchArguments(process.argv), {
+    homeDirectory,
+    environment: process.env,
+  });
 
   await startDesktopHost(
     { homeDirectory, ...options },

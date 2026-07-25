@@ -30,6 +30,8 @@ import type {
 export interface StartDesktopPublisherOptions {
   stateDir: string;
   lock?: RuntimeLock;
+  bootstrap?: StartPublisherOptions["bootstrap"];
+  policy?: PublisherRuntimePolicy;
 }
 
 export interface StartDesktopSubscriberOptions {
@@ -37,12 +39,19 @@ export interface StartDesktopSubscriberOptions {
   gatewayPort: number;
   services: StartSubscriberOptions["services"];
   lock?: RuntimeLock;
+  bootstrap?: StartSubscriberOptions["bootstrap"];
+  route?: StartSubscriberOptions["route"];
 }
 
 export interface StartDesktopRuntimeOptions {
   publisher?: StartDesktopPublisherOptions;
   subscriber?: StartDesktopSubscriberOptions;
   onSnapshot(snapshot: DesktopSnapshot): void;
+}
+
+export interface DesktopRuntimeConfiguration {
+  publisher?: StartDesktopPublisherOptions;
+  subscriber?: StartDesktopSubscriberOptions;
 }
 
 export interface DesktopRuntimeDependencies {
@@ -56,6 +65,7 @@ export interface DesktopRuntimeDependencies {
 
 export interface RunningDesktopRuntime {
   poll(): Promise<void>;
+  reconfigure(configuration: DesktopRuntimeConfiguration): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -76,17 +86,20 @@ export async function startDesktopRuntime(
     throw new Error("desktop runtime requires at least one role");
   }
 
+  let publisherOptions = options.publisher;
+  let subscriberOptions = options.subscriber;
   let appPhase: DesktopSnapshot["appPhase"] = "starting";
-  let publisherRole = options.publisher ? initialPublisherRole() : undefined;
-  let subscriberRole = options.subscriber ? initialSubscriberRole() : undefined;
-  let publisherLock = options.publisher?.lock;
-  let subscriberLock = options.subscriber?.lock;
+  let publisherRole = publisherOptions ? initialPublisherRole() : undefined;
+  let subscriberRole = subscriberOptions ? initialSubscriberRole() : undefined;
+  let publisherLock = publisherOptions?.lock;
+  let subscriberLock = subscriberOptions?.lock;
   let runningPublisher: RunningPublisher | undefined;
   let runningSubscriber: RunningSubscriber | undefined;
   let registry: HomeRegistry | undefined;
   let refreshedGeneration: number | undefined;
   let stopped = false;
   let pollTask: Promise<void> | undefined;
+  let reconfigureTail = Promise.resolve();
   let stopTask: Promise<void> | undefined;
 
   const snapshot = (): DesktopSnapshot => ({
@@ -98,23 +111,24 @@ export async function startDesktopRuntime(
   const publish = (): void => options.onSnapshot(snapshot());
 
   const startPublisherRole = async (): Promise<void> => {
-    if (!options.publisher || !publisherRole) return;
+    if (!publisherOptions || !publisherRole) return;
     try {
       publisherLock ??= await dependencies.acquirePublisherLock(
-        options.publisher.stateDir,
+        publisherOptions.stateDir,
       );
       const { config, manifest } = await dependencies.loadPublisherState(
-        options.publisher.stateDir,
+        publisherOptions.stateDir,
       );
-      const policy: PublisherRuntimePolicy = {
-        displayName: manifest.displayName,
-        allow: config.allow,
-        services: manifest.services.map(({ id, name, targetPort }) => ({
-          id,
-          name,
-          targetPort,
-        })),
-      };
+      const policy: PublisherRuntimePolicy =
+        publisherOptions.policy ?? {
+          displayName: manifest.displayName,
+          allow: config.allow,
+          services: manifest.services.map(({ id, name, targetPort }) => ({
+            id,
+            name,
+            targetPort,
+          })),
+        };
       const publisherKey = derivePublisherHomeKey(config.seed);
       publisherRole = {
         phase: "starting",
@@ -130,7 +144,8 @@ export async function startDesktopRuntime(
         })),
       };
       runningPublisher = await dependencies.startPublisher({
-        stateDir: options.publisher.stateDir,
+        stateDir: publisherOptions.stateDir,
+        bootstrap: publisherOptions.bootstrap,
         policy,
       });
       updatePublisherRole();
@@ -147,15 +162,17 @@ export async function startDesktopRuntime(
   };
 
   const startSubscriberRole = async (): Promise<void> => {
-    if (!options.subscriber || !subscriberRole) return;
+    if (!subscriberOptions || !subscriberRole) return;
     try {
       subscriberLock ??= await dependencies.acquireSubscriberLock(
-        options.subscriber.stateDir,
+        subscriberOptions.stateDir,
       );
       runningSubscriber = await dependencies.startSubscriber({
-        stateDir: options.subscriber.stateDir,
-        gatewayPort: options.subscriber.gatewayPort,
-        services: options.subscriber.services,
+        stateDir: subscriberOptions.stateDir,
+        gatewayPort: subscriberOptions.gatewayPort,
+        services: subscriberOptions.services,
+        bootstrap: subscriberOptions.bootstrap,
+        route: subscriberOptions.route,
         waitForPublisher: false,
       });
       await updateSubscriberRole();
@@ -185,7 +202,7 @@ export async function startDesktopRuntime(
   }
 
   async function updateSubscriberRole(): Promise<void> {
-    if (!runningSubscriber || !options.subscriber || !subscriberRole) return;
+    if (!runningSubscriber || !subscriberOptions || !subscriberRole) return;
     const status = runningSubscriber.status();
     let registryError: string | undefined;
     if (
@@ -208,7 +225,7 @@ export async function startDesktopRuntime(
     if (stopped) return;
     subscriberRole = createSubscriberRole(
       status,
-      options.subscriber.gatewayPort,
+      subscriberOptions.gatewayPort,
       registry,
       registryError,
     );
@@ -217,32 +234,131 @@ export async function startDesktopRuntime(
   async function releaseLock(role: "publisher" | "subscriber"): Promise<void> {
     if (role === "publisher") {
       const lock = publisherLock;
-      publisherLock = undefined;
       await lock?.release();
+      if (publisherLock === lock) publisherLock = undefined;
       return;
     }
     const lock = subscriberLock;
-    subscriberLock = undefined;
     await lock?.release();
+    if (subscriberLock === lock) subscriberLock = undefined;
+  }
+
+  async function cleanupPublisherRole(): Promise<unknown> {
+    let failure: unknown;
+    try {
+      await runningPublisher?.stop();
+    } catch (error) {
+      failure = error;
+    }
+    runningPublisher = undefined;
+    try {
+      await releaseLock("publisher");
+    } catch (error) {
+      failure ??= error;
+    }
+    return failure;
+  }
+
+  async function cleanupSubscriberRole(): Promise<unknown> {
+    let failure: unknown;
+    try {
+      await runningSubscriber?.stop();
+    } catch (error) {
+      failure = error;
+    }
+    runningSubscriber = undefined;
+    try {
+      await releaseLock("subscriber");
+    } catch (error) {
+      failure ??= error;
+    }
+    return failure;
   }
 
   async function cleanupRoles(): Promise<unknown> {
     let failure: unknown;
-    const cleanup = async (step: () => void | Promise<void>): Promise<void> => {
+    for (const cleanup of [cleanupPublisherRole, cleanupSubscriberRole]) {
       try {
-        await step();
+        const cleanupFailure = await cleanup();
+        failure ??= cleanupFailure;
       } catch (error) {
         failure ??= error;
       }
-    };
-
-    await cleanup(() => runningPublisher?.stop());
-    runningPublisher = undefined;
-    await cleanup(() => releaseLock("publisher"));
-    await cleanup(() => runningSubscriber?.stop());
-    runningSubscriber = undefined;
-    await cleanup(() => releaseLock("subscriber"));
+    }
     return failure;
+  }
+
+  async function applyConfiguration(
+    configuration: DesktopRuntimeConfiguration,
+  ): Promise<void> {
+    if (stopped) throw new Error("desktop runtime is stopped");
+    const publisherChanged = !sameRoleConfiguration(
+      publisherOptions,
+      configuration.publisher,
+    );
+    const subscriberChanged = !sameRoleConfiguration(
+      subscriberOptions,
+      configuration.subscriber,
+    );
+    if (!publisherChanged && !subscriberChanged) return;
+
+    await pollTask;
+    if (publisherChanged && publisherRole?.phase === "running") {
+      publisherRole = { ...publisherRole, phase: "stopping" };
+    }
+    if (subscriberChanged && subscriberRole?.phase === "running") {
+      subscriberRole = { ...subscriberRole, phase: "stopping" };
+    }
+    publish();
+
+    let failure: unknown;
+    if (publisherChanged) {
+      const publisherFailure = await cleanupPublisherRole();
+      failure ??= publisherFailure;
+    }
+    if (subscriberChanged) {
+      const subscriberFailure = await cleanupSubscriberRole();
+      failure ??= subscriberFailure;
+    }
+    if (failure !== undefined) {
+      if (publisherChanged && publisherRole) {
+        publisherRole = {
+          ...publisherRole,
+          phase: "failed",
+          error: errorMessage(failure),
+        };
+      }
+      if (subscriberChanged && subscriberRole) {
+        subscriberRole = {
+          ...subscriberRole,
+          phase: "failed",
+          connection: "stopped",
+          error: errorMessage(failure),
+        };
+      }
+      publish();
+      throw failure;
+    }
+
+    if (publisherChanged) {
+      publisherOptions = configuration.publisher;
+      publisherLock = configuration.publisher?.lock;
+      publisherRole = configuration.publisher ? initialPublisherRole() : undefined;
+    }
+    if (subscriberChanged) {
+      subscriberOptions = configuration.subscriber;
+      subscriberLock = configuration.subscriber?.lock;
+      subscriberRole = configuration.subscriber ? initialSubscriberRole() : undefined;
+      registry = undefined;
+      refreshedGeneration = undefined;
+    }
+    if (stopped) return;
+    publish();
+    await Promise.allSettled([
+      publisherChanged ? startPublisherRole() : undefined,
+      subscriberChanged ? startSubscriberRole() : undefined,
+    ]);
+    if (!stopped) publish();
   }
 
   try {
@@ -274,11 +390,17 @@ export async function startDesktopRuntime(
       pollTask = task;
       return task;
     },
+    reconfigure(configuration): Promise<void> {
+      const task = reconfigureTail.then(() => applyConfiguration(configuration));
+      reconfigureTail = task.catch(() => undefined);
+      return task;
+    },
     stop(): Promise<void> {
       stopTask ??= (async () => {
         if (stopped) return;
         stopped = true;
         appPhase = "stopping";
+        await reconfigureTail;
         if (publisherRole?.phase === "running") {
           publisherRole = { ...publisherRole, phase: "stopping" };
         }
@@ -316,6 +438,16 @@ export async function startDesktopRuntime(
       return stopTask;
     },
   };
+}
+
+function sameRoleConfiguration(
+  left: { lock?: RuntimeLock } | undefined,
+  right: { lock?: RuntimeLock } | undefined,
+): boolean {
+  if (!left || !right) return left === right;
+  const { lock: _leftLock, ...leftConfiguration } = left;
+  const { lock: _rightLock, ...rightConfiguration } = right;
+  return JSON.stringify(leftConfiguration) === JSON.stringify(rightConfiguration);
 }
 
 function initialPublisherRole(): DesktopPublisherRole {

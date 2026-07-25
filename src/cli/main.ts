@@ -51,9 +51,9 @@ import {
 } from "../runtime/runtime-lock.js";
 import { waitForSignal } from "./signals.js";
 import {
-  loadCliConfig,
-  type CliConfig,
-} from "./config.js";
+  loadKeposConfig,
+  type KeposConfig,
+} from "../app-config.js";
 
 interface CliPublisher {
   home: { url: string };
@@ -73,7 +73,7 @@ interface CliSubscriber {
 export interface CliDependencies {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
-  loadConfig: (configPath?: string) => Promise<CliConfig | undefined>;
+  loadConfig: (configPath?: string) => Promise<KeposConfig | undefined>;
   setupPublisher: (
     options: SetupPublisherOptions,
   ) => Promise<SetupPublisherResult>;
@@ -112,7 +112,7 @@ export function createDefaultCliDependencies(
   return {
     stdout: output.stdout ?? console.log,
     stderr: output.stderr ?? console.error,
-    loadConfig: loadCliConfig,
+    loadConfig: loadKeposConfig,
     setupPublisher,
     setupSubscriber,
     setSubscriberPublisher,
@@ -382,7 +382,7 @@ async function runSubscriberCommand(
 
 function resolvedBootstrap(
   options: ReturnType<typeof parseOptions>,
-  config: CliConfig | undefined,
+  config: KeposConfig | undefined,
 ) {
   const bootstrap =
     parseBootstrapOptions(options) ?? config?.network?.bootstrap;

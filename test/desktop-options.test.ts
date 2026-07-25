@@ -4,6 +4,74 @@ import { test } from "node:test";
 
 import { parseDesktopOptions } from "../apps/desktop/src/options.js";
 
+test("desktop derives enabled roles from shared config and fixed state paths", () => {
+  assert.deepEqual(
+    parseDesktopOptions([], {
+      homeDirectory: "/Users/neil",
+      environment: { XDG_STATE_HOME: "" },
+      config: {
+        network: { bootstrap: [{ host: "bootstrap.example", port: 49_737 }] },
+        publisher: {
+          enabled: false,
+          displayName: "Neil",
+          allow: [],
+          services: [],
+        },
+        subscriber: {
+          enabled: true,
+          gatewayPort: 17_480,
+          route: "public",
+          services: [{ id: "ssh", localPort: 2_222 }],
+        },
+      },
+    }),
+    {
+      subscriber: {
+        stateDir: "/Users/neil/.local/state/kepos-neo/subscriber",
+        gatewayPort: 17_480,
+        route: "public",
+        bootstrap: [{ host: "bootstrap.example", port: 49_737 }],
+        services: [{ id: "ssh", localPort: 2_222 }],
+      },
+    },
+  );
+});
+
+test("desktop loads the shared config when no role flags are given", async () => {
+  const module = (await import(
+    "../apps/desktop/src/options.js"
+  )) as Record<string, unknown>;
+  assert.equal(typeof module.loadDesktopOptions, "function");
+  const loadDesktopOptions = module.loadDesktopOptions as (
+    arguments_: readonly string[],
+    context: Record<string, unknown>,
+  ) => Promise<unknown>;
+  const loadedPaths: Array<string | undefined> = [];
+  const loadedHomes: Array<string | undefined> = [];
+
+  const options = await loadDesktopOptions([], {
+    homeDirectory: "/Users/neil",
+    environment: {},
+    loadConfig: async (configPath?: string, _environment?: unknown, home?: string) => {
+      loadedPaths.push(configPath);
+      loadedHomes.push(home);
+      return {
+        subscriber: { enabled: true, services: [] },
+      };
+    },
+  });
+
+  assert.deepEqual(loadedPaths, [undefined]);
+  assert.deepEqual(loadedHomes, ["/Users/neil"]);
+  assert.deepEqual(options, {
+    subscriber: {
+      stateDir: "/Users/neil/.local/state/kepos-neo/subscriber",
+      gatewayPort: 17_480,
+      services: [],
+    },
+  });
+});
+
 test("desktop launch options accept subscriber-only mode", () => {
   assert.deepEqual(
     parseDesktopOptions([

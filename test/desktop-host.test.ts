@@ -90,6 +90,38 @@ test("desktop host supports subscriber-only mode", async () => {
   await host.shutdown();
 });
 
+test("desktop host forwards configured role policy to the runtime", async () => {
+  const harness = createHarness();
+  const bootstrap = [{ host: "bootstrap.example", port: 49_737 }];
+  const policy = {
+    displayName: "Configured publisher",
+    allow: [],
+    services: [],
+  };
+  const options = dualOptions();
+  Object.assign(options.publisher ?? {}, { bootstrap, policy });
+  Object.assign(options.subscriber ?? {}, { bootstrap, route: "public" });
+  const host = await startDesktopHost(options, harness.dependencies);
+
+  assert.deepEqual(harness.runtimeOptions?.publisher?.bootstrap, bootstrap);
+  assert.deepEqual(harness.runtimeOptions?.publisher?.policy, policy);
+  assert.deepEqual(harness.runtimeOptions?.subscriber?.bootstrap, bootstrap);
+  assert.equal(harness.runtimeOptions?.subscriber?.route, "public");
+  await host.shutdown();
+});
+
+test("desktop host exposes in-process role reconfiguration", async () => {
+  const harness = createHarness();
+  const host = await startDesktopHost(subscriberOptions(), harness.dependencies);
+
+  await host.reconfigure({
+    publisher: { stateDir: "/state/publisher" },
+  });
+
+  assert.equal(harness.events.includes("runtime:reconfigure"), true);
+  await host.shutdown();
+});
+
 test("desktop host rejects a second process without creating a window", async () => {
   const harness = createHarness({ singletonFailure: "already running" });
 
@@ -268,6 +300,9 @@ function createHarness(options: HarnessOptions = {}) {
   const runtime: RunningDesktopRuntime = {
     poll: async () => {
       events.push("runtime:poll");
+    },
+    reconfigure: async () => {
+      events.push("runtime:reconfigure");
     },
     stop: async () => {
       events.push("runtime:stop");

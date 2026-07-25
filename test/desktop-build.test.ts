@@ -151,7 +151,7 @@ test("desktop output is ignored without ignoring desktop source", async () => {
   assert.doesNotMatch(gitignore, /^apps\/desktop\/$/m);
 });
 
-test("desktop publisher maps every Home Node dependency to Bare", async () => {
+test("desktop maps every added Node dependency to Bare", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(repository, "package.json"), "utf8"),
   ) as {
@@ -162,6 +162,7 @@ test("desktop publisher maps every Home Node dependency to Bare", async () => {
   for (const [nodeModule, bareModule] of [
     ["node:crypto", "bare-crypto"],
     ["node:events", "bare-events"],
+    ["node:os", "bare-os"],
     ["node:url", "bare-url"],
   ]) {
     assert.deepEqual(packageJson.imports?.[nodeModule], {

@@ -1,4 +1,3 @@
-import type { SubscriberService } from "../../../src/runtime/subscriber.js";
 import {
   acquirePublisherRuntimeLock,
   acquireSubscriberRuntimeLock,
@@ -8,8 +7,11 @@ import { createDesktopController } from "./controller.js";
 import type { DesktopSnapshot } from "./protocol.js";
 import {
   startDesktopRuntime,
+  type DesktopRuntimeConfiguration,
+  type StartDesktopPublisherOptions,
   type RunningDesktopRuntime,
   type StartDesktopRuntimeOptions,
+  type StartDesktopSubscriberOptions,
 } from "./runtime.js";
 import { acquireDesktopSingleton } from "./singleton.js";
 import { renderDesktopUi } from "./ui.js";
@@ -30,12 +32,8 @@ export interface DesktopNativeWebView {
 
 export interface StartDesktopHostOptions {
   homeDirectory: string;
-  publisher?: { stateDir: string };
-  subscriber?: {
-    stateDir: string;
-    gatewayPort: number;
-    services: SubscriberService[];
-  };
+  publisher?: Omit<StartDesktopPublisherOptions, "lock">;
+  subscriber?: Omit<StartDesktopSubscriberOptions, "lock">;
 }
 
 export interface DesktopHostDependencies {
@@ -52,6 +50,7 @@ export interface DesktopHostDependencies {
 }
 
 export interface RunningDesktopHost {
+  reconfigure(configuration: DesktopRuntimeConfiguration): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -158,6 +157,16 @@ export async function startDesktopHost(
     return shutdownPromise;
   }
 
+  async function reconfigure(
+    configuration: DesktopRuntimeConfiguration,
+  ): Promise<void> {
+    if (shutdownPromise !== undefined) {
+      throw new Error("Kepos desktop is stopping");
+    }
+    if (!runtime) throw new Error("Kepos desktop runtime is unavailable");
+    await runtime.reconfigure(configuration);
+  }
+
   const controller = createDesktopController({
     initialSnapshot: {
       ...initialSnapshot,
@@ -218,7 +227,7 @@ export async function startDesktopHost(
       ...(options.publisher
         ? {
             publisher: {
-              stateDir: options.publisher.stateDir,
+              ...options.publisher,
               lock: publisherLock,
             },
           }
@@ -226,9 +235,7 @@ export async function startDesktopHost(
       ...(options.subscriber
         ? {
             subscriber: {
-              stateDir: options.subscriber.stateDir,
-              gatewayPort: options.subscriber.gatewayPort,
-              services: options.subscriber.services,
+              ...options.subscriber,
               lock: subscriberLock,
             },
           }
@@ -239,7 +246,7 @@ export async function startDesktopHost(
   } catch {
     // startDesktopRuntime already publishes a safe failed snapshot and releases
     // the subscriber-state lock. Keep the window open so the user can read it.
-    return { shutdown };
+    return { reconfigure, shutdown };
   }
   if (shutdownPromise === undefined) {
     runtime = startedRuntime;
@@ -253,7 +260,7 @@ export async function startDesktopHost(
     }
   }
 
-  return { shutdown };
+  return { reconfigure, shutdown };
 }
 
 async function cleanNativeSetup(

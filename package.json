@@ -29,6 +29,10 @@
       "bare": "bare-net",
       "default": "node:net"
     },
+    "node:os": {
+      "bare": "bare-os",
+      "default": "node:os"
+    },
     "node:path": {
       "bare": "bare-path",
       "default": "node:path"
@@ -90,6 +94,7 @@
     "bare-fs": "^4.7.4",
     "bare-http1": "^4.5.7",
     "bare-net": "^2.3.2",
+    "bare-os": "^3.9.3",
     "bare-path": "^3.1.1",
     "bare-stream": "^2.13.3",
     "bare-url": "^2.4.6",

@@ -1,15 +1,26 @@
 import path from "node:path";
 
+import {
+  loadKeposConfig,
+  type KeposConfig,
+} from "../../../src/app-config.js";
+import type { DhtAddress } from "../../../src/mux/hyperdht.js";
+import type { Route } from "../../../src/mux/route.js";
+import type { PublisherRuntimePolicy } from "../../../src/runtime/publisher.js";
 import type { SubscriberService } from "../../../src/runtime/subscriber.js";
 
 export interface DesktopSubscriberOptions {
   stateDir: string;
   gatewayPort: number;
+  bootstrap?: DhtAddress[];
+  route?: Route;
   services: SubscriberService[];
 }
 
 export interface DesktopPublisherOptions {
   stateDir: string;
+  bootstrap?: DhtAddress[];
+  policy?: PublisherRuntimePolicy;
 }
 
 export interface DesktopOptions {
@@ -17,7 +28,49 @@ export interface DesktopOptions {
   publisher?: DesktopPublisherOptions;
 }
 
-export function parseDesktopOptions(arguments_: readonly string[]): DesktopOptions {
+export interface DesktopConfigContext {
+  homeDirectory: string;
+  config?: KeposConfig;
+  environment?: Record<string, string | undefined>;
+}
+
+export interface LoadDesktopOptionsContext {
+  homeDirectory: string;
+  environment?: NodeJS.ProcessEnv;
+  loadConfig?: typeof loadKeposConfig;
+}
+
+export async function loadDesktopOptions(
+  arguments_: readonly string[],
+  context: LoadDesktopOptionsContext,
+): Promise<DesktopOptions> {
+  const configOption = arguments_[0] === "--config";
+  if (arguments_.length > 0 && !configOption) {
+    return parseDesktopOptions(arguments_);
+  }
+  if (configOption && arguments_.length !== 2) {
+    throw new Error("--config requires exactly one path");
+  }
+  const configPath = configOption ? arguments_[1] : undefined;
+  const config = await (context.loadConfig ?? loadKeposConfig)(
+    configPath,
+    context.environment,
+    context.homeDirectory,
+  );
+  return parseDesktopOptions([], {
+    homeDirectory: context.homeDirectory,
+    environment: context.environment,
+    config,
+  });
+}
+
+export function parseDesktopOptions(
+  arguments_: readonly string[],
+  context?: DesktopConfigContext,
+): DesktopOptions {
+  if (arguments_.length === 0 && context) {
+    return optionsFromConfig(context);
+  }
   let subscriberStateDir: string | undefined;
   let publisherStateDir: string | undefined;
   const services: SubscriberService[] = [];
@@ -78,6 +131,48 @@ export function parseDesktopOptions(arguments_: readonly string[]): DesktopOptio
         }
       : {}),
   };
+}
+
+function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
+  const stateHome =
+    context.environment?.XDG_STATE_HOME ||
+    path.join(context.homeDirectory, ".local", "state");
+  const stateRoot = path.join(stateHome, "kepos-neo");
+  const bootstrap = context.config?.network?.bootstrap;
+  const publisherConfig = context.config?.publisher;
+  const subscriberConfig = context.config?.subscriber;
+  const options: DesktopOptions = {
+    ...(publisherConfig?.enabled === true
+      ? {
+          publisher: {
+            stateDir: path.join(stateRoot, "publisher"),
+            ...(bootstrap ? { bootstrap } : {}),
+            policy: {
+              displayName: publisherConfig.displayName,
+              allow: publisherConfig.allow,
+              services: publisherConfig.services,
+            },
+          },
+        }
+      : {}),
+    ...(subscriberConfig?.enabled === true
+      ? {
+          subscriber: {
+            stateDir: path.join(stateRoot, "subscriber"),
+            gatewayPort: subscriberConfig.gatewayPort ?? 17_480,
+            ...(bootstrap ? { bootstrap } : {}),
+            ...(subscriberConfig.route
+              ? { route: subscriberConfig.route }
+              : {}),
+            services: subscriberConfig.services ?? [],
+          },
+        }
+      : {}),
+  };
+  if (!options.publisher && !options.subscriber) {
+    throw new Error("desktop config must enable at least one role");
+  }
+  return options;
 }
 
 function parseService(value: string): SubscriberService {
