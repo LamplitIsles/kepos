@@ -69,6 +69,7 @@ export interface SubscriberRuntimeStatus {
   role: "subscriber";
   state: "running" | "stopped";
   connection: SubscriberConnectionStatus;
+  connectionGeneration: number;
   publisherKey: string;
   homeUrl: string;
   services: RunningSubscriberService[];
@@ -179,6 +180,7 @@ export async function startSubscriber(
         role: "subscriber",
         state: stopped ? "stopped" : "running",
         connection: connection.status(),
+        connectionGeneration: connection.generation(),
         publisherKey: contact.publisherKey,
         homeUrl: gateway.url,
         services: services.map((service) => ({ ...service })),
@@ -277,6 +279,7 @@ export function createPublisherConnection(options: {
 }): ServiceOpener & {
   start: () => Promise<void>;
   startInBackground: () => void;
+  generation: () => number;
   status: () => SubscriberConnectionStatus;
   stop: () => Promise<void>;
 } {
@@ -287,6 +290,7 @@ export function createPublisherConnection(options: {
   let connectingOuter: DhtStream | undefined;
   let stopped = false;
   let connectionAttempt = 0;
+  let connectionGeneration = 0;
 
   const install = (
     outer: DhtStream,
@@ -294,6 +298,7 @@ export function createPublisherConnection(options: {
     observe: EmitObservation,
   ): RunningMuxSubscriber => {
     current = { outer, mux };
+    connectionGeneration++;
     let streamError: string | undefined;
     outer.once("error", (error) => {
       streamError = error.message;
@@ -453,6 +458,9 @@ export function createPublisherConnection(options: {
     startInBackground(): void {
       if (stopped || current || reconnecting) return;
       void reconnect().catch(() => undefined);
+    },
+    generation(): number {
+      return connectionGeneration;
     },
     async open(serviceId: string, signal?: CancellationSignal): Promise<Duplex> {
       while (!stopped) {

@@ -17,7 +17,10 @@ data class ServiceSnapshot(
   val id: String,
   val name: String,
   val access: String,
+  val action: String? = null,
+  val icon: String = "port",
   val url: String? = null,
+  val copyText: String? = null,
 )
 
 data class RuntimeSnapshot(

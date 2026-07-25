@@ -1,27 +1,20 @@
 import type { HomeRegistry } from "../home/registry.js";
+import {
+  createServicePresentations,
+  type ServicePresentation,
+} from "../runtime/service-handlers.js";
 
 export interface AndroidPublisher {
   displayName: string;
   publisherKey: string;
 }
 
-export interface AndroidService {
-  id: string;
-  name: string;
-  access: "http" | "tcp";
-  url?: string;
-}
+export type AndroidService = ServicePresentation;
 
 export interface AndroidRegistrySnapshot {
   publisher: AndroidPublisher;
   services: AndroidService[];
 }
-
-const KNOWN_HTTP_SERVICE_IDS = new Set([
-  "forgejo",
-  "navidrome",
-  "woodpecker",
-]);
 
 export class AndroidRegistryState {
   private current: AndroidRegistrySnapshot | undefined;
@@ -56,18 +49,6 @@ export function createAndroidRegistrySnapshot(
 ): AndroidRegistrySnapshot {
   return {
     publisher: { ...registry.publisher },
-    services: registry.services
-      .filter(({ id }) => id !== "home")
-      .map((service): AndroidService => {
-        if (!KNOWN_HTTP_SERVICE_IDS.has(service.id)) {
-          return { id: service.id, name: service.name, access: "tcp" };
-        }
-        return {
-          id: service.id,
-          name: service.name,
-          access: "http",
-          url: `http://${service.id}.localhost:${gatewayPort}/`,
-        };
-      }),
+    services: createServicePresentations(registry.services, gatewayPort),
   };
 }

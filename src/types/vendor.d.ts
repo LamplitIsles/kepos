@@ -30,3 +30,28 @@ declare module "sodium-universal" {
 declare module "which-runtime" {
   export const isWindows: boolean;
 }
+
+declare module "bare-native" {
+  import { EventEmitter } from "node:events";
+
+  export class WebView extends EventEmitter {
+    loadURL(url: string): this;
+    loadHTML(html: string): this;
+    inspectable(enabled: boolean): this;
+    postMessage(message: string): this;
+    openExternal(url: string): this;
+    destroy(): this;
+  }
+
+  export class Window extends EventEmitter {
+    constructor(width: number, height: number);
+    content(view: WebView): this;
+    close(): this;
+  }
+}
+
+declare const Bare: {
+  readonly argv: string[];
+  exitCode: number;
+  exit(code?: number): void;
+};

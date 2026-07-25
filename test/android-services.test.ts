@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { readHomeRegistry } from "../src/android/registry-client.js";
+import { readHomeRegistry } from "../src/runtime/registry-client.js";
 import {
   AndroidRegistryState,
   createAndroidRegistrySnapshot,
@@ -11,7 +11,7 @@ import { startHomeServer } from "../src/home/server.js";
 
 const publisherKey = "ab".repeat(32);
 
-test("Android registry snapshot hides Home and exposes usable service addresses", () => {
+test("Android registry snapshot applies shared service actions, icons, URLs, and order", () => {
   const registry: HomeRegistry = {
     schemaVersion: 2,
     revision: 1,
@@ -19,8 +19,11 @@ test("Android registry snapshot hides Home and exposes usable service addresses"
     services: [
       { id: "home", name: "Home", kind: "tcp" },
       { id: "navidrome", name: "Navidrome", kind: "tcp" },
-      { id: "forgejo", name: "Forgejo", kind: "tcp" },
+      { id: "ente-storage", name: "Ente Storage", kind: "tcp" },
       { id: "ssh", name: "SSH", kind: "tcp" },
+      { id: "forgejo", name: "Forgejo", kind: "tcp" },
+      { id: "ente", name: "Ente Photos", kind: "tcp" },
+      { id: "woodpecker", name: "Woodpecker", kind: "tcp" },
     ],
   };
 
@@ -28,21 +31,47 @@ test("Android registry snapshot hides Home and exposes usable service addresses"
     publisher: { displayName: "kosmos", publisherKey },
     services: [
       {
-        id: "navidrome",
-        name: "Navidrome",
-        access: "http",
-        url: "http://navidrome.localhost:17480/",
-      },
-      {
         id: "forgejo",
         name: "Forgejo",
         access: "http",
+        action: "open",
+        icon: "git",
         url: "http://forgejo.localhost:17480/",
       },
       {
-        id: "ssh",
-        name: "SSH",
-        access: "tcp",
+        id: "woodpecker",
+        name: "Woodpecker",
+        access: "http",
+        action: "open",
+        icon: "build",
+        url: "http://woodpecker.localhost:17480/",
+      },
+      {
+        id: "navidrome",
+        name: "Navidrome",
+        access: "http",
+        action: "copy-url",
+        icon: "music",
+        url: "http://navidrome.localhost:17480",
+        copyText: "http://navidrome.localhost:17480",
+      },
+      {
+        id: "ente-storage",
+        name: "Ente Storage",
+        access: "http",
+        action: "copy-url",
+        icon: "storage",
+        url: "http://ente-storage.localhost:17480",
+        copyText: "http://ente-storage.localhost:17480",
+      },
+      {
+        id: "ente",
+        name: "Ente Photos",
+        access: "http",
+        action: "copy-url",
+        icon: "photos",
+        url: "http://ente.localhost:17480",
+        copyText: "http://ente.localhost:17480",
       },
     ],
   });
@@ -68,7 +97,7 @@ test("Android registry snapshot preserves publisher service order", () => {
   );
 });
 
-test("Android treats an unknown TCP service conservatively", () => {
+test("Android omits services without a built-in action", () => {
   const registry: HomeRegistry = {
     schemaVersion: 2,
     revision: 1,
@@ -79,9 +108,7 @@ test("Android treats an unknown TCP service conservatively", () => {
     ],
   };
 
-  assert.deepEqual(createAndroidRegistrySnapshot(registry, 17_480).services, [
-    { id: "postgres", name: "PostgreSQL", access: "tcp" },
-  ]);
+  assert.deepEqual(createAndroidRegistrySnapshot(registry, 17_480).services, []);
 });
 
 test("Android reads the publisher registry through its local HTTP surface", async () => {

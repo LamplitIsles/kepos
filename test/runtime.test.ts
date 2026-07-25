@@ -112,6 +112,7 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
       role: "subscriber",
       state: "running",
       connection: "connected",
+      connectionGeneration: 1,
       publisherKey,
       homeUrl: subscriber.home.url,
       services: [],

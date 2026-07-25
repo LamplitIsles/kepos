@@ -43,7 +43,7 @@ class KeposScreenTest {
     compose.onNodeWithText("http://woodpecker.localhost:17480/").assertIsDisplayed()
     compose.onAllNodesWithText("Home").assertCountEquals(0)
     compose.onNodeWithText("Copy URL").performClick()
-    assertEquals("http://navidrome.localhost:17480/", copied)
+    assertEquals("http://navidrome.localhost:17480", copied)
     compose.onAllNodesWithText("Open")[0].performClick()
     assertEquals("http://forgejo.localhost:17480/", opened)
     compose.onNodeWithContentDescription("More actions for Forgejo").performClick()
@@ -172,19 +172,25 @@ class KeposScreenTest {
         id = "navidrome",
         name = "Navidrome",
         access = "http",
-        url = "http://navidrome.localhost:17480/",
+        action = "copy-url",
+        icon = "music",
+        url = "http://navidrome.localhost:17480",
+        copyText = "http://navidrome.localhost:17480",
       ),
       ServiceSnapshot(
         id = "forgejo",
         name = "Forgejo",
         access = "http",
+        action = "open",
+        icon = "git",
         url = "http://forgejo.localhost:17480/",
       ),
-      ServiceSnapshot(id = "ssh", name = "SSH", access = "tcp"),
       ServiceSnapshot(
         id = "woodpecker",
         name = "Woodpecker",
         access = "http",
+        action = "open",
+        icon = "build",
         url = "http://woodpecker.localhost:17480/",
       ),
     ),

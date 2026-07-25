@@ -1,15 +1,78 @@
 import assert from "node:assert/strict";
-import { link, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  link,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import {
+  acquireRuntimeLock,
   acquireSubscriberRuntimeLock,
+  installRuntimeLock,
   subscriberRuntimeLockPath,
-} from "../src/cli/runtime-lock.js";
+  writeAll,
+} from "../src/runtime/subscriber-lock.js";
 
-test("allows only one CLI runtime for a subscriber state directory", async () => {
+test("runtime lock writing supports Bare file handles and short writes", async () => {
+  const chunks: Buffer[] = [];
+  await writeAll(
+    {
+      async write(buffer) {
+        const bytesWritten = Math.min(2, buffer.byteLength);
+        chunks.push(Buffer.from(buffer.subarray(0, bytesWritten)));
+        return { bytesWritten };
+      },
+    },
+    Buffer.from("lock-state"),
+  );
+
+  assert.equal(Buffer.concat(chunks).toString(), "lock-state");
+});
+
+test("runtime lock installation relies on atomic link, not Bare exclusive open", async () => {
+  const canonical = Buffer.from("existing-owner\n");
+  const candidates = new Map<string, Buffer>();
+
+  await assert.rejects(
+    installRuntimeLock(
+      "/state/runtime.lock",
+      { ownerToken: "a".repeat(32), pid: 42 },
+      {
+        async open(filePath) {
+          let bytes = Buffer.alloc(0);
+          return {
+            async write(buffer) {
+              bytes = Buffer.concat([bytes, Buffer.from(buffer)]);
+              candidates.set(filePath, bytes);
+              return { bytesWritten: buffer.byteLength };
+            },
+            async close() {},
+          };
+        },
+        async link(_candidatePath, lockPath) {
+          assert.equal(lockPath, "/state/runtime.lock");
+          throw Object.assign(new Error("exists"), { code: "EEXIST" });
+        },
+        async unlink(filePath) {
+          candidates.delete(filePath);
+        },
+      },
+    ),
+    (error: unknown) =>
+      error instanceof Error && "code" in error && error.code === "EEXIST",
+  );
+
+  assert.equal(canonical.toString(), "existing-owner\n");
+  assert.equal(candidates.size, 0);
+});
+
+test("allows only one host runtime for a subscriber state directory", async () => {
   const stateDir = await mkdtemp(path.join(tmpdir(), "kepos-cli-lock-"));
   const first = await acquireSubscriberRuntimeLock(stateDir);
 
@@ -27,6 +90,58 @@ test("allows only one CLI runtime for a subscriber state directory", async () =>
     await first.release();
     await rm(subscriberRuntimeLockPath(stateDir), { force: true });
     await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("a runtime lock can be reused for the desktop singleton", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "kepos-desktop-lock-"));
+  const lockPath = path.join(directory, "desktop.runtime.lock");
+  const first = await acquireRuntimeLock({
+    lockPath,
+    conflictMessage: "Kepos desktop is already running",
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        acquireRuntimeLock({
+          lockPath,
+          conflictMessage: "Kepos desktop is already running",
+        }),
+      /desktop is already running/i,
+    );
+    await first.release();
+    const next = await acquireRuntimeLock({
+      lockPath,
+      conflictMessage: "Kepos desktop is already running",
+    });
+    await next.release();
+  } finally {
+    await first.release().catch(() => undefined);
+    await rm(lockPath, { force: true });
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a runtime lock owner cannot delete a replacement lock", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "kepos-lock-owner-"));
+  const lockPath = path.join(directory, "desktop.runtime.lock");
+  const lock = await acquireRuntimeLock({
+    lockPath,
+    conflictMessage: "Kepos desktop is already running",
+  });
+  await writeFile(
+    lockPath,
+    `${JSON.stringify({ ownerToken: "replacement", pid: process.pid })}\n`,
+    { mode: 0o600 },
+  );
+
+  try {
+    await assert.rejects(() => lock.release(), /ownership changed/i);
+    assert.equal(JSON.parse(await readFile(lockPath, "utf8")).ownerToken, "replacement");
+  } finally {
+    await rm(lockPath, { force: true });
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

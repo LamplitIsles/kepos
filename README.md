@@ -170,6 +170,31 @@ for clients that cannot resolve `*.localhost`; it is not the product-facing
 address. Both routes use the same publisher connection. This is not yet a Play
 Store release, and foreground-service policy remains unresolved.
 
+## macOS desktop subscriber
+
+The unsigned Apple Silicon desktop app runs the real subscriber in one Bare
+process. It is an alternative to the subscriber CLI: the desktop and CLI cannot
+use the same subscriber state at the same time, and only one desktop instance
+may run on a Mac.
+
+Build and launch it from an initialized recursive checkout:
+
+```sh
+npm run desktop:build
+dist/desktop/Kepos.app/Contents/MacOS/Kepos \
+  --state ~/.local/state/kepos-neo/subscriber \
+  --service ssh:2222
+```
+
+The build compiles the pinned Bare WebKit fork before packaging
+`dist/desktop/Kepos.app`; Xcode command-line build tools are required. The app
+shows the publisher's validated Registry. HTTP `OPEN` actions use the macOS
+default browser, Navidrome copies its canonical `*.localhost` URL for Navic,
+and SSH copies its explicit loopback command. No Node or Electron child process
+is used. [ADR 0004](docs/adr/0004-two-level-subscriber-runtime-locking.md)
+defines how the desktop singleton and shared subscriber-state lock prevent
+competing hosts.
+
 ## Persistent multiplex CLI
 
 The canonical CLI keeps one encrypted subscriber connection open to one
