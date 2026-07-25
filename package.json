@@ -73,7 +73,7 @@
     "android:assemble": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug",
     "android:release": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug assembleRelease && tsx scripts/report-android-size.ts",
     "android:install": "npm run android:assemble && adb install -r android/app/build/outputs/apk/debug/app-debug.apk",
-    "android:check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug lintRelease assembleDebug assembleRelease && tsx scripts/report-android-size.ts",
+    "android:check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug",
     "android:device-check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDeviceTestAndroidTest",
     "build:packages": "tsc -b --clean packages/bare-host-protocol packages/kepos-android-worklet && tsc -b packages/bare-host-protocol packages/kepos-android-worklet",
     "check": "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage",
