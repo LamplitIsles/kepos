@@ -2,7 +2,7 @@
 
 > This run used one physical desktop. It is evidence for the P0 process,
 > allowlist, restart, and Home path only. It is not evidence for separate
-> devices, NAT traversal, CGNAT, mobile networks, mainland or cross-border
+> devices, NAT traversal, CGNAT, mobile networks, or restricted-network
 > quality, relay behavior, or production readiness.
 
 ## Environment

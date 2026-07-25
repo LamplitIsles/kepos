@@ -34,10 +34,6 @@ The complete compatibility path is not simply "UDP or TCP". It can be:
 4. choose paths from measured quality, not only from connection success or a
    fixed country label.
 
-There is no strong public evidence that HyperDHT works reliably across China
-Telecom, China Unicom, and China Mobile. That gap must be closed by our own
-test matrix before release.
-
 ## 2. The four network layers
 
 The word "TCP" can refer to different layers. Mixing them leads to the wrong
@@ -103,7 +99,7 @@ Registry. DHT bootstrap and lookup traffic use UDP.
 
 The default HyperDHT bootstrap set contains a small number of fixed IPv4 UDP
 endpoints. A bootstrap node helps a device enter the DHT. It is not a data
-relay and gives no availability promise for China.
+relay and gives no general availability promise.
 
 ### 3.2 Handshake and NAT punching
 
@@ -232,7 +228,7 @@ channel behind it. Direct UDX also has cross-channel blocking if all Protomux
 channels share one ordered UDX stream. We must measure this rather than claim
 that either carrier gives independent streams.
 
-## 6. Domestic and international network evidence
+## 6. Network compatibility evidence
 
 ### 6.1 What is well supported
 
@@ -240,68 +236,25 @@ Evidence level A means a standard, official document, source code, or project
 maintainer statement.
 
 - RFC 9308 summarizes measurements where roughly 3% to 5% of networks block
-  all UDP. This is global data, not a China-specific rate. It also notes that
-  UDP NAT state can expire quickly, so keepalive and recovery matter.
+  all UDP. It also notes that UDP NAT state can expire quickly, so keepalive
+  and recovery matter.
 - HyperDHT, UDX, and blind relay source confirm that the current main path and
   relay path use UDP.
 - Tailscale falls back from UDP direct paths to HTTPS DERP relay. NetBird uses
   WebSocket relay on TCP/443 when its UDP path is unavailable. ZeroTier has a
   separate TCP relay rather than treating a Moon as TCP fallback.
-- Microsoft and Alibaba Cloud warn that public Internet paths between mainland
-  China and overseas regions can have congestion, latency, and packet loss.
-  There is no stable number that applies to every carrier or city.
-- China cloud security groups generally support both TCP and UDP. A public UDP
-  service still needs a public IP, security group rule, host firewall rule,
-  and a provider/network that permits the path.
+- IPv6 cannot be treated as an automatic escape path. Residential IPv6
+  firewalls still block unsolicited inbound traffic, and the currently used
+  HyperDHT code does not put IPv6 candidates into its normal connect handshake.
 
-### 6.2 What is not proven
+### 6.2 What remains unproven
 
-- There is no reliable public test matrix for HyperDHT, Hyperswarm, Pear, or
-  Keet across China Telecom, China Unicom, and China Mobile.
-- Absence of Holepunch China issues is not evidence of compatibility.
-- The 2025 measurement of targeted QUIC Initial/SNI blocking in China does not
-  prove that arbitrary UDX is blocked, and does not prove that it is safe.
-- No reliable source gives one China-wide UDP shaping rule.
-- IPv6 cannot be treated as the MLP escape path. Residential IPv6 firewalls
-  still block unsolicited inbound traffic, and the currently used HyperDHT
-  code does not put IPv6 candidates into its normal connect handshake.
-
-### 6.3 Project issues from China
-
-Evidence level B means a reproducible project issue or maintainer discussion,
-but not a broad measurement.
-
-| Project | Report | What it tells us |
-| --- | --- | --- |
-| Tailscale #10634 | A China user reports direct UDP being rate-limited and asks to force a private DERP | Direct can be worse than relay; manual relay mode matters |
-| Tailscale #11879 | Mainland users report high latency on overseas DERP and inconsistent private DERP use | A relay must be tested from the target carrier; low probe RTT alone is not enough |
-| Tailscale #2270 | Long-running reports say some mobile networks allow UDP but make it much slower than DERP | Fallback must react to quality, not only total failure |
-| ZeroTier #2196 | For a China P2P problem, a maintainer points to forced TCP relay and says Moon is not the answer | Discovery infrastructure and data fallback are separate |
-| NetBird #4739 | China peers can choose a Japan relay and get poor throughput or latency | First relay to answer is not necessarily the best relay |
-
-These reports identify failure modes. They do not establish an operator-wide
-rate, policy, or success percentage.
-
-### 6.4 Small mainland tests and community reports
-
-Evidence level C means a single test or small community sample. These results
-are useful for building a test matrix, not for making a national claim.
-
-- A Headscale/Tailscale test reported that a campus network and China Telecom
-  5G could connect directly, while a harder campus/industrial NAT pair used a
-  relay. The author's NAT labels were informal.
-- A June 2026 Shandong report measured a Tailscale direct path between China
-  Unicom and China Mobile as stable below about 2 Mbps, then losing packets at
-  higher rates. It is one person's test on one night.
-- Several ZeroTier reports describe same-city or same-carrier pairs that were
-  slow or could not punch, even when ordinary public throughput was healthy.
-- Community reports on randomized NAT punching conflict by carrier, city, and
-  time. Some also suggest that opening many UDP mappings can trigger CGN limits
-  or loss. HyperDHT's birthday-punch settings therefore need bounds and tests.
-
-The common signal is not "UDP is blocked in China". It is:
-
-> A UDP path may connect and still be too poor for sustained service traffic.
+- There is no reliable public cross-network test matrix for HyperDHT,
+  Hyperswarm, Pear, or Keet.
+- A successful hole punch does not prove that a path has enough sustained
+  throughput or low enough loss for the exposed service.
+- Mobile, campus, hotel, enterprise, and CGNAT paths still need direct
+  measurement rather than assumptions based on network labels.
 
 ## 7. Compatibility by network shape
 
@@ -312,15 +265,11 @@ The common signal is not "UDP is blocked in China". It is:
 | Two randomized or hard CGNATs | Often fails | Designed for this case | Strong backup | Relay availability |
 | Mobile hotspot or 5G on both ends | Uncertain | May work | Needed for coverage | CGNAT and UDP shaping |
 | Campus, hotel, or enterprise Wi-Fi | Uncertain | Fails if UDP is blocked | Most compatible | TLS proxy and idle timeout |
-| Mainland to mainland, same carrier | Must measure | Regional relay may help | Regional relay may help | UDP shaping can still occur |
-| Mainland across carriers | Must measure | Regional relay may help | Often more predictable | Interconnect loss and relay choice |
-| Mainland to overseas | Must measure | Overseas-only relay may be poor | Measure both sides | Cross-border congestion |
-| Overseas residential networks | Usually good but not guaranteed | Useful | Covers UDP-blocked tail | Hard NAT and enterprise policy |
+| Residential networks | Usually good but not guaranteed | Useful | Covers UDP-blocked tail | Hard NAT and ISP policy |
 | WSL2 default NAT | Extra NAT layer | Useful | Useful | Windows firewall and WSL mode |
 
-"Regional relay may help" is not a promise. Hong Kong, Japan, Singapore, and
-mainland candidates must be measured from both peers. Physical distance alone
-does not pick the best path.
+"Regional relay may help" is not a promise. Candidates must be measured from
+both peers. Physical distance alone does not pick the best path.
 
 ## 8. Future full-compatibility path model
 
@@ -439,28 +388,26 @@ but it is not a reliable public relay unless it has separately proven public
 reachability and an operations configuration.
 
 For a product beta, candidates should span at least two failure domains. A
-single overseas relay is not enough evidence for mainland use. A mainland
-public service also brings ICP, provider, abuse, metadata, and data protection
-questions that need a separate deployment and legal review.
+single relay is not enough evidence for broad availability, and every public
+service needs provider, abuse, metadata, and data-protection review.
 
 ## 12. Full network test matrix
 
 ### 12.1 Endpoints
 
-- China Telecom, China Unicom, and China Mobile home broadband;
-- hotspots on all three mobile networks;
+- home broadband from more than one ISP;
+- mobile hotspots from more than one carrier;
 - at least one campus, hotel, or enterprise network;
 - one network with all UDP blocked;
-- overseas home networks in Asia and Europe or North America;
+- home networks in more than one region;
 - public IPv4 VPS endpoints;
 - WSL2 in default NAT and mirrored networking modes.
 
 ### 12.2 Pairs
 
-- mainland same carrier and cross-carrier;
-- mainland fixed to mobile;
-- mainland to Hong Kong, Singapore, Japan, and at least one farther region;
-- overseas to overseas;
+- same-ISP and cross-ISP residential pairs;
+- fixed-to-mobile and mobile-to-mobile pairs;
+- same-region and long-distance pairs;
 - two CGNAT/mobile endpoints;
 - WSL to each important class.
 
@@ -480,9 +427,8 @@ For each pair and each candidate relay:
 - network changes, relay restart, gateway restart, and allowlist removal after
   publisher reload.
 
-Testing only ping, SSH login, or hole-punch success is not enough. The main
-China risk in public reports is often a path that connects but degrades under
-sustained traffic.
+Testing only ping, SSH login, or hole-punch success is not enough. A path may
+connect and still degrade under sustained traffic.
 
 ## 13. Release gates
 
@@ -491,8 +437,7 @@ MLP V1 direct networking is ready only when:
 1. the direct UDX path works end to end with publisher allowlist authentication;
 2. path diagnostics distinguish discovery, punching, transport, and
    publisher-auth failures;
-3. the mainland/overseas direct-path matrix has recorded results, not
-   assumptions;
+3. the representative direct-path matrix has recorded results, not assumptions;
 4. sustained-traffic tests meet an agreed success and performance bar.
 
 The V1 release claim must explicitly say:
@@ -512,7 +457,7 @@ Build and verify in this order:
 1. Keep the MLP V1 product protocol transport-independent when code moves
    beyond the direct Hypertele P0 baseline.
 2. Build MLP V1 with direct HyperDHT/UDX only.
-3. Test V1 across the mainland and overseas matrix.
+3. Test V1 across the representative network matrix.
 4. Build MLP V2 with a private, authenticated blind UDX relay.
 5. Use measured V1 and V2 results to decide whether to build TCP/443 relay.
 
@@ -545,7 +490,6 @@ V1 or V2.
 - [RFC 9308: Applicability of the QUIC transport protocol](https://datatracker.ietf.org/doc/html/rfc9308)
 - [RFC 6092: IPv6 residential CPE filtering](https://datatracker.ietf.org/doc/html/rfc6092)
 - [RFC 9000 section 2: QUIC streams](https://www.rfc-editor.org/rfc/rfc9000.html#section-2)
-- [USENIX Security 2025: QUIC censorship measurement in China](https://gfw.report/publications/usenixsecurity25/en/)
 
 ### Comparable systems
 
@@ -553,24 +497,9 @@ V1 or V2.
 - [Tailscale DERP](https://tailscale.com/kb/1232/derp-servers)
 - [Tailscale NAT traversal](https://tailscale.com/blog/nat-traversal-improvements-pt-1)
 - [Tailscale mobile UDP issue #2270](https://github.com/tailscale/tailscale/issues/2270)
-- [Tailscale China UDP report #10634](https://github.com/tailscale/tailscale/issues/10634)
-- [Tailscale mainland DERP report #11879](https://github.com/tailscale/tailscale/issues/11879)
 - [NetBird architecture](https://docs.netbird.io/about-netbird/how-netbird-works)
 - [NetBird NAT and relay](https://docs.netbird.io/about-netbird/understanding-nat-and-connectivity)
-- [NetBird China relay selection issue #4739](https://github.com/netbirdio/netbird/issues/4739)
 - [ZeroTier roots and Moons](https://docs.zerotier.com/roots/)
 - [ZeroTier TCP relay](https://docs.zerotier.com/relay/)
-- [ZeroTier China maintainer reply #2196](https://github.com/zerotier/ZeroTierOne/issues/2196#issuecomment-1933230046)
 - [frp XTCP fallback](https://gofrp.org/en/docs/features/xtcp/)
 - [rathole out of scope](https://github.com/rathole-org/rathole/blob/main/docs/out-of-scope.md)
-
-### Mainland network and deployment context
-
-- [Microsoft networking guidance for China](https://learn.microsoft.com/en-us/microsoft-365/enterprise/microsoft-365-networking-china?view=o365-worldwide)
-- [Microsoft WSL networking](https://learn.microsoft.com/en-us/windows/wsl/networking)
-- [Alibaba Cloud regions and network quality](https://help.aliyun.com/zh/ecs/user-guide/regions-and-zones)
-- [Alibaba Cloud ICP filing overview](https://help.aliyun.com/zh/icp-filing/basic-icp-service/user-guide/icp-filing-application-overview)
-- [China cross-border data rules, 2024](https://www.cac.gov.cn/2024-03/22/c_1712776611775634.htm)
-- [Small Headscale/Tailscale mainland test](https://cloud.tencent.com/developer/article/2457464)
-- [Small Shandong Tailscale UDP test](https://www.v2ex.com/t/1222087)
-- [Mainland NAT community discussion](https://www.v2ex.com/t/1046044)

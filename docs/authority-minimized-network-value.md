@@ -26,7 +26,7 @@ Kepos Neo 不应被定义为自建 Tailscale、轻量 VPN 或另一种端口转�
 
 低延迟是产品成立的门槛，不是发布后的优化项。能建立连接但交互迟钝、抖动明显或频繁绕远路，等同于不可用。Kepos Neo 应优先争取 direct path，并用相对原始网络路径的额外 RTT、p95 RTT、抖动和切换恢复时间判断连接是否有使用价值。
 
-Kepos Neo 不应为了提前完成一套理想身份或 capability 模型，延迟 direct path、低延迟 relay、国内网络兼容性和真实用户验证。当前只保留不能妥协的最低边界：peer 间端到端加密、publisher 本地授权、relay 不持有 endpoint secret。
+Kepos Neo 不应为了提前完成一套理想身份或 capability 模型，延迟 direct path、低延迟 relay、受限网络兼容性和真实用户验证。当前只保留不能妥协的最低边界：peer 间端到端加密、publisher 本地授权、relay 不持有 endpoint secret。
 
 本文是
 [竞争价值分析](./competitive-value-analysis.md) 中“无授权 controller”方向的聚焦补充。原文继续负责完整竞品和产品定位，本讨论稿只说明中间人授权权力为什么值得缩小。它不改变
@@ -132,7 +132,7 @@ Relay 是否能解密数据不是唯一问题。一个 relay 或 relay controlle
 - 不同 publisher 的授权不会自动同步；
 - 动态撤销和多设备身份需要单独设计；
 - relay 和 bootstrap 仍需要运维；
-- 国内 UDP、跨运营商和受限网络兼容性需要实测；
+- UDP、跨网络和受限网络兼容性需要实测；
 - 没有中心账号系统代为完成 MFA、offboarding 和审计；
 - 用户双方都需要安装和运行 Kepos endpoint。
 

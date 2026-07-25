@@ -130,6 +130,9 @@ test("Android device commands isolate tests and preserve installed state", async
   assert.match(lifecycleTest!, /BuildConfig\.NAVIDROME_PORT/);
   assert.match(worklet!, /Bare\.argv\[2\]/);
   assert.match(worklet!, /Bare\.argv\[3\]/);
+  assert.match(worklet!, /Bare\.argv\[4\]/);
+  assert.match(foregroundService!, /kepos-bootstrap\.json/);
+  assert.match(foregroundService!, /readText\(\)/);
   assert.match(readme!, /npm run android:install/);
   assert.match(readme!, /io\.github\.ttalab\.kepos\.devicetest/);
   assert.match(readme!, /preserving app-private state/);

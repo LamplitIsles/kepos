@@ -65,6 +65,7 @@ android {
   sourceSets {
     getByName("main") {
       jniLibs.srcDirs("src/main/addons")
+      assets.srcDir("../../.build/android-assets")
     }
   }
 }

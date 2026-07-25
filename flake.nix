@@ -75,7 +75,7 @@
               enable = true;
               inherit package;
               stateDir = "/home/kepos-test/.local/state/kepos-neo/publisher";
-              bootstrap = ["47.94.213.63:49737"];
+              bootstrap = ["bootstrap.example:49737"];
               displayName = "test-publisher";
               allow = ["1111111111111111111111111111111111111111111111111111111111111111"];
               services.ssh = {
@@ -94,7 +94,7 @@
           nativeBuildInputs = [pkgs.gnugrep];
         } ''
           grep -F 'display_name = "test-publisher"' ${configFile}
-          grep -F '47.94.213.63:49737' ${configFile}
+          grep -F 'bootstrap.example:49737' ${configFile}
           grep -F 'target_port = 22' ${configFile}
           grep -F -- '--observations ndjson' ${pkgs.writeText "kepos-exec-start" (toString service.ExecStart)}
           ${pkgs.lib.getExe package} --help | grep -F 'publisher run'

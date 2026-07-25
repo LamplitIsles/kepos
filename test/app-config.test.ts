@@ -14,12 +14,12 @@ test("shared config parses network bootstrap endpoints", () => {
   assert.deepEqual(
     parseKeposConfig(`
 [network]
-bootstrap = ["47.94.213.63:49737", "dht.example.com:49738"]
+bootstrap = ["bootstrap.example:49737", "dht.example.com:49738"]
 `),
     {
       network: {
         bootstrap: [
-          { host: "47.94.213.63", port: 49_737 },
+          { host: "bootstrap.example", port: 49_737 },
           { host: "dht.example.com", port: 49_738 },
         ],
       },
@@ -141,7 +141,7 @@ test("shared config rejects unknown fields and malformed endpoints", () => {
     /unknown field: network\.bootstraps/,
   );
   assert.throws(
-    () => parseKeposConfig('[network]\nbootstrap = ["47.94.213.63"]'),
+    () => parseKeposConfig('[network]\nbootstrap = ["bootstrap.example"]'),
     /network\.bootstrap.*host:port/,
   );
 });
@@ -162,10 +162,10 @@ test("shared config follows XDG and distinguishes default from explicit files", 
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(
     configPath,
-    '[network]\nbootstrap = ["47.94.213.63:49737"]\n',
+    '[network]\nbootstrap = ["bootstrap.example:49737"]\n',
   );
   assert.deepEqual(await loadKeposConfig(undefined, { XDG_CONFIG_HOME: root }), {
-    network: { bootstrap: [{ host: "47.94.213.63", port: 49_737 }] },
+    network: { bootstrap: [{ host: "bootstrap.example", port: 49_737 }] },
   });
 });
 

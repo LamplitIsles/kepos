@@ -51,11 +51,40 @@ export async function loadKeposConfig(
   environment: NodeJS.ProcessEnv = process.env,
   homeDirectory = os.homedir(),
 ): Promise<KeposConfig | undefined> {
+  const source = await readKeposConfigSource(
+    configPath,
+    environment,
+    homeDirectory,
+  );
+  return source === undefined ? undefined : parseKeposConfig(source);
+}
+
+export async function loadKeposBootstrap(
+  configPath?: string,
+  environment: NodeJS.ProcessEnv = process.env,
+  homeDirectory = os.homedir(),
+): Promise<DhtAddress[] | undefined> {
+  const source = await readKeposConfigSource(
+    configPath,
+    environment,
+    homeDirectory,
+  );
+  if (source === undefined) return undefined;
+  const value: unknown = parse(source);
+  const root = requireTable(value, "config");
+  if (root.network === undefined) return undefined;
+  return parseNetwork(root.network).bootstrap;
+}
+
+async function readKeposConfigSource(
+  configPath: string | undefined,
+  environment: NodeJS.ProcessEnv,
+  homeDirectory: string,
+): Promise<string | undefined> {
   const resolvedPath =
     configPath ?? defaultKeposConfigPath(environment, homeDirectory);
-  let source: string;
   try {
-    source = await readFile(resolvedPath, "utf8");
+    return await readFile(resolvedPath, "utf8");
   } catch (error) {
     if (
       configPath === undefined &&
@@ -69,7 +98,6 @@ export async function loadKeposConfig(
       cause: error,
     });
   }
-  return parseKeposConfig(source);
 }
 
 export function parseKeposConfig(source: string): KeposConfig {

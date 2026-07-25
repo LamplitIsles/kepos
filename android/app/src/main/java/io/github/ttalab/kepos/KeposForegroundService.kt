@@ -99,11 +99,18 @@ class KeposForegroundService : Service() {
           stateDir.absolutePath,
           BuildConfig.GATEWAY_PORT.toString(),
           BuildConfig.NAVIDROME_PORT.toString(),
+          readBootstrapAsset(),
         ),
       )
     } catch (error: Throwable) {
       Log.e(LOG_TAG, "Bare Worklet failed to start", error)
     }
+  }
+
+  private fun readBootstrapAsset(): String = try {
+    assets.open(BOOTSTRAP_ASSET).bufferedReader().use { it.readText() }
+  } catch (_: java.io.FileNotFoundException) {
+    "null"
   }
 
   private fun finishServiceStop() {
@@ -165,6 +172,7 @@ class KeposForegroundService : Service() {
     private const val NOTIFICATION_CHANNEL = "kepos-runtime"
     private const val NOTIFICATION_ID = 17480
     private const val WORKLET_ASSET = "kepos.bundle"
+    private const val BOOTSTRAP_ASSET = "kepos-bootstrap.json"
     private const val LOG_TAG = "KeposRuntime"
 
     fun start(context: Context) {

@@ -380,33 +380,6 @@ CGNAT does not always prevent a direct connection. Stable or predictable NAT
 mappings may work. Two strict or randomized NATs are much more likely to need
 a relay.
 
-## Experimental mainland relay deployment
-
-The first relay experiment is private and closed:
-
-- fixed public IP and a public UDP port;
-- no website, public API, public registration, or payment;
-- only peer keys in a private relay-operator allowlist may use it;
-- relay admission is separate from publisher service authorization and cannot
-  add a peer to any publisher allowlist;
-- not an open proxy;
-- no service plaintext at the relay;
-- explicit connection, bandwidth, and traffic limits.
-
-For this private non-Web shape, normal website ICP filing is unlikely to be
-the immediate path. This is not a legal exemption. Before deployment, the
-chosen cloud provider must confirm in writing that the exact UDP service is
-allowed.
-
-An IP-only website or API is still a website for filing purposes. A future
-WSS service on a mainland server should be planned as a Web service and should
-not rely on using port 443 or omitting a public page to avoid filing.
-
-Operating a public or paid family relay in mainland China is a different
-case. It may require analysis beyond ICP filing, including whether the service
-falls under a value-added telecom category such as a domestic IP-VPN service.
-That decision is outside MLP.
-
 ## Relay operating risks
 
 A long-running relay may be limited, blocked, attacked, or suspended. This is
