@@ -492,6 +492,8 @@ test("subscriber run uses TOML bindings and CLI overrides", async () => {
       network: { bootstrap: [] },
       subscriber: {
         gatewayPort: 17_480,
+        gatewayHost: "0.0.0.0",
+        gatewayDomain: "kepos.internal",
         route: "auto",
         services: [{ id: "ssh", localPort: 2_222 }],
       },
@@ -510,6 +512,10 @@ test("subscriber run uses TOML bindings and CLI overrides", async () => {
       "./subscriber",
       "--gateway-port",
       "18080",
+      "--gateway-host",
+      "127.0.0.2",
+      "--gateway-domain",
+      "cluster.internal",
       "--route",
       "public",
       "--service",
@@ -521,14 +527,20 @@ test("subscriber run uses TOML bindings and CLI overrides", async () => {
   const [configured, overridden] = cli.calls.startSubscriber as Array<{
     bootstrap?: unknown;
     gatewayPort?: number;
+    gatewayHost?: string;
+    gatewayDomain?: string;
     route: string;
     services: Array<{ id: string; localPort: number }>;
   }>;
   assert.equal(configured.bootstrap, undefined);
   assert.equal(configured.gatewayPort, 17_480);
+  assert.equal(configured.gatewayHost, "0.0.0.0");
+  assert.equal(configured.gatewayDomain, "kepos.internal");
   assert.equal(configured.route, "auto");
   assert.deepEqual(configured.services, [{ id: "ssh", localPort: 2_222 }]);
   assert.equal(overridden.gatewayPort, 18_080);
+  assert.equal(overridden.gatewayHost, "127.0.0.2");
+  assert.equal(overridden.gatewayDomain, "cluster.internal");
   assert.equal(overridden.route, "public");
   assert.deepEqual(overridden.services, [{ id: "ssh", localPort: 2_200 }]);
 });

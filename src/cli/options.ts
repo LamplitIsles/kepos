@@ -4,6 +4,10 @@ import type { DhtAddress } from "../mux/hyperdht.js";
 import { parseRoute, type Route } from "../mux/route.js";
 import type { PublisherStateService } from "../state/publisher.js";
 import type { SubscriberService } from "../runtime/subscriber.js";
+import {
+  parseGatewayDomain,
+  parseGatewayHost,
+} from "../home/gateway-options.js";
 
 export type ParsedOptions = ReadonlyMap<string, readonly string[]>;
 
@@ -98,6 +102,24 @@ export function parseGatewayPortOption(
   return value === undefined
     ? undefined
     : parseTcpPort(value, "--gateway-port");
+}
+
+export function parseGatewayHostOption(
+  options: ParsedOptions,
+): string | undefined {
+  const value = singleOption(options, "--gateway-host");
+  return value === undefined
+    ? undefined
+    : parseGatewayHost(value, "--gateway-host");
+}
+
+export function parseGatewayDomainOption(
+  options: ParsedOptions,
+): string | undefined {
+  const value = singleOption(options, "--gateway-domain");
+  return value === undefined
+    ? undefined
+    : parseGatewayDomain(value, "--gateway-domain");
 }
 
 export function parseBootstrapOptions(

@@ -45,6 +45,8 @@ target_port = 4533
 
 [subscriber]
 gateway_port = 17480
+gateway_host = "0.0.0.0"
+gateway_domain = "kepos.internal"
 route = "auto"
 
 [[subscriber.services]]
@@ -62,6 +64,8 @@ local_port = 2222
       },
       subscriber: {
         gatewayPort: 17_480,
+        gatewayHost: "0.0.0.0",
+        gatewayDomain: "kepos.internal",
         route: "auto",
         services: [{ id: "ssh", localPort: 2_222 }],
       },
@@ -133,6 +137,14 @@ test("shared config rejects incomplete or invalid role policy", () => {
     () => parseKeposConfig('[subscriber]\ngateway_port = 70000'),
     /subscriber\.gateway_port.*65535/,
   );
+  assert.throws(
+    () => parseKeposConfig('[subscriber]\ngateway_host = "bad host"'),
+    /subscriber\.gateway_host/,
+  );
+  assert.throws(
+    () => parseKeposConfig('[subscriber]\ngateway_domain = ".internal"'),
+    /subscriber\.gateway_domain/,
+  );
 });
 
 test("shared config rejects unknown fields and malformed endpoints", () => {
@@ -194,6 +206,8 @@ test("shared config atomically persists the validated desktop shape", async () =
     subscriber: {
       enabled: true,
       gatewayPort: 17_480,
+      gatewayHost: "0.0.0.0",
+      gatewayDomain: "kepos.internal",
       route: "auto",
       services: [{ id: "ssh", localPort: 2_222 }],
     },

@@ -377,18 +377,49 @@ do not need a subscriber `--service` option or a separate local process.
 `--service id:local-port` remains as a one-run override for raw TCP services
 such as SSH. If 17480 is occupied, select another gateway port:
 
-Kepos reserves `home` for machine-readable discovery. Native clients read its
-registry at
-`http://home.localhost:17480/.well-known/kepos/services.json`; the root path
-does not serve a human page. The reserved `ssh` service remains raw TCP, and
-its local port belongs to the subscriber configuration.
-
 ```sh
 npm run kepos -- subscriber run \
   --state ~/.local/state/kepos-neo/subscriber \
   --gateway-port 18080 \
   --service ssh:2222
 ```
+
+Kepos reserves `home` for machine-readable discovery. Native clients read its
+registry at
+`http://home.localhost:17480/.well-known/kepos/services.json`; the root path
+does not serve a human page. The reserved `ssh` service remains raw TCP, and
+its local port belongs to the subscriber configuration.
+
+### Pod-facing gateway
+
+The loopback bind and `.localhost` routing remain the safe defaults. A
+host-network subscriber can opt into a Pod-facing listener and one additional
+hostname suffix:
+
+```toml
+[subscriber]
+gateway_port = 17480
+gateway_host = "0.0.0.0"
+gateway_domain = "kepos.internal"
+```
+
+The same settings can be supplied for one CLI run:
+
+```sh
+kepos subscriber run \
+  --state /var/lib/kepos/node-subscriber \
+  --gateway-host 0.0.0.0 \
+  --gateway-domain kepos.internal
+```
+
+That gateway accepts both `navidrome.localhost:17480` for node-local clients
+such as containerd and `navidrome.kepos.internal:17480` for ordinary Pods.
+`gateway_domain` only adds Host-header routing; it does not install DNS or make
+the listener reachable by itself. The cluster deployment must route
+`*.kepos.internal` to a ClusterIP backed by the host-network subscriber. Use
+same-node routing such as `internalTrafficPolicy: Local`, and restrict port
+17480 to Pod/CNI source ranges with the node firewall. Never expose this
+listener on a public interface.
 
 Subscriber route mode defaults to `auto`, which permits HyperDHT's LAN-local
 shortcut. Add `--route public` to disable only that shortcut when comparing a

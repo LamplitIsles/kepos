@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
-import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
+import {
+  createServer as createHttpServer,
+  request,
+  type Server as HttpServer,
+} from "node:http";
 import { createConnection, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -78,6 +82,34 @@ async function exchangeTcp(port: number, payload: string): Promise<string> {
     });
     socket.once("error", reject);
     socket.once("close", () => resolve(response));
+  });
+}
+
+async function requestWithHost(
+  port: number,
+  host: string,
+  requestPath: string,
+): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const outgoing = request({
+      hostname: "127.0.0.1",
+      port,
+      path: requestPath,
+      headers: { host },
+    });
+    outgoing.once("response", (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.once("end", () => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`HTTP ${response.statusCode ?? 0}`));
+          return;
+        }
+        resolve(Buffer.concat(chunks));
+      });
+    });
+    outgoing.once("error", reject);
+    outgoing.end();
   });
 }
 
@@ -169,6 +201,8 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
       stateDir: subscriberState,
       bootstrap: testnet.bootstrap,
       gatewayPort: 0,
+      gatewayHost: "0.0.0.0",
+      gatewayDomain: "kepos.internal",
       services: [{ id: "ssh", localPort: 0 }],
       log: noLog,
       observe: (event) => subscriberEvents.push(event),
@@ -177,16 +211,22 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     const ssh = subscriber.services.find((service) => service.id === "ssh");
     assert.ok(ssh);
 
-    const [healthResponse, audioResponse, sshResponse] = await Promise.all([
+    const [healthResponse, audioResponse, podResponse, sshResponse] = await Promise.all([
       fetch(`${subscriber.home.url}/healthz`),
       fetch(
         `http://navidrome.localhost:${subscriber.home.port}/rest/stream`,
+      ),
+      requestWithHost(
+        subscriber.home.port,
+        "navidrome.kepos.internal",
+        "/rest/stream",
       ),
       exchangeTcp(ssh.port, "hello"),
     ]);
     assert.equal(healthResponse.status, 200);
     assert.equal(audioResponse.status, 200);
     assert.equal((await audioResponse.arrayBuffer()).byteLength, 64 * 1024);
+    assert.equal(podResponse.byteLength, 64 * 1024);
     assert.equal(sshResponse, "ssh:hello");
     assert.equal(publisher.acceptedConnections(), 1);
 

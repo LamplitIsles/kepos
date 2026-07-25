@@ -14,6 +14,7 @@ import type {
 } from "../src/runtime/publisher.js";
 import type {
   RunningSubscriber,
+  StartSubscriberOptions,
   SubscriberRuntimeStatus,
 } from "../src/runtime/subscriber.js";
 
@@ -91,21 +92,26 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
   let connection: SubscriberRuntimeStatus["connection"] = "connected";
   let generation = 1;
   let registryReads = 0;
+  let startedOptions: StartSubscriberOptions | undefined;
   const runtime = await startDesktopRuntime(
     {
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: 17_480,
+        gatewayHost: "0.0.0.0",
+        gatewayDomain: "kepos.internal",
         services: [{ id: "ssh", localPort: 2222 }],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
     },
     dependencies(events, {
-      startSubscriber: async () =>
-        runningSubscriber(
+      startSubscriber: async (options) => {
+        startedOptions = options;
+        return runningSubscriber(
           () => subscriberStatus(connection, generation),
           events,
-        ),
+        );
+      },
       readRegistry: async () => {
         registryReads++;
         return registry;
@@ -114,6 +120,8 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
   );
 
   assert.equal(registryReads, 1);
+  assert.equal(startedOptions?.gatewayHost, "0.0.0.0");
+  assert.equal(startedOptions?.gatewayDomain, "kepos.internal");
   assert.deepEqual(snapshots.at(-1)?.subscriber, {
     phase: "running",
     connection: "connected",

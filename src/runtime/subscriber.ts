@@ -49,6 +49,8 @@ export interface StartSubscriberOptions {
   stateDir: string;
   bootstrap?: DhtAddress[];
   gatewayPort?: number;
+  gatewayHost?: string;
+  gatewayDomain?: string;
   serviceAcquisitionTimeoutMs?: number;
   services: SubscriberService[];
   log?: (line: string) => void;
@@ -145,6 +147,8 @@ export async function startSubscriber(
 
     const gateway = await startHttpGateway({
       port: options.gatewayPort ?? (contact.requestedLocalPort || undefined),
+      host: options.gatewayHost,
+      domain: options.gatewayDomain,
       acquisitionTimeoutMs: options.serviceAcquisitionTimeoutMs,
       open: connection.open,
     });

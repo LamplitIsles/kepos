@@ -35,6 +35,8 @@ import {
   observationMode,
   parseBootstrapOptions,
   parseGatewayPortOption,
+  parseGatewayHostOption,
+  parseGatewayDomainOption,
   parseOptions,
   parsePublisherService,
   parseRouteOption,
@@ -339,6 +341,8 @@ async function runSubscriberCommand(
     "--state",
     "--service",
     "--gateway-port",
+    "--gateway-host",
+    "--gateway-domain",
     "--route",
     "--observations",
     "--bootstrap",
@@ -360,6 +364,10 @@ async function runSubscriberCommand(
       bootstrap: resolvedBootstrap(options, config),
       gatewayPort:
         parseGatewayPortOption(options) ?? config?.subscriber?.gatewayPort,
+      gatewayHost:
+        parseGatewayHostOption(options) ?? config?.subscriber?.gatewayHost,
+      gatewayDomain:
+        parseGatewayDomainOption(options) ?? config?.subscriber?.gatewayDomain,
       services,
       route: options.has("--route")
         ? parseRouteOption(options)

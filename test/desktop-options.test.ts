@@ -20,6 +20,8 @@ test("desktop derives enabled roles from shared config and fixed state paths", (
         subscriber: {
           enabled: true,
           gatewayPort: 17_480,
+          gatewayHost: "0.0.0.0",
+          gatewayDomain: "kepos.internal",
           route: "public",
           services: [{ id: "ssh", localPort: 2_222 }],
         },
@@ -29,6 +31,8 @@ test("desktop derives enabled roles from shared config and fixed state paths", (
       subscriber: {
         stateDir: "/Users/neil/.local/state/kepos-neo/subscriber",
         gatewayPort: 17_480,
+        gatewayHost: "0.0.0.0",
+        gatewayDomain: "kepos.internal",
         route: "public",
         bootstrap: [{ host: "bootstrap.example", port: 49_737 }],
         services: [{ id: "ssh", localPort: 2_222 }],
