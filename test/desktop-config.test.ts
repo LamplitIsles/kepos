@@ -44,3 +44,43 @@ test("desktop config writes desired state before applying it in memory", async (
     },
   });
 });
+
+test("desktop pairing appends allowlist through the fresh TOML config", async () => {
+  const { persistDesktopPublisherAllowlist } = await import(
+    "../apps/desktop/src/config.js"
+  );
+  const configPath = "/Users/neil/.config/kepos/config.toml";
+  const original = {
+    network: { bootstrap: [{ host: "bootstrap.example", port: 49_737 }] },
+    publisher: {
+      enabled: true,
+      displayName: "Neil",
+      allow: ["11".repeat(32)],
+      services: [],
+    },
+  };
+  let saved: unknown;
+
+  await persistDesktopPublisherAllowlist(
+    configPath,
+    ["11".repeat(32), "22".repeat(32)],
+    {
+      loadConfig: async (loadedPath) => {
+        assert.equal(loadedPath, configPath);
+        return original;
+      },
+      saveConfig: async (config, savedPath) => {
+        assert.equal(savedPath, configPath);
+        saved = config;
+      },
+    },
+  );
+
+  assert.deepEqual(saved, {
+    ...original,
+    publisher: {
+      ...original.publisher,
+      allow: ["11".repeat(32), "22".repeat(32)],
+    },
+  });
+});

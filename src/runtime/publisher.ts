@@ -17,9 +17,25 @@ import {
 } from "../mux/observability.js";
 import {
   createMuxPublisher,
+  type PairingDecision,
   type RunningMuxPublisher,
 } from "../mux/transport.js";
-import { loadPublisherState } from "../state/publisher.js";
+import {
+  PublisherPairing,
+  type PublisherPairingSnapshot,
+} from "../pairing/publisher.js";
+import type { PairingRequest } from "../pairing/protocol.js";
+import {
+  loadPublisherState,
+  setPublisherAllowlist,
+} from "../state/publisher.js";
+
+const maximumPairingCandidates = 3;
+
+type SchedulePairingExpiry = (
+  delayMs: number,
+  callback: () => void,
+) => () => void;
 
 export interface PublisherRuntimePolicy {
   displayName: string;
@@ -34,6 +50,8 @@ export interface StartPublisherOptions {
   log?: (line: string) => void;
   now?: () => number;
   observe?: Observe;
+  persistAllowlist?: (subscriberPublicKeys: string[]) => Promise<void>;
+  schedulePairingExpiry?: SchedulePairingExpiry;
 }
 
 export interface PublisherRuntimeStatus {
@@ -43,6 +61,7 @@ export interface PublisherRuntimeStatus {
   homeUrl: string;
   acceptedConnections: number;
   activeSubscribers: number;
+  pairing: PublisherPairingSnapshot;
 }
 
 export interface RunningPublisher {
@@ -50,6 +69,11 @@ export interface RunningPublisher {
   home: RunningHomeServer;
   acceptedConnections: () => number;
   activeSubscribers: () => number;
+  approvePairing: () => Promise<void>;
+  cancelPairing: () => void;
+  createPairingInvitation: () => { uri: string; expiresAt: number };
+  denyPairing: () => void;
+  pairingStatus: () => PublisherPairingSnapshot;
   status: () => PublisherRuntimeStatus;
   stop: () => Promise<void>;
 }
@@ -81,8 +105,35 @@ export async function startPublisher(
     ),
   ]);
   const allow = new Set(policy.allow);
+  const persistAllowlist =
+    options.persistAllowlist ??
+    (options.policy
+      ? async (): Promise<void> => {
+          throw new Error(
+            "Publisher policy persistence is not configured for pairing",
+          );
+        }
+      : async (subscriberPublicKeys: string[]): Promise<void> =>
+          setPublisherAllowlist({
+            stateDir: options.stateDir,
+            subscriberPublicKeys,
+          }));
+  const pairing = new PublisherPairing({
+    publisherKey,
+    displayName: policy.displayName,
+    now: options.now,
+    persistSubscriber: async (subscriberKey) => {
+      if (allow.has(subscriberKey)) return;
+      await persistAllowlist([...allow, subscriberKey]);
+    },
+  });
   const dht = createDht({ bootstrap: options.bootstrap, keyPair });
   const now = options.now ?? Date.now;
+  const observePairing = createObservationEmitter({
+    observe: options.observe,
+    role: "publisher",
+    now,
+  });
   const streams = new Set<DhtStream>();
   const muxes = new Map<DhtStream, RunningMuxPublisher>();
   const activeBySubscriberKey = new Map<
@@ -95,13 +146,72 @@ export async function startPublisher(
     }
   >();
   const replacedStreams = new Set<DhtStream>();
+  const pairingCandidates = new Set<DhtStream>();
+  let pendingCandidateAdmissions = 0;
+  let cancelPairingExpiry: (() => void) | undefined;
   let accepted = 0;
   let stopped = false;
+
+  function closePairingCandidates(): void {
+    for (const stream of pairingCandidates) muxes.get(stream)?.close();
+    pairingCandidates.clear();
+    pendingCandidateAdmissions = 0;
+  }
+
+  function closeOtherPairingCandidates(selected: DhtStream): void {
+    for (const stream of pairingCandidates) {
+      if (stream !== selected) muxes.get(stream)?.close();
+    }
+  }
+
+  function clearPairingExpiry(): void {
+    cancelPairingExpiry?.();
+    cancelPairingExpiry = undefined;
+  }
+
+  function reportPairingEnd(
+    event: "pairing.cancelled" | "pairing.denied",
+    status: PublisherPairingSnapshot,
+  ): void {
+    if (status.phase === "idle") return;
+    observePairing(event, {
+      ...(status.phase === "pending"
+        ? { remotePublicKey: status.subscriberKey }
+        : {}),
+    });
+  }
+
+  function armPairingExpiry(expiresAt: number): void {
+    clearPairingExpiry();
+    const schedule = options.schedulePairingExpiry ?? schedulePairingExpiry;
+    const expire = (): void => {
+      const status = pairing.snapshot();
+      if (status.phase !== "inviting" || status.expiresAt !== expiresAt) {
+        return;
+      }
+      const remainingMs = expiresAt - now();
+      if (remainingMs > 0) {
+        cancelPairingExpiry = schedule(remainingMs, expire);
+        return;
+      }
+      cancelPairingExpiry = undefined;
+      closePairingCandidates();
+      observePairing("pairing.invitation-expired", { expiresAt });
+    };
+    cancelPairingExpiry = schedule(Math.max(0, expiresAt - now()), expire);
+  }
 
   const server = dht.createServer(
     {
       firewall: (remotePublicKey) => {
-        const rejected = !allow.has(b4a.toString(remotePublicKey, "hex"));
+        const subscriberKey = b4a.toString(remotePublicKey, "hex");
+        const known = allow.has(subscriberKey);
+        const admitCandidate =
+          pairing.acceptsCandidates() &&
+          pairingCandidates.size + pendingCandidateAdmissions <
+            maximumPairingCandidates;
+        const rejected = !known && !admitCandidate;
+        if (!known && admitCandidate) pendingCandidateAdmissions++;
         if (rejected) {
           const observe = createObservationEmitter({
             observe: options.observe,
@@ -117,6 +227,10 @@ export async function startPublisher(
     },
     (stream) => {
       const subscriberKey = b4a.toString(stream.remotePublicKey, "hex");
+      const initiallyAuthorized = allow.has(subscriberKey);
+      if (!initiallyAuthorized && pendingCandidateAdmissions > 0) {
+        pendingCandidateAdmissions--;
+      }
       const outerId = createObservationId("outer");
       const observe = createObservationEmitter({
         observe: options.observe,
@@ -126,6 +240,7 @@ export async function startPublisher(
       });
       accepted++;
       streams.add(stream);
+      if (!initiallyAuthorized) pairingCandidates.add(stream);
       stream.setKeepAlive?.(10_000);
       observe("outer.accepted", {
         remotePublicKey: stream.remotePublicKey,
@@ -136,28 +251,62 @@ export async function startPublisher(
         transport: dhtStreamSnapshot(stream),
       });
       let mux: RunningMuxPublisher | undefined;
+      const activate = (): void => {
+        if (!mux || !streams.has(stream)) return;
+        pairingCandidates.delete(stream);
+        const current = activeBySubscriberKey.get(subscriberKey);
+        if (current?.stream === stream) return;
+        activeBySubscriberKey.set(subscriberKey, {
+          mux,
+          observe,
+          outerId,
+          stream,
+        });
+        if (!current) return;
+        current.observe("outer.replaced", {
+          remotePublicKey: subscriberKey,
+          replacementOuterId: outerId,
+        });
+        replacedStreams.add(current.stream);
+        current.mux.close();
+      };
       mux = createMuxPublisher(stream, {
+        authorized: initiallyAuthorized,
         outerId,
         now,
         observe: options.observe,
-        onControlReady: () => {
-          if (!mux || !streams.has(stream)) return;
-          const current = activeBySubscriberKey.get(subscriberKey);
-          if (current?.stream === stream) return;
-          activeBySubscriberKey.set(subscriberKey, {
-            mux,
-            observe,
-            outerId,
-            stream,
-          });
-          if (!current) return;
-          current.observe("outer.replaced", {
-            remotePublicKey: subscriberKey,
-            replacementOuterId: outerId,
-          });
-          replacedStreams.add(current.stream);
-          current.mux.close();
-        },
+        onControlReady: activate,
+        ...(initiallyAuthorized
+          ? {}
+          : {
+              onPairingRequest: (
+                request: PairingRequest,
+                decision: PairingDecision,
+              ) => {
+                const received = pairing.receive({
+                  subscriberKey,
+                  request,
+                  approve: () => {
+                    allow.add(subscriberKey);
+                    activate();
+                    decision.approve();
+                  },
+                  deny: decision.deny,
+                  fail: decision.fail,
+                });
+                if (received) {
+                  clearPairingExpiry();
+                  closeOtherPairingCandidates(stream);
+                  observe("pairing.requested", {
+                    remotePublicKey: subscriberKey,
+                  });
+                } else {
+                  observe("pairing.rejected", {
+                    remotePublicKey: subscriberKey,
+                  });
+                }
+              },
+            }),
         transportSnapshot: () => dhtStreamSnapshot(stream),
         connect: async (serviceId) => {
           if (activeBySubscriberKey.get(subscriberKey)?.stream !== stream) {
@@ -171,17 +320,13 @@ export async function startPublisher(
         },
       });
       muxes.set(stream, mux);
-      if (!activeBySubscriberKey.has(subscriberKey)) {
-        activeBySubscriberKey.set(subscriberKey, {
-          mux,
-          observe,
-          outerId,
-          stream,
-        });
+      if (initiallyAuthorized && !activeBySubscriberKey.has(subscriberKey)) {
+        activate();
       }
       stream.once("close", () => {
         streams.delete(stream);
         muxes.delete(stream);
+        pairingCandidates.delete(stream);
         const current = activeBySubscriberKey.get(subscriberKey);
         if (current?.stream === stream) {
           activeBySubscriberKey.delete(subscriberKey);
@@ -211,6 +356,55 @@ export async function startPublisher(
     home,
     acceptedConnections: () => accepted,
     activeSubscribers: () => activeBySubscriberKey.size,
+    approvePairing: async () => {
+      const status = pairing.snapshot();
+      try {
+        await pairing.approve();
+        observePairing("pairing.approved", {
+          ...(status.phase === "pending"
+            ? { remotePublicKey: status.subscriberKey }
+            : {}),
+        });
+      } catch (error) {
+        observePairing("pairing.approval-error", {
+          ...(status.phase === "pending"
+            ? { remotePublicKey: status.subscriberKey }
+            : {}),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    },
+    cancelPairing: () => {
+      clearPairingExpiry();
+      const status = pairing.snapshot();
+      pairing.cancel();
+      reportPairingEnd("pairing.cancelled", status);
+      closePairingCandidates();
+    },
+    createPairingInvitation: () => {
+      if (pairing.snapshot().phase === "pending") {
+        throw new Error("A pairing request is waiting for approval");
+      }
+      const status = pairing.snapshot();
+      pairing.cancel();
+      reportPairingEnd("pairing.cancelled", status);
+      closePairingCandidates();
+      const invitation = pairing.createInvitation();
+      armPairingExpiry(invitation.expiresAt);
+      observePairing("pairing.invitation-created", {
+        expiresAt: invitation.expiresAt,
+      });
+      return invitation;
+    },
+    denyPairing: () => {
+      clearPairingExpiry();
+      const status = pairing.snapshot();
+      pairing.deny();
+      reportPairingEnd("pairing.denied", status);
+      closePairingCandidates();
+    },
+    pairingStatus: () => pairing.snapshot(),
     status: () => ({
       role: "publisher",
       state: stopped ? "stopped" : "running",
@@ -218,10 +412,13 @@ export async function startPublisher(
       homeUrl: home.url,
       acceptedConnections: accepted,
       activeSubscribers: activeBySubscriberKey.size,
+      pairing: pairing.snapshot(),
     }),
     async stop(): Promise<void> {
       if (stopped) return;
       stopped = true;
+      clearPairingExpiry();
+      await pairing.waitForApproval().catch(() => undefined);
       for (const mux of muxes.values()) mux.close();
       await Promise.allSettled([
         server.close(),
@@ -230,6 +427,14 @@ export async function startPublisher(
       ]);
     },
   };
+}
+
+function schedulePairingExpiry(
+  delayMs: number,
+  callback: () => void,
+): () => void {
+  const timeout = setTimeout(callback, delayMs);
+  return () => clearTimeout(timeout);
 }
 
 async function connectLoopback(port: number): Promise<Socket> {

@@ -39,6 +39,20 @@ class KeposUiModelTest {
   }
 
   @Test
+  fun pairingProgressDistinguishesNetworkSetupFromHumanApproval() {
+    assertEquals("Sending pairing request", connectionTitle("pairing-connecting"))
+    assertEquals(
+      "Kepos is finding and authenticating the publisher from the invitation.",
+      connectionDetail("pairing-connecting"),
+    )
+    assertEquals("Waiting for approval", connectionTitle("awaiting-approval"))
+    assertEquals(
+      "The request reached your publisher. Choose Allow on that device.",
+      connectionDetail("awaiting-approval"),
+    )
+  }
+
+  @Test
   fun serviceHomeUsesPublisherNameAndPreservesRegistryOrder() {
     val model = KeposUiModel.from(connectedSnapshot())
 

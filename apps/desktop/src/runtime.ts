@@ -1,4 +1,5 @@
 import type { HomeRegistry } from "../../../src/home/registry.js";
+import { renderSVG } from "uqr";
 import { derivePublisherHomeKey } from "../../../src/keys.js";
 import { readHomeRegistry } from "../../../src/runtime/registry-client.js";
 import { createServicePresentations } from "../../../src/runtime/service-handlers.js";
@@ -26,9 +27,11 @@ import type {
   DesktopSnapshot,
   DesktopSubscriberRole,
 } from "./protocol.js";
+import { persistDesktopPublisherAllowlist } from "./config.js";
 
 export interface StartDesktopPublisherOptions {
   stateDir: string;
+  configPath?: string;
   lock?: RuntimeLock;
   bootstrap?: StartPublisherOptions["bootstrap"];
   policy?: PublisherRuntimePolicy;
@@ -63,9 +66,15 @@ export interface DesktopRuntimeDependencies {
   startPublisher(options: StartPublisherOptions): Promise<RunningPublisher>;
   startSubscriber(options: StartSubscriberOptions): Promise<RunningSubscriber>;
   readRegistry(gatewayPort: number): Promise<HomeRegistry>;
+  renderPairingQr(uri: string): Promise<string>;
+  persistPublisherAllowlist(configPath: string, allow: string[]): Promise<void>;
 }
 
 export interface RunningDesktopRuntime {
+  approvePairing(): Promise<void>;
+  cancelPairing(): Promise<void>;
+  createPairingInvitation(): Promise<void>;
+  denyPairing(): Promise<void>;
   poll(): Promise<void>;
   reconfigure(configuration: DesktopRuntimeConfiguration): Promise<void>;
   stop(): Promise<void>;
@@ -82,6 +91,14 @@ const defaultDependencies: DesktopRuntimeDependencies = {
   startPublisher,
   startSubscriber,
   readRegistry: readHomeRegistry,
+  renderPairingQr: async (uri) =>
+    renderSVG(uri, {
+      ecc: "M",
+      border: 1,
+      blackColor: "#0d1209",
+      whiteColor: "#f0f1e7",
+    }),
+  persistPublisherAllowlist: persistDesktopPublisherAllowlist,
 };
 
 export async function startDesktopRuntime(
@@ -107,6 +124,10 @@ export async function startDesktopRuntime(
   let pollTask: Promise<void> | undefined;
   let reconfigureTail = Promise.resolve();
   let stopTask: Promise<void> | undefined;
+  let pairingInvitation:
+    | { expiresAt: number; qrSvg: string }
+    | undefined;
+  let pairingError: string | undefined;
 
   const snapshot = (): DesktopSnapshot => ({
     type: "snapshot",
@@ -136,6 +157,7 @@ export async function startDesktopRuntime(
           })),
         };
       const publisherKey = derivePublisherHomeKey(config.seed);
+      const configPath = publisherOptions.configPath;
       publisherRole = {
         phase: "starting",
         displayName: policy.displayName,
@@ -152,7 +174,16 @@ export async function startDesktopRuntime(
       runningPublisher = await dependencies.startPublisher({
         stateDir: publisherOptions.stateDir,
         bootstrap: publisherOptions.bootstrap,
-        policy,
+        ...(publisherOptions.policy ? { policy } : {}),
+        ...(configPath
+          ? {
+              persistAllowlist: (allow) =>
+                dependencies.persistPublisherAllowlist(
+                  configPath,
+                  allow,
+                ),
+            }
+          : {}),
       });
       updatePublisherRole();
       return { ok: true };
@@ -202,7 +233,13 @@ export async function startDesktopRuntime(
   function updatePublisherRole(): void {
     if (!runningPublisher || !publisherRole) return;
     const status = runningPublisher.status();
-    const { error: _error, ...current } = publisherRole;
+    const { error: _error, pairing: _pairing, ...current } = publisherRole;
+    const pairingStatus =
+      status.pairing.phase === "inviting" && pairingInvitation
+        ? { ...status.pairing, ...pairingInvitation }
+        : status.pairing.phase === "pending" && pairingError
+          ? { ...status.pairing, error: pairingError }
+        : status.pairing;
     publisherRole = {
       ...current,
       phase: status.state === "stopped" ? "stopped" : "running",
@@ -210,7 +247,10 @@ export async function startDesktopRuntime(
       keyFingerprint: status.publisherKey.slice(0, 16),
       activeSubscribers: status.activeSubscribers,
       acceptedConnections: status.acceptedConnections,
+      ...(pairingStatus.phase === "idle" ? {} : { pairing: pairingStatus }),
     };
+    if (status.pairing.phase !== "inviting") pairingInvitation = undefined;
+    if (status.pairing.phase !== "pending") pairingError = undefined;
   }
 
   async function updateSubscriberRole(): Promise<void> {
@@ -399,6 +439,52 @@ export async function startDesktopRuntime(
   }
 
   return {
+    async approvePairing(): Promise<void> {
+      if (!runningPublisher) throw new Error("Publisher is not running");
+      pairingError = undefined;
+      try {
+        await runningPublisher.approvePairing();
+      } catch (error) {
+        pairingError = error instanceof Error ? error.message : String(error);
+        updatePublisherRole();
+        publish();
+        throw error;
+      }
+      updatePublisherRole();
+      publish();
+    },
+    async cancelPairing(): Promise<void> {
+      if (!runningPublisher) throw new Error("Publisher is not running");
+      runningPublisher.cancelPairing();
+      pairingInvitation = undefined;
+      pairingError = undefined;
+      updatePublisherRole();
+      publish();
+    },
+    async createPairingInvitation(): Promise<void> {
+      if (!runningPublisher) throw new Error("Publisher is not running");
+      pairingError = undefined;
+      const invitation = runningPublisher.createPairingInvitation();
+      try {
+        pairingInvitation = {
+          expiresAt: invitation.expiresAt,
+          qrSvg: await dependencies.renderPairingQr(invitation.uri),
+        };
+      } catch (error) {
+        runningPublisher.cancelPairing();
+        throw error;
+      }
+      updatePublisherRole();
+      publish();
+    },
+    async denyPairing(): Promise<void> {
+      if (!runningPublisher) throw new Error("Publisher is not running");
+      runningPublisher.denyPairing();
+      pairingInvitation = undefined;
+      pairingError = undefined;
+      updatePublisherRole();
+      publish();
+    },
     poll(): Promise<void> {
       if (pollTask !== undefined) return pollTask;
       const task = runPoll().finally(() => {

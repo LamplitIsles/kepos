@@ -1,5 +1,6 @@
 import {
   defaultKeposConfigPath,
+  loadKeposConfig,
   saveKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
@@ -25,6 +26,9 @@ export async function applyDesktopConfig(
     homeDirectory: context.homeDirectory,
     environment: context.environment,
     config,
+    configPath:
+      context.configPath ??
+      defaultKeposConfigPath(context.environment, context.homeDirectory),
   });
   const configPath =
     context.configPath ??
@@ -32,4 +36,25 @@ export async function applyDesktopConfig(
   await (context.saveConfig ?? saveKeposConfig)(config, configPath);
   await context.reconfigure(options);
   return options;
+}
+
+export async function persistDesktopPublisherAllowlist(
+  configPath: string,
+  allow: string[],
+  dependencies: {
+    loadConfig?: typeof loadKeposConfig;
+    saveConfig?: typeof saveKeposConfig;
+  } = {},
+): Promise<void> {
+  const config = await (dependencies.loadConfig ?? loadKeposConfig)(configPath);
+  if (!config?.publisher?.enabled) {
+    throw new Error("Desktop publisher config is not enabled");
+  }
+  await (dependencies.saveConfig ?? saveKeposConfig)(
+    {
+      ...config,
+      publisher: { ...config.publisher, allow },
+    },
+    configPath,
+  );
 }

@@ -190,9 +190,19 @@ export function renderDesktopUi(): string {
       text-transform: uppercase;
     }
     .surface-head strong { color: var(--cream); font-weight: 600; }
-    .publisher-summary { display: flex; align-items: center; gap: 12px; }
+    .publisher-primary-actions { display: flex; align-items: center; gap: 8px; }
+    .publisher-meta {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 12px;
+      min-height: 38px;
+      border-bottom: 1px solid var(--soft-line);
+    }
+    .publisher-meta [data-role="subscriber-count"] { flex: none; color: var(--muted); font-size: 9px; }
     .publisher-key {
-      max-width: 280px;
+      min-width: 0;
+      flex: 1;
       overflow: hidden;
       color: var(--muted);
       font-size: 9px;
@@ -202,6 +212,30 @@ export function renderDesktopUi(): string {
       white-space: nowrap;
     }
     .key-copy { min-width: auto; padding: 6px 8px; }
+    .pairing {
+      display: grid;
+      grid-template-columns: 154px minmax(0, 1fr);
+      gap: 22px;
+      align-items: center;
+      padding: 20px;
+      border-bottom: 1px solid var(--soft-line);
+      background: rgba(183, 238, 69, .035);
+    }
+    .pairing.pending { grid-template-columns: minmax(0, 1fr) auto; }
+    .pairing-qr {
+      display: grid;
+      width: 154px;
+      height: 154px;
+      place-items: center;
+      padding: 8px;
+      background: var(--cream);
+    }
+    .pairing-qr svg { width: 100%; height: 100%; }
+    .pairing-title { margin: 0 0 8px; font-size: 14px; }
+    .pairing-detail { margin: 0 0 16px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+    .pairing-error { color: var(--danger); }
+    .pairing-actions { display: flex; gap: 8px; }
+    .action.danger { border-color: rgba(255, 159, 130, .35); color: var(--danger); }
     .service {
       display: grid;
       grid-template-columns: 38px minmax(0, 1fr) auto;
@@ -356,8 +390,10 @@ export function renderDesktopUi(): string {
         <section class="surface" data-role="publisher-surface" hidden>
           <div class="surface-head">
             <strong>Available remotely</strong>
-            <div class="publisher-summary"><span data-role="subscriber-count">0 connected</span><span class="publisher-key" data-role="publisher-key">Publisher key pending</span><button class="action key-copy" type="button" data-action="copy-publisher-key" disabled>Copy key</button></div>
+            <div class="publisher-primary-actions"><button class="action key-copy" type="button" data-action="create-pairing">Add device</button></div>
           </div>
+          <div class="publisher-meta"><span data-role="subscriber-count">0 connected</span><span class="publisher-key" data-role="publisher-key">Publisher key pending</span><button class="action key-copy" type="button" data-action="copy-publisher-key" disabled>Copy key</button></div>
+          <div class="pairing" data-role="pairing" hidden></div>
           <div class="services" data-role="shared-services" aria-live="polite"><div class="empty">Starting local publisher…</div></div>
         </section>
       </div>
@@ -398,6 +434,8 @@ export function renderDesktopUi(): string {
       const publisherKeyNode = document.querySelector('[data-role="publisher-key"]');
       const subscriberCountNode = document.querySelector('[data-role="subscriber-count"]');
       const publisherKeyButton = document.querySelector('[data-action="copy-publisher-key"]');
+      const createPairingButton = document.querySelector('[data-action="create-pairing"]');
+      const pairingNode = document.querySelector('[data-role="pairing"]');
       const toastNode = document.querySelector('[data-role="toast"]');
 
       const escapeHtml = (value) => String(value)
@@ -439,6 +477,36 @@ export function renderDesktopUi(): string {
           '<div class="service-icon">' + icons.port + '</div>' +
           '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2>' +
           '<p class="service-address">' + escapeHtml(address) + '</p></div></article>';
+      };
+
+      const renderPairing = (pairing) => {
+        if (!pairing || pairing.phase === 'idle') {
+          pairingNode.hidden = true;
+          pairingNode.innerHTML = '';
+          createPairingButton.hidden = false;
+          return;
+        }
+        createPairingButton.hidden = true;
+        pairingNode.hidden = false;
+        pairingNode.classList.toggle('pending', pairing.phase === 'pending');
+        if (pairing.phase === 'pending') {
+          pairingNode.innerHTML = '<div><h2 class="pairing-title">Approve this device?</h2>' +
+            '<p class="pairing-detail">' + escapeHtml(pairing.label) + ' · ' + escapeHtml(pairing.platform) + '<br>' +
+            'Key ' + escapeHtml(pairing.keyFingerprint) +
+            (pairing.error ? '<br><span class="pairing-error">' + escapeHtml(pairing.error) + '</span>' : '') + '</p></div>' +
+            '<div class="pairing-actions"><button class="action danger" type="button" data-action="deny-pairing">Deny</button>' +
+            '<button class="action" type="button" data-action="approve-pairing">Allow</button></div>';
+          return;
+        }
+        const seconds = Math.max(0, Math.ceil((pairing.expiresAt - Date.now()) / 1000));
+        const qr = pairing.qrSvg || '';
+        pairingNode.innerHTML = '<div class="pairing-qr">' + qr + '</div><div>' +
+          '<h2 class="pairing-title">Scan with Kepos</h2>' +
+          '<p class="pairing-detail">' + (pairing.expired ? 'Invitation expired.' : 'Expires in ' + seconds + ' seconds.') +
+          ' Access still needs your approval.</p><div class="pairing-actions">' +
+          '<button class="action danger" type="button" data-action="cancel-pairing">Cancel</button>' +
+          (pairing.expired ? '<button class="action" type="button" data-action="create-pairing">Generate new</button>' : '') +
+          '</div></div>';
       };
 
       const selectRole = (role) => {
@@ -513,6 +581,8 @@ export function renderDesktopUi(): string {
           subscriberCountNode.textContent = publisher.activeSubscribers + ' connected';
           publisherKeyNode.textContent = publisher.publisherKey || 'Publisher key pending';
           publisherKeyButton.disabled = !publisher.publisherKey;
+          createPairingButton.disabled = publisher.phase !== 'running';
+          renderPairing(publisher.pairing);
           sharedServicesNode.innerHTML = publisher.error
             ? '<div class="error">' + escapeHtml(publisher.error) + '</div>'
             : publisher.services.length
@@ -556,6 +626,10 @@ export function renderDesktopUi(): string {
             if (snapshot && snapshot.publisher && snapshot.publisher.publisherKey) await copy(snapshot.publisher.publisherKey);
             return;
           }
+          if (button.dataset.action === 'create-pairing') { send({ type: "createPairingInvitation" }); return; }
+          if (button.dataset.action === 'cancel-pairing') { send({ type: "cancelPairing" }); return; }
+          if (button.dataset.action === 'approve-pairing') { send({ type: "approvePairing" }); return; }
+          if (button.dataset.action === 'deny-pairing') { send({ type: "denyPairing" }); return; }
           const service = snapshot && snapshot.subscriber && snapshot.subscriber.services.find((item) => item.id === button.dataset.service);
           if (!service || !service.available) return;
           if (button.dataset.action === 'copy' && service.copyText) { await copy(service.copyText); return; }

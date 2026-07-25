@@ -11,7 +11,8 @@ class RequestTracker {
       method == "ping" ||
         method == "status" ||
         method == "stop" ||
-        method == "configure"
+        method == "configure" ||
+        method == "pair"
     ) {
       "unsupported control request method"
     }

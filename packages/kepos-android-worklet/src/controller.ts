@@ -11,6 +11,11 @@ export interface WorkletControllerOptions {
   write(frame: Uint8Array): void;
   stopEcho(): Promise<void>;
   configurePublisher?(publisherKey: string): Promise<unknown>;
+  pairPublisher?(
+    invitation: string,
+    deviceLabel: string,
+    platform: string,
+  ): Promise<unknown>;
   status?(): Record<string, unknown>;
 }
 
@@ -65,7 +70,54 @@ export class WorkletController {
       await this.configure(request);
       return;
     }
+    if (request.method === "pair") {
+      await this.pair(request);
+      return;
+    }
     await this.stop(request);
+  }
+
+  private async pair(request: RequestEnvelope): Promise<void> {
+    try {
+      const params = request.params;
+      if (typeof params !== "object" || params === null || Array.isArray(params)) {
+        throw new Error("pairing parameters are required");
+      }
+      const fields = params as Record<string, unknown>;
+      if (
+        Object.keys(fields).length !== 3 ||
+        typeof fields.invitation !== "string" ||
+        fields.invitation.length > 2_048 ||
+        !fields.invitation.startsWith("kepos://pair?") ||
+        typeof fields.deviceLabel !== "string" ||
+        fields.deviceLabel.length === 0 ||
+        b4a.byteLength(fields.deviceLabel, "utf8") > 128 ||
+        typeof fields.platform !== "string" ||
+        !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(fields.platform)
+      ) {
+        throw new Error("pairing parameters are invalid");
+      }
+      if (!this.options.pairPublisher) {
+        throw new Error("publisher pairing is unavailable");
+      }
+      const result = await this.options.pairPublisher(
+        fields.invitation,
+        fields.deviceLabel,
+        fields.platform,
+      );
+      this.emitState();
+      this.respond(request, result);
+    } catch (error) {
+      this.write({
+        version: 1,
+        kind: "error",
+        id: request.id,
+        error: {
+          code: "invalid_pairing",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
   }
 
   private async configure(request: RequestEnvelope): Promise<void> {
@@ -147,3 +199,4 @@ import type {
   HostEnvelope,
   RequestEnvelope,
 } from "@tta-lab/bare-host-protocol/messages";
+import b4a from "b4a";

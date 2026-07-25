@@ -76,6 +76,28 @@ test("desktop loads the shared config when no role flags are given", async () =>
   });
 });
 
+test("desktop retains the TOML path that owns publisher allowlist changes", async () => {
+  const { loadDesktopOptions } = await import(
+    "../apps/desktop/src/options.js"
+  );
+  const options = await loadDesktopOptions(
+    ["--config", "/config/kepos.toml"],
+    {
+      homeDirectory: "/Users/neil",
+      loadConfig: async () => ({
+        publisher: {
+          enabled: true,
+          displayName: "Neil",
+          allow: [],
+          services: [],
+        },
+      }),
+    },
+  );
+
+  assert.equal(options.publisher?.configPath, "/config/kepos.toml");
+});
+
 test("desktop launch options accept subscriber-only mode", () => {
   assert.deepEqual(
     parseDesktopOptions([

@@ -298,6 +298,10 @@ function createHarness(options: HarnessOptions = {}) {
     | undefined;
 
   const runtime: RunningDesktopRuntime = {
+    approvePairing: async () => undefined,
+    cancelPairing: async () => undefined,
+    createPairingInvitation: async () => undefined,
+    denyPairing: async () => undefined,
     poll: async () => {
       events.push("runtime:poll");
     },

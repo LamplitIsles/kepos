@@ -105,6 +105,7 @@ test("observation sanitization removes secrets and truncates peer keys", () => {
   assert.deepEqual(
     sanitizeObservation({
       seed: "seed",
+      pairingToken: "one-time-token",
       nested: {
         secretKey: "secret",
         publicKey: "a".repeat(64),

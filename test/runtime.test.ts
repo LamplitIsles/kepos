@@ -100,6 +100,7 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
       homeUrl: publisher.home.url,
       acceptedConnections: 0,
       activeSubscribers: 0,
+      pairing: { phase: "idle" },
     } satisfies PublisherRuntimeStatus);
 
     subscriber = await startSubscriber({

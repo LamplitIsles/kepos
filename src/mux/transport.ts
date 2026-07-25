@@ -5,6 +5,12 @@ import { Duplex } from "node:stream";
 import ProtomuxModule from "protomux";
 
 import {
+  pairingRequestEncoding,
+  pairingResponseEncoding,
+  type PairingRequest,
+  type PairingResponse,
+} from "../pairing/protocol.js";
+import {
   createObservationId,
   createObservationEmitter,
   type EmitObservation,
@@ -19,6 +25,7 @@ const compact = compactModule as CompactEncoding;
 
 const protocol = "kepos/tcp/1";
 const controlProtocol = "kepos/control/1";
+const pairingProtocol = "kepos/pair/1";
 const defaultHeartbeatIntervalMs = 15_000;
 const defaultHeartbeatResponseTimeoutMs = 10_000;
 const defaultMissedPongsBeforeTimeout = 2;
@@ -101,18 +108,27 @@ export interface HeartbeatOptions {
 }
 
 export interface MuxPublisherOptions {
+  authorized?: boolean;
   connect: (serviceId: string) => Promise<Duplex>;
   heartbeat?: false;
   now?: () => number;
   onControlReady?: () => void;
+  onPairingRequest?: (
+    request: PairingRequest,
+    decision: PairingDecision,
+  ) => void | Promise<void>;
   observe?: Observe;
   outerId?: string;
+  schedulePairingRequestDeadline?: ScheduleHeartbeat;
   transportSnapshot?: () => unknown;
 }
 
 export interface MuxSubscriberOptions {
+  authorized?: boolean;
   heartbeat?: false | HeartbeatOptions;
   now?: () => number;
+  onControlClosed?: () => void;
+  onControlReady?: () => void;
   onHeartbeatTimeout?: (fields: {
     lastPongElapsedMs: number;
     missedPongs: number;
@@ -129,6 +145,36 @@ export interface RunningMuxPublisher {
 export interface RunningMuxSubscriber {
   close: () => void;
   open: (serviceId: string) => Promise<Duplex>;
+  pair: (
+    request: PairingRequest,
+    options?: { onPending?: () => void },
+  ) => Promise<void>;
+}
+
+export interface PairingDecision {
+  approve: () => void;
+  deny: () => void;
+  fail: (
+    code: Extract<PairingResponse, { status: "error" }>["code"],
+  ) => void;
+}
+
+export type TerminalPairingOutcome =
+  | "denied"
+  | Extract<PairingResponse, { status: "error" }>["code"];
+
+export class TerminalPairingError extends Error {
+  readonly outcome: TerminalPairingOutcome;
+
+  constructor(outcome: TerminalPairingOutcome) {
+    super(
+      outcome === "denied"
+        ? "Pairing request was denied"
+        : `Pairing failed: ${outcome}`,
+    );
+    this.name = "TerminalPairingError";
+    this.outcome = outcome;
+  }
 }
 
 interface RunningControlChannel {
@@ -181,8 +227,14 @@ function createSubscriberControlChannel(
     protocol: controlProtocol,
     id: crypto.randomBytes(16),
     handshake: compact.string,
-    onopen: () => arm(intervalMs, sendPing),
-    onclose: stop,
+    onopen: () => {
+      options.onControlReady?.();
+      arm(intervalMs, sendPing);
+    },
+    onclose: () => {
+      stop();
+      options.onControlClosed?.();
+    },
   });
   if (!channel) return undefined;
 
@@ -548,10 +600,23 @@ export function createMuxSubscriber(
   const mux = new Protomux(outer);
   const now = options.now ?? Date.now;
   const outerId = options.outerId ?? createObservationId("outer");
-  const control = createSubscriberControlChannel(mux, outer, options, now);
+  let authorized = options.authorized ?? true;
+  let control = authorized
+    ? createSubscriberControlChannel(mux, outer, options, now)
+    : undefined;
+  let pairingChannel: MuxChannel | undefined;
+
+  const authorize = (): void => {
+    if (authorized) return;
+    authorized = true;
+    control = createSubscriberControlChannel(mux, outer, options, now);
+  };
 
   return {
     async open(serviceId: string): Promise<Duplex> {
+      if (!authorized) {
+        throw new Error("Subscriber pairing is not approved");
+      }
       const id = crypto.randomBytes(16);
       const emit = createObservationEmitter({
         observe: options.observe,
@@ -587,22 +652,79 @@ export function createMuxSubscriber(
       await tunnel.stream.ready;
       return tunnel.stream;
     },
+    pair(
+      request: PairingRequest,
+      pairingOptions: { onPending?: () => void } = {},
+    ): Promise<void> {
+      if (authorized) {
+        throw new Error("Subscriber is already approved");
+      }
+      if (pairingChannel) {
+        throw new Error("Subscriber pairing is already in progress");
+      }
+      return new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const channel = mux.createChannel({
+          protocol: pairingProtocol,
+          id: crypto.randomBytes(16),
+          handshake: compact.string,
+          onopen: () => {
+            requestMessage.send(request);
+          },
+          onclose: () => {
+            pairingChannel = undefined;
+            if (settled) return;
+            settled = true;
+            reject(new Error("Pairing channel closed before approval"));
+          },
+        });
+        if (!channel) {
+          reject(new Error("Pairing channel could not be created"));
+          return;
+        }
+        const requestMessage = channel.addMessage({
+          encoding: pairingRequestEncoding,
+          onmessage: () => undefined,
+        });
+        channel.addMessage({
+          encoding: pairingResponseEncoding,
+          onmessage: (response) => {
+            if (settled) return;
+            if (response.status === "pending") {
+              pairingOptions.onPending?.();
+              return;
+            }
+            settled = true;
+            if (response.status === "approved") {
+              authorize();
+              resolve();
+              return;
+            }
+            reject(
+              new TerminalPairingError(
+                response.status === "denied" ? "denied" : response.code,
+              ),
+            );
+          },
+        });
+        pairingChannel = channel;
+        channel.open("");
+      });
+    },
     close(): void {
+      pairingChannel?.close();
       control?.close();
       outer.destroy();
     },
   };
 }
 
-export function createMuxPublisher(
-  outer: OuterStream,
+function pairPublisherServiceProtocol(
+  mux: MuxInstance,
   options: MuxPublisherOptions,
-): RunningMuxPublisher {
-  const mux = new Protomux(outer);
-  const now = options.now ?? Date.now;
-  const outerId = options.outerId ?? createObservationId("outer");
-  const controlChannels = pairPublisherControlChannel(mux, options);
-
+  now: () => number,
+  outerId: string,
+): void {
   mux.pair({ protocol }, (id) => {
     let serviceId: string | undefined;
     const emitBase = createObservationEmitter({
@@ -650,11 +772,115 @@ export function createMuxPublisher(
     );
     tunnel.channel.open("");
   });
+}
+
+export function createMuxPublisher(
+  outer: OuterStream,
+  options: MuxPublisherOptions,
+): RunningMuxPublisher {
+  const mux = new Protomux(outer);
+  const now = options.now ?? Date.now;
+  const outerId = options.outerId ?? createObservationId("outer");
+  let authorized = false;
+  let pairingChannel: MuxChannel | undefined;
+  let pairingOpened = false;
+  const controlChannels = new Set<MuxChannel>();
+
+  const installAuthorizedProtocols = (): void => {
+    if (authorized) return;
+    authorized = true;
+    for (const channel of pairPublisherControlChannel(mux, options)) {
+      controlChannels.add(channel);
+    }
+    pairPublisherServiceProtocol(mux, options, now, outerId);
+  };
+
+  if (options.authorized ?? true) installAuthorizedProtocols();
+
+  if (options.onPairingRequest) {
+    mux.pair({ protocol: pairingProtocol }, (id) => {
+      if (authorized || pairingOpened) {
+        outer.destroy(new Error("Pairing candidate opened an invalid channel"));
+        return;
+      }
+      pairingOpened = true;
+      let received = false;
+      let decided = false;
+      let cancelDeadline: (() => void) | undefined;
+      const channel = mux.createChannel({
+        protocol: pairingProtocol,
+        id,
+        handshake: compact.string,
+        onopen: () => {
+          cancelDeadline = (
+            options.schedulePairingRequestDeadline ?? scheduleHeartbeat
+          )(5_000, () => {
+            outer.destroy(new Error("Pairing request deadline exceeded"));
+          });
+        },
+        onclose: () => {
+          cancelDeadline?.();
+          cancelDeadline = undefined;
+          pairingChannel = undefined;
+        },
+      });
+      if (!channel) {
+        outer.destroy(new Error("Pairing channel could not be created"));
+        return;
+      }
+      let responseMessage: MuxMessage<PairingResponse>;
+      channel.addMessage({
+        encoding: pairingRequestEncoding,
+        onmessage: (request) => {
+          if (received) {
+            outer.destroy(new Error("Pairing request was already submitted"));
+            return;
+          }
+          received = true;
+          cancelDeadline?.();
+          cancelDeadline = undefined;
+          responseMessage.send({ status: "pending" });
+          const decision: PairingDecision = {
+            approve(): void {
+              if (decided) return;
+              decided = true;
+              installAuthorizedProtocols();
+              responseMessage.send({ status: "approved" });
+              queueMicrotask(() => channel.close());
+            },
+            deny(): void {
+              if (decided) return;
+              decided = true;
+              responseMessage.send({ status: "denied" });
+              queueMicrotask(() => outer.destroy());
+            },
+            fail(code): void {
+              if (decided) return;
+              decided = true;
+              responseMessage.send({ status: "error", code });
+              queueMicrotask(() => outer.destroy());
+            },
+          };
+          Promise.resolve(options.onPairingRequest?.(request, decision)).catch(
+            () => decision.fail("invalid-request"),
+          );
+        },
+      });
+      responseMessage = channel.addMessage({
+        encoding: pairingResponseEncoding,
+        onmessage: () => undefined,
+      });
+      pairingChannel = channel;
+      channel.open("");
+    });
+  }
 
   return {
     close(): void {
       mux.unpair({ protocol });
       mux.unpair({ protocol: controlProtocol });
+      mux.unpair({ protocol: pairingProtocol });
+      pairingChannel?.close();
       for (const channel of controlChannels) channel.close();
       controlChannels.clear();
       outer.destroy();

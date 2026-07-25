@@ -54,8 +54,8 @@ export function defaultKeposConfigPath(
 
 export async function loadKeposConfig(
   configPath?: string,
-  environment: NodeJS.ProcessEnv = process.env,
-  homeDirectory = os.homedir(),
+  environment?: NodeJS.ProcessEnv,
+  homeDirectory?: string,
 ): Promise<KeposConfig | undefined> {
   const source = await readKeposConfigSource(
     configPath,
@@ -67,8 +67,8 @@ export async function loadKeposConfig(
 
 export async function loadKeposBootstrap(
   configPath?: string,
-  environment: NodeJS.ProcessEnv = process.env,
-  homeDirectory = os.homedir(),
+  environment?: NodeJS.ProcessEnv,
+  homeDirectory?: string,
 ): Promise<DhtAddress[] | undefined> {
   const source = await readKeposConfigSource(
     configPath,
@@ -84,8 +84,8 @@ export async function loadKeposBootstrap(
 
 async function readKeposConfigSource(
   configPath: string | undefined,
-  environment: NodeJS.ProcessEnv,
-  homeDirectory: string,
+  environment: NodeJS.ProcessEnv | undefined,
+  homeDirectory: string | undefined,
 ): Promise<string | undefined> {
   const resolvedPath =
     configPath ?? defaultKeposConfigPath(environment, homeDirectory);

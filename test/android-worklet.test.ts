@@ -186,6 +186,63 @@ test("Android Worklet controller configures one publisher without stopping", asy
   );
 });
 
+test("Android Worklet controller forwards one pairing invitation", async () => {
+  const output: HostEnvelope[] = [];
+  const decoder = new FrameDecoder();
+  let received: unknown;
+  const controller = new WorkletController({
+    runtimeId: "runtime-1",
+    echoUrl: "http://127.0.0.1:17482/",
+    write(frame) {
+      output.push(...decoder.push(frame));
+    },
+    async stopEcho() {},
+    async pairPublisher(invitation, deviceLabel, platform) {
+      received = { invitation, deviceLabel, platform };
+      return { connection: "connected" };
+    },
+  });
+  controller.start();
+
+  const textEncoder = globalThis.TextEncoder;
+  Object.defineProperty(globalThis, "TextEncoder", {
+    configurable: true,
+    value: undefined,
+  });
+  try {
+    await controller.receive(
+      encodeFrame({
+        version: 1,
+        kind: "request",
+        id: 5,
+        method: "pair",
+        params: {
+          invitation: "kepos://pair?v=1&token=one-time",
+          deviceLabel: "Neil's Pixel",
+          platform: "android",
+        },
+      }),
+    );
+  } finally {
+    Object.defineProperty(globalThis, "TextEncoder", {
+      configurable: true,
+      value: textEncoder,
+    });
+  }
+
+  assert.deepEqual(received, {
+    invitation: "kepos://pair?v=1&token=one-time",
+    deviceLabel: "Neil's Pixel",
+    platform: "android",
+  });
+  assert.deepEqual(output.at(-1), {
+    version: 1,
+    kind: "response",
+    id: 5,
+    result: { connection: "connected" },
+  });
+});
+
 test("Android Worklet controller serializes concurrent publisher configuration", async () => {
   const decoder = new FrameDecoder();
   const configured: string[] = [];

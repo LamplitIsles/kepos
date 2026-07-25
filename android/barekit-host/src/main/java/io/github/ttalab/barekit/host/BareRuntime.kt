@@ -139,6 +139,40 @@ class BareRuntime(
   }
 
   @Synchronized
+  fun pairPublisher(
+    invitation: String,
+    deviceLabel: String,
+    platform: String,
+  ): CompletableFuture<RuntimeSnapshot> {
+    require(invitation.startsWith("kepos://pair?") && invitation.toByteArray().size <= 2_048) {
+      "pairing invitation is invalid"
+    }
+    require(deviceLabel.isNotBlank() && deviceLabel.toByteArray().size <= 128) {
+      "device label is invalid"
+    }
+    require(PLATFORM.matches(platform)) { "platform is invalid" }
+    val current = state.snapshot()
+    check(current.state == RuntimeState.RUNNING) {
+      "cannot pair from a runtime in ${current.state}"
+    }
+    val runtimeId = checkNotNull(current.runtimeId)
+    val request = requests.request(
+      "pair",
+      buildJsonObject {
+        put("invitation", invitation)
+        put("deviceLabel", deviceLabel)
+        put("platform", platform)
+      },
+    )
+    val future = CompletableFuture<RuntimeSnapshot>()
+    configureFutures[request.id] = future
+    checkNotNull(session).write(codec.encode(request)) { error ->
+      fail(runtimeId, error)
+    }
+    return future
+  }
+
+  @Synchronized
   fun stop(timeoutMillis: Long = 2_000): CompletableFuture<RuntimeSnapshot> {
     require(timeoutMillis >= 0) { "stop timeout must not be negative" }
     stopFuture?.let { return it }
@@ -214,6 +248,7 @@ class BareRuntime(
       subscriberPublicKey = data["subscriberPublicKey"]?.jsonPrimitive?.content,
       configured = data["configured"]?.jsonPrimitive?.booleanOrNull ?: false,
       connection = data["connection"]?.jsonPrimitive?.content,
+      error = data["error"]?.jsonPrimitive?.content,
       publisher = data["publisher"]?.jsonObject?.let(::parsePublisher),
       services = data["services"]?.jsonArray?.map { parseService(it.jsonObject) }
         ?: emptyList(),
@@ -317,5 +352,6 @@ class BareRuntime(
 
   private companion object {
     val PUBLISHER_KEY = Regex("^[0-9a-f]{64}$")
+    val PLATFORM = Regex("^[a-z0-9][a-z0-9_-]{0,31}$")
   }
 }

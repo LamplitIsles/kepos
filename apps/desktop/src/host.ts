@@ -192,6 +192,11 @@ export async function startDesktopHost(
     },
     send: (message) => mainWebView.postMessage(message),
     openService,
+    approvePairing: () => requireRuntime(runtime).approvePairing(),
+    cancelPairing: () => requireRuntime(runtime).cancelPairing(),
+    createPairingInvitation: () =>
+      requireRuntime(runtime).createPairingInvitation(),
+    denyPairing: () => requireRuntime(runtime).denyPairing(),
     quit: shutdown,
   });
   try {
@@ -260,6 +265,13 @@ export async function startDesktopHost(
   }
 
   return { reconfigure, shutdown };
+}
+
+function requireRuntime(
+  runtime: RunningDesktopRuntime | undefined,
+): RunningDesktopRuntime {
+  if (!runtime) throw new Error("Kepos desktop runtime is unavailable");
+  return runtime;
 }
 
 async function cleanNativeSetup(
