@@ -1,1 +1,1 @@
-# Kepos has no release-only ProGuard rules yet.
+# Kepos app-specific release rules belong here.

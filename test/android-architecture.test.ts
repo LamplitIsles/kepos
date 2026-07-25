@@ -68,10 +68,6 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.equal(await readProjectFile("scripts/fetch-bare-kit.mjs"), null);
   assert.equal(await readProjectFile("scripts/fetch-bare-kit.d.mts"), null);
   assert.equal(
-    rootPackage.scripts?.["android:check"],
-    "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug assembleDebug",
-  );
-  assert.equal(
     rootPackage.scripts?.["android:device-check"],
     "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDeviceTestAndroidTest",
   );
@@ -137,6 +133,62 @@ test("Android device commands isolate tests and preserve installed state", async
   assert.match(readme!, /npm run android:install/);
   assert.match(readme!, /io\.github\.ttalab\.kepos\.devicetest/);
   assert.match(readme!, /preserving app-private state/);
+});
+
+test("Android release build is optimized and reports its size", async () => {
+  const rootPackage = JSON.parse(
+    (await readProjectFile("package.json"))!,
+  ) as { scripts?: Record<string, string> };
+  const appBuild = await readProjectFile("android/app/build.gradle.kts");
+  const hostBuild = await readProjectFile("android/barekit-host/build.gradle.kts");
+  const consumerRules = await readProjectFile(
+    "android/barekit-host/consumer-rules.pro",
+  );
+  const checkWorkflow = await readProjectFile(".github/workflows/check.yml");
+  const releaseWorkflow = await readProjectFile(".github/workflows/release.yml");
+  const reporterPath = "../scripts/report-android-size.js";
+  const reporter = await import(reporterPath).catch(() => null) as null | {
+    formatApkSizeComparison(debugBytes: number, releaseBytes: number): string;
+  };
+
+  assert.equal(
+    rootPackage.scripts?.["android:release"],
+    "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug assembleRelease && tsx scripts/report-android-size.ts",
+  );
+  assert.equal(
+    rootPackage.scripts?.["android:check"],
+    "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug",
+  );
+  assert.match(appBuild!, /getByName\("release"\)/);
+  assert.match(appBuild!, /isMinifyEnabled\s*=\s*true/);
+  assert.match(appBuild!, /isShrinkResources\s*=\s*true/);
+  assert.match(appBuild!, /getDefaultProguardFile\("proguard-android-optimize\.txt"\)/);
+  assert.match(hostBuild!, /consumerProguardFiles\("consumer-rules\.pro"\)/);
+  assert.match(consumerRules!, /-keep class to\.holepunch\.bare\.kit\.\*\*/);
+  assert.doesNotMatch(checkWorkflow!, /assemble(?:Debug|Release)|android:release/);
+  assert.notEqual(releaseWorkflow, null, "missing tag release workflow");
+  assert.match(releaseWorkflow!, /tags:\s*\n\s*- "v\*"/);
+  assert.match(releaseWorkflow!, /run: npm run android:release/);
+  assert.match(
+    releaseWorkflow!,
+    /path: android\/app\/build\/outputs\/apk\/release\/app-release-unsigned\.apk/,
+  );
+  assert.doesNotMatch(releaseWorkflow!, /desktop:/i);
+  assert.doesNotMatch(releaseWorkflow!, /uses: actions\/(?:checkout|setup-node|setup-java|upload-artifact)@v\d/);
+  assert.notEqual(reporter, null, "missing Android APK size reporter");
+  assert.equal(
+    reporter!.formatApkSizeComparison(100 * 1024 * 1024, 70 * 1024 * 1024),
+    [
+      "Android APK sizes",
+      "debug: 100.00 MiB (104857600 bytes)",
+      "release: 70.00 MiB (73400320 bytes)",
+      "saved: 30.00 MiB (30.0%)",
+    ].join("\n"),
+  );
+  assert.throws(
+    () => reporter!.formatApkSizeComparison(70 * 1024 * 1024, 100 * 1024 * 1024),
+    /release APK must be smaller than debug/,
+  );
 });
 
 test("Android subscriber waits for startup and exposes the real service registry", async () => {
