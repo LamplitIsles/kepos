@@ -4,6 +4,8 @@ export interface HomeRegistryService {
   kind: "tcp";
 }
 
+export const HOME_REGISTRY_PATH = "/.well-known/kepos/services.json";
+
 export interface HomeRegistry {
   schemaVersion: 2;
   revision: 1;

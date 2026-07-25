@@ -173,9 +173,9 @@ applications without treating the whole machine as the shared resource:
 
 - the sidebar lists local devices and publishers shared with the user;
 - the application opens the last-used remote publisher by default;
-- the selected publisher page leads with online state, path quality, and an
-  **Open Home** action;
-- Navidrome, SSH, and other published services appear as quick-launch actions;
+- the selected publisher page leads with online state and its native service
+  directory;
+- Navidrome, SSH, and other published services expose one primary action;
 - **Add service** appears only on a local publisher page, while **Add
   publisher** starts pairing from a remote-device context;
 - the list may reserve space for several publishers, but the first subscriber

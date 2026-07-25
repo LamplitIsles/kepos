@@ -392,9 +392,9 @@ firewall classes (`open`, `consistent`, `random`, or `unknown`) and only the
 number of candidate addresses. Connection and close events also include
 cumulative DHT punch and relay counters. No candidate IP addresses are logged.
 
-The command prints the local Home URL immediately and keeps the gateway and raw
-TCP listeners bound while the publisher is unavailable. Connection attempts
-continue in the background instead of terminating the CLI.
+The command prints the machine-readable registry URL immediately and keeps the
+gateway and raw TCP listeners bound while the publisher is unavailable.
+Connection attempts continue in the background instead of terminating the CLI.
 
 New peers also negotiate one `kepos/control/1` heartbeat channel on the existing
 encrypted outer connection. After a healthy pong, the subscriber waits 15

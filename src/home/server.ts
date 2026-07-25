@@ -4,12 +4,12 @@ import { createServer, type ServerResponse } from "node:http";
 
 import {
   createHomeRegistry,
+  HOME_REGISTRY_PATH,
   type HomeRegistry,
   type HomeRegistryService,
 } from "./registry.js";
 
 const host = "127.0.0.1" as const;
-const registryPath = "/.well-known/kepos/services.json";
 const benchmarkPath = "/.well-known/kepos/benchmark";
 const benchmarkChunk = Buffer.alloc(64 * 1024);
 const maxBenchmarkBytes = 64 * 1024 * 1024;
@@ -90,7 +90,7 @@ async function startHomeServerWithRegistry(
       send(response, 404, "text/plain; charset=utf-8", "Not Found\n");
       return;
     }
-    if (pathname === registryPath) {
+    if (pathname === HOME_REGISTRY_PATH) {
       if (request.headers["if-none-match"] === registryEtag) {
         response.writeHead(304, { etag: registryEtag });
         response.end();
