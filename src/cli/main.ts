@@ -45,14 +45,15 @@ import {
   singleOption,
 } from "./options.js";
 import {
+  acquirePublisherRuntimeLock,
   acquireSubscriberRuntimeLock,
-  type SubscriberRuntimeLock,
-} from "../runtime/subscriber-lock.js";
+  type RuntimeLock,
+} from "../runtime/runtime-lock.js";
 import { waitForSignal } from "./signals.js";
 import {
-  loadCliConfig,
-  type CliConfig,
-} from "./config.js";
+  loadKeposConfig,
+  type KeposConfig,
+} from "../app-config.js";
 
 interface CliPublisher {
   home: { url: string };
@@ -72,7 +73,7 @@ interface CliSubscriber {
 export interface CliDependencies {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
-  loadConfig: (configPath?: string) => Promise<CliConfig | undefined>;
+  loadConfig: (configPath?: string) => Promise<KeposConfig | undefined>;
   setupPublisher: (
     options: SetupPublisherOptions,
   ) => Promise<SetupPublisherResult>;
@@ -96,7 +97,10 @@ export interface CliDependencies {
   ) => Promise<CliSubscriber>;
   acquireSubscriberRuntimeLock: (
     stateDir: string,
-  ) => Promise<SubscriberRuntimeLock>;
+  ) => Promise<RuntimeLock>;
+  acquirePublisherRuntimeLock: (
+    stateDir: string,
+  ) => Promise<RuntimeLock>;
   waitForSignal: (stop: () => Promise<void>) => Promise<void>;
 }
 
@@ -108,7 +112,7 @@ export function createDefaultCliDependencies(
   return {
     stdout: output.stdout ?? console.log,
     stderr: output.stderr ?? console.error,
-    loadConfig: loadCliConfig,
+    loadConfig: loadKeposConfig,
     setupPublisher,
     setupSubscriber,
     setSubscriberPublisher,
@@ -116,6 +120,7 @@ export function createDefaultCliDependencies(
     setPublisherServices,
     startPublisher,
     startSubscriber,
+    acquirePublisherRuntimeLock,
     acquireSubscriberRuntimeLock,
     waitForSignal,
   };
@@ -307,16 +312,22 @@ async function runPublisherCommand(
   ]);
   const mode = observationMode(options);
   const config = await dependencies.loadConfig(configPath(options));
-  const running = await dependencies.startPublisher({
-    stateDir: requiredState(options),
-    bootstrap: resolvedBootstrap(options, config),
-    policy: config?.publisher,
-    observe: observationWriter(mode, dependencies),
-  });
-  statusWriter(mode, dependencies)(
-    `Publisher running: key=${running.publisherKey} home=${running.home.url}`,
-  );
-  await dependencies.waitForSignal(running.stop);
+  const stateDir = requiredState(options);
+  const lock = await dependencies.acquirePublisherRuntimeLock(stateDir);
+  try {
+    const running = await dependencies.startPublisher({
+      stateDir,
+      bootstrap: resolvedBootstrap(options, config),
+      policy: config?.publisher,
+      observe: observationWriter(mode, dependencies),
+    });
+    statusWriter(mode, dependencies)(
+      `Publisher running: key=${running.publisherKey} home=${running.home.url}`,
+    );
+    await dependencies.waitForSignal(running.stop);
+  } finally {
+    await lock.release();
+  }
 }
 
 async function runSubscriberCommand(
@@ -371,7 +382,7 @@ async function runSubscriberCommand(
 
 function resolvedBootstrap(
   options: ReturnType<typeof parseOptions>,
-  config: CliConfig | undefined,
+  config: KeposConfig | undefined,
 ) {
   const bootstrap =
     parseBootstrapOptions(options) ?? config?.network?.bootstrap;

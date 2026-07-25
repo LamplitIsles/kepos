@@ -1,14 +1,17 @@
-import type { SubscriberService } from "../../../src/runtime/subscriber.js";
 import {
+  acquirePublisherRuntimeLock,
   acquireSubscriberRuntimeLock,
-  type SubscriberRuntimeLock,
-} from "../../../src/runtime/subscriber-lock.js";
+  type RuntimeLock,
+} from "../../../src/runtime/runtime-lock.js";
 import { createDesktopController } from "./controller.js";
 import type { DesktopSnapshot } from "./protocol.js";
 import {
   startDesktopRuntime,
+  type DesktopRuntimeConfiguration,
+  type StartDesktopPublisherOptions,
   type RunningDesktopRuntime,
   type StartDesktopRuntimeOptions,
+  type StartDesktopSubscriberOptions,
 } from "./runtime.js";
 import { acquireDesktopSingleton } from "./singleton.js";
 import { renderDesktopUi } from "./ui.js";
@@ -29,14 +32,14 @@ export interface DesktopNativeWebView {
 
 export interface StartDesktopHostOptions {
   homeDirectory: string;
-  stateDir: string;
-  gatewayPort: number;
-  services: SubscriberService[];
+  publisher?: Omit<StartDesktopPublisherOptions, "lock">;
+  subscriber?: Omit<StartDesktopSubscriberOptions, "lock">;
 }
 
 export interface DesktopHostDependencies {
-  acquireSingleton(homeDirectory: string): Promise<SubscriberRuntimeLock>;
-  acquireSubscriberLock(stateDir: string): Promise<SubscriberRuntimeLock>;
+  acquireSingleton(homeDirectory: string): Promise<RuntimeLock>;
+  acquirePublisherLock(stateDir: string): Promise<RuntimeLock>;
+  acquireSubscriberLock(stateDir: string): Promise<RuntimeLock>;
   createWindow(width: number, height: number): DesktopNativeWindow;
   createWebView(): DesktopNativeWebView;
   startRuntime(
@@ -47,14 +50,13 @@ export interface DesktopHostDependencies {
 }
 
 export interface RunningDesktopHost {
+  reconfigure(configuration: DesktopRuntimeConfiguration): Promise<void>;
   shutdown(): Promise<void>;
 }
 
 const initialSnapshot: DesktopSnapshot = {
   type: "snapshot",
-  phase: "starting",
-  connection: "connecting",
-  services: [],
+  appPhase: "starting",
 };
 
 export async function startDesktopHost(
@@ -62,11 +64,31 @@ export async function startDesktopHost(
   dependencies: DesktopHostDependencies,
 ): Promise<RunningDesktopHost> {
   const singleton = await dependencies.acquireSingleton(options.homeDirectory);
-  let subscriberLock: SubscriberRuntimeLock;
+  let publisherLock: RuntimeLock | undefined;
+  let subscriberLock: RuntimeLock | undefined;
   try {
-    subscriberLock = await dependencies.acquireSubscriberLock(options.stateDir);
+    if (options.publisher) {
+      publisherLock = await dependencies.acquirePublisherLock(
+        options.publisher.stateDir,
+      );
+    }
+    if (options.subscriber) {
+      subscriberLock = await dependencies.acquireSubscriberLock(
+        options.subscriber.stateDir,
+      );
+    }
   } catch (error) {
-    await singleton.release();
+    for (const release of [
+      () => subscriberLock?.release(),
+      () => publisherLock?.release(),
+      () => singleton.release(),
+    ]) {
+      try {
+        await release();
+      } catch {
+        // Preserve the lock acquisition error after trying every prior release.
+      }
+    }
     throw error;
   }
   let createdWindow: DesktopNativeWindow | undefined;
@@ -75,7 +97,13 @@ export async function startDesktopHost(
     createdWindow = dependencies.createWindow(720, 620);
     createdWebView = dependencies.createWebView();
   } catch (error) {
-    await cleanNativeSetup(createdWindow, createdWebView, subscriberLock, singleton);
+    await cleanNativeSetup(
+      createdWindow,
+      createdWebView,
+      publisherLock,
+      subscriberLock,
+      singleton,
+    );
     throw error;
   }
   const mainWindow = createdWindow;
@@ -129,8 +157,39 @@ export async function startDesktopHost(
     return shutdownPromise;
   }
 
+  async function reconfigure(
+    configuration: DesktopRuntimeConfiguration,
+  ): Promise<void> {
+    if (shutdownPromise !== undefined) {
+      throw new Error("Kepos desktop is stopping");
+    }
+    if (!runtime) throw new Error("Kepos desktop runtime is unavailable");
+    await runtime.reconfigure(configuration);
+  }
+
   const controller = createDesktopController({
-    initialSnapshot,
+    initialSnapshot: {
+      ...initialSnapshot,
+      ...(options.publisher
+        ? {
+            publisher: {
+              phase: "starting" as const,
+              activeSubscribers: 0,
+              acceptedConnections: 0,
+              services: [],
+            },
+          }
+        : {}),
+      ...(options.subscriber
+        ? {
+            subscriber: {
+              phase: "starting" as const,
+              connection: "connecting" as const,
+              services: [],
+            },
+          }
+        : {}),
+    },
     send: (message) => mainWebView.postMessage(message),
     openService,
     showHome: async () => undefined,
@@ -145,7 +204,13 @@ export async function startDesktopHost(
     mainWindow.content(mainWebView);
     mainWebView.loadHTML(renderDesktopUi());
   } catch (error) {
-    await cleanNativeSetup(mainWindow, mainWebView, subscriberLock, singleton);
+    await cleanNativeSetup(
+      mainWindow,
+      mainWebView,
+      publisherLock,
+      subscriberLock,
+      singleton,
+    );
     throw error;
   }
   mainWindow.on("willClose", () => {
@@ -159,17 +224,29 @@ export async function startDesktopHost(
   let startedRuntime: RunningDesktopRuntime;
   try {
     runtimeStartTask = dependencies.startRuntime({
-      stateDir: options.stateDir,
-      gatewayPort: options.gatewayPort,
-      services: options.services,
-      subscriberLock,
+      ...(options.publisher
+        ? {
+            publisher: {
+              ...options.publisher,
+              lock: publisherLock,
+            },
+          }
+        : {}),
+      ...(options.subscriber
+        ? {
+            subscriber: {
+              ...options.subscriber,
+              lock: subscriberLock,
+            },
+          }
+        : {}),
       onSnapshot: (snapshot) => controller.publish(snapshot),
     });
     startedRuntime = await runtimeStartTask;
   } catch {
     // startDesktopRuntime already publishes a safe failed snapshot and releases
     // the subscriber-state lock. Keep the window open so the user can read it.
-    return { shutdown };
+    return { reconfigure, shutdown };
   }
   if (shutdownPromise === undefined) {
     runtime = startedRuntime;
@@ -183,19 +260,21 @@ export async function startDesktopHost(
     }
   }
 
-  return { shutdown };
+  return { reconfigure, shutdown };
 }
 
 async function cleanNativeSetup(
   mainWindow: DesktopNativeWindow | undefined,
   mainWebView: DesktopNativeWebView | undefined,
-  subscriberLock: SubscriberRuntimeLock,
-  singleton: SubscriberRuntimeLock,
+  publisherLock: RuntimeLock | undefined,
+  subscriberLock: RuntimeLock | undefined,
+  singleton: RuntimeLock,
 ): Promise<void> {
   const steps = [
     () => mainWebView?.destroy(),
     () => mainWindow?.close(),
-    () => subscriberLock.release(),
+    () => subscriberLock?.release(),
+    () => publisherLock?.release(),
     () => singleton.release(),
   ];
   for (const step of steps) {
@@ -209,6 +288,7 @@ async function cleanNativeSetup(
 
 export const defaultDesktopHostDependencies = {
   acquireSingleton: acquireDesktopSingleton,
+  acquirePublisherLock: acquirePublisherRuntimeLock,
   acquireSubscriberLock: acquireSubscriberRuntimeLock,
   startRuntime: startDesktopRuntime,
 };

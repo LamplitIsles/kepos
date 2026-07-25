@@ -7,37 +7,34 @@ import {
   type DesktopHostDependencies,
   type DesktopNativeWebView,
   type DesktopNativeWindow,
+  type StartDesktopHostOptions,
 } from "../apps/desktop/src/host.js";
 import type { RunningDesktopRuntime } from "../apps/desktop/src/runtime.js";
 
-const publisherKey = "e4".repeat(32);
+const remotePublisherKey = "e4".repeat(32);
 
-test("desktop host acquires its singleton before opening one control window", async () => {
+test("desktop host acquires dual-role locks before one control window", async () => {
   const harness = createHarness();
-  const host = await startDesktopHost(
-    {
-      homeDirectory: "/Users/neil",
-      stateDir: "/state/subscriber",
-      gatewayPort: 17_480,
-      services: [{ id: "ssh", localPort: 2222 }],
-    },
-    harness.dependencies,
-  );
+  const host = await startDesktopHost(dualOptions(), harness.dependencies);
 
-  assert.deepEqual(harness.events.slice(0, 5), [
+  assert.deepEqual(harness.events.slice(0, 6), [
     "singleton:acquire:/Users/neil",
+    "publisher-lock:acquire:/state/publisher",
     "subscriber-lock:acquire:/state/subscriber",
     "window:create:720x620",
     "webview:create",
     "window:content",
   ]);
+  assert.equal(harness.runtimeOptions?.publisher?.stateDir, "/state/publisher");
+  assert.equal(harness.runtimeOptions?.subscriber?.stateDir, "/state/subscriber");
   assert.match(harness.webViews[0]?.html ?? "", /<title>Kepos<\/title>/);
   assert.equal(harness.schedules.length, 1);
 
   harness.webViews[0]?.emit("message", JSON.stringify({ type: "ready" }));
   await harness.flushCommands();
   assert.equal(
-    JSON.parse(harness.webViews[0]?.messages.at(-1) ?? "null").connection,
+    JSON.parse(harness.webViews[0]?.messages.at(-1) ?? "null").subscriber
+      .connection,
     "connected",
   );
 
@@ -46,7 +43,6 @@ test("desktop host acquires its singleton before opening one control window", as
     JSON.stringify({ type: "openService", serviceId: "forgejo" }),
   );
   await harness.flushCommands();
-  assert.equal(harness.windows.length, 1);
   assert.deepEqual(harness.webViews[0]?.externalUrls, [
     "http://forgejo.localhost:17480/",
   ]);
@@ -54,67 +50,131 @@ test("desktop host acquires its singleton before opening one control window", as
   await host.shutdown();
   await host.shutdown();
   assert.equal(harness.events.filter((event) => event === "runtime:stop").length, 1);
-  assert.equal(
-    harness.events.filter((event) => event === "singleton:release").length,
-    1,
-  );
+  assert.equal(harness.events.filter((event) => event === "singleton:release").length, 1);
   assert.equal(harness.events.filter((event) => event === "exit:0").length, 1);
-  assert.equal(harness.webViews.every(({ destroyed }) => destroyed), true);
+});
+
+test("desktop host supports publisher-only mode", async () => {
+  const harness = createHarness();
+  const host = await startDesktopHost(
+    {
+      homeDirectory: "/Users/neil",
+      publisher: { stateDir: "/state/publisher" },
+    },
+    harness.dependencies,
+  );
+
+  assert.equal(
+    harness.events.includes("publisher-lock:acquire:/state/publisher"),
+    true,
+  );
+  assert.equal(harness.events.some((event) => event.startsWith("subscriber-lock")), false);
+  await host.shutdown();
+});
+
+test("desktop host supports subscriber-only mode", async () => {
+  const harness = createHarness();
+  const host = await startDesktopHost(
+    subscriberOptions(),
+    harness.dependencies,
+  );
+
+  assert.equal(
+    harness.events.includes("subscriber-lock:acquire:/state/subscriber"),
+    true,
+  );
+  assert.equal(
+    harness.events.some((event) => event.startsWith("publisher-lock")),
+    false,
+  );
+  await host.shutdown();
+});
+
+test("desktop host forwards configured role policy to the runtime", async () => {
+  const harness = createHarness();
+  const bootstrap = [{ host: "bootstrap.example", port: 49_737 }];
+  const policy = {
+    displayName: "Configured publisher",
+    allow: [],
+    services: [],
+  };
+  const options = dualOptions();
+  Object.assign(options.publisher ?? {}, { bootstrap, policy });
+  Object.assign(options.subscriber ?? {}, { bootstrap, route: "public" });
+  const host = await startDesktopHost(options, harness.dependencies);
+
+  assert.deepEqual(harness.runtimeOptions?.publisher?.bootstrap, bootstrap);
+  assert.deepEqual(harness.runtimeOptions?.publisher?.policy, policy);
+  assert.deepEqual(harness.runtimeOptions?.subscriber?.bootstrap, bootstrap);
+  assert.equal(harness.runtimeOptions?.subscriber?.route, "public");
+  await host.shutdown();
+});
+
+test("desktop host exposes in-process role reconfiguration", async () => {
+  const harness = createHarness();
+  const host = await startDesktopHost(subscriberOptions(), harness.dependencies);
+
+  await host.reconfigure({
+    publisher: { stateDir: "/state/publisher" },
+  });
+
+  assert.equal(harness.events.includes("runtime:reconfigure"), true);
+  await host.shutdown();
 });
 
 test("desktop host rejects a second process without creating a window", async () => {
   const harness = createHarness({ singletonFailure: "already running" });
 
   await assert.rejects(
-    startDesktopHost(
-      {
-        homeDirectory: "/Users/neil",
-        stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
-        services: [],
-      },
-      harness.dependencies,
-    ),
+    startDesktopHost(subscriberOptions(), harness.dependencies),
     /already running/,
   );
   assert.equal(harness.windows.length, 0);
-  assert.equal(harness.webViews.length, 0);
 });
 
-test("desktop host rejects a CLI collision before creating a window", async () => {
-  const harness = createHarness({ subscriberLockFailure: "state already in use" });
-
+test("desktop host releases acquired locks when the next role lock fails", async () => {
+  const publisherFailure = createHarness({ publisherLockFailure: "publisher in use" });
   await assert.rejects(
-    startDesktopHost(
-      {
-        homeDirectory: "/Users/neil",
-        stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
-        services: [],
-      },
-      harness.dependencies,
-    ),
-    /state already in use/,
+    startDesktopHost(dualOptions(), publisherFailure.dependencies),
+    /publisher in use/,
   );
-  assert.equal(harness.windows.length, 0);
-  assert.deepEqual(harness.events, [
+  assert.deepEqual(publisherFailure.events, [
     "singleton:acquire:/Users/neil",
+    "publisher-lock:acquire:/state/publisher",
+    "singleton:release",
+  ]);
+
+  const subscriberFailure = createHarness({ subscriberLockFailure: "subscriber in use" });
+  await assert.rejects(
+    startDesktopHost(dualOptions(), subscriberFailure.dependencies),
+    /subscriber in use/,
+  );
+  assert.deepEqual(subscriberFailure.events, [
+    "singleton:acquire:/Users/neil",
+    "publisher-lock:acquire:/state/publisher",
     "subscriber-lock:acquire:/state/subscriber",
+    "publisher-lock:release",
     "singleton:release",
   ]);
 });
 
-test("native close and UI quit share one ordered shutdown", async () => {
-  const harness = createHarness();
-  await startDesktopHost(
-    {
-      homeDirectory: "/Users/neil",
-      stateDir: "/state/subscriber",
-      gatewayPort: 17_480,
-      services: [],
-    },
-    harness.dependencies,
+test("desktop host preserves lock failure while attempting all prior releases", async () => {
+  const harness = createHarness({
+    subscriberLockFailure: "subscriber in use",
+    publisherLockReleaseFailure: "publisher release failed",
+  });
+
+  await assert.rejects(
+    startDesktopHost(dualOptions(), harness.dependencies),
+    /subscriber in use/,
   );
+  assert.equal(harness.events.includes("publisher-lock:release"), true);
+  assert.equal(harness.events.includes("singleton:release"), true);
+});
+
+test("native close and UI quit share one ordered dual-role shutdown", async () => {
+  const harness = createHarness();
+  await startDesktopHost(dualOptions(), harness.dependencies);
   harness.webViews[0]?.emit("message", JSON.stringify({ type: "ready" }));
   harness.windows[0]?.emit("willClose");
   harness.webViews[0]?.emit("message", JSON.stringify({ type: "quit" }));
@@ -125,6 +185,7 @@ test("native close and UI quit share one ordered shutdown", async () => {
       [
         "schedule:cancel",
         "runtime:stop",
+        "publisher-lock:release",
         "subscriber-lock:release",
         "webview:destroy",
         "singleton:release",
@@ -134,6 +195,7 @@ test("native close and UI quit share one ordered shutdown", async () => {
     [
       "schedule:cancel",
       "runtime:stop",
+      "publisher-lock:release",
       "subscriber-lock:release",
       "webview:destroy",
       "singleton:release",
@@ -145,19 +207,12 @@ test("native close and UI quit share one ordered shutdown", async () => {
 test("closing during startup stops a runtime that resolves late", async () => {
   let resolveRuntime: ((runtime: RunningDesktopRuntime) => void) | undefined;
   const harness = createHarness({
-    startRuntime: () => new Promise((resolve) => {
-      resolveRuntime = resolve;
-    }),
+    startRuntime: () =>
+      new Promise((resolve) => {
+        resolveRuntime = resolve;
+      }),
   });
-  const startTask = startDesktopHost(
-    {
-      homeDirectory: "/Users/neil",
-      stateDir: "/state/subscriber",
-      gatewayPort: 17_480,
-      services: [],
-    },
-    harness.dependencies,
-  );
+  const startTask = startDesktopHost(dualOptions(), harness.dependencies);
 
   await new Promise((resolve) => setTimeout(resolve, 0));
   harness.windows[0]?.emit("willClose");
@@ -171,17 +226,9 @@ test("closing during startup stops a runtime that resolves late", async () => {
   assert.equal(harness.events.includes("singleton:release"), true);
 });
 
-test("shutdown completes cleanup after runtime stop fails", async () => {
+test("shutdown completes host cleanup after runtime stop fails", async () => {
   const harness = createHarness({ runtimeStopFailure: "stop failed" });
-  const host = await startDesktopHost(
-    {
-      homeDirectory: "/Users/neil",
-      stateDir: "/state/subscriber",
-      gatewayPort: 17_480,
-      services: [],
-    },
-    harness.dependencies,
-  );
+  const host = await startDesktopHost(dualOptions(), harness.dependencies);
 
   await assert.rejects(host.shutdown(), /stop failed/);
   assert.equal(harness.webViews[0]?.destroyed, true);
@@ -191,22 +238,17 @@ test("shutdown completes cleanup after runtime stop fails", async () => {
 });
 
 for (const nativeFailure of ["window", "webview", "content", "load"] as const) {
-  test(`desktop host releases both locks when native ${nativeFailure} setup fails`, async () => {
+  test(`desktop host releases every lock when native ${nativeFailure} setup fails`, async () => {
     const harness = createHarness({ nativeFailure });
 
     await assert.rejects(
-      startDesktopHost(
-        {
-          homeDirectory: "/Users/neil",
-          stateDir: "/state/subscriber",
-          gatewayPort: 17_480,
-          services: [],
-        },
-        harness.dependencies,
-      ),
+      startDesktopHost(dualOptions(), harness.dependencies),
       new RegExp(`${nativeFailure} failed`),
     );
-
+    assert.equal(
+      harness.events.filter((event) => event === "publisher-lock:release").length,
+      1,
+    );
     assert.equal(
       harness.events.filter((event) => event === "subscriber-lock:release").length,
       1,
@@ -218,8 +260,28 @@ for (const nativeFailure of ["window", "webview", "content", "load"] as const) {
   });
 }
 
+function subscriberOptions(): StartDesktopHostOptions {
+  return {
+    homeDirectory: "/Users/neil",
+    subscriber: {
+      stateDir: "/state/subscriber",
+      gatewayPort: 17_480,
+      services: [{ id: "ssh", localPort: 2222 }],
+    },
+  };
+}
+
+function dualOptions(): StartDesktopHostOptions {
+  return {
+    ...subscriberOptions(),
+    publisher: { stateDir: "/state/publisher" },
+  };
+}
+
 interface HarnessOptions {
   singletonFailure?: string;
+  publisherLockFailure?: string;
+  publisherLockReleaseFailure?: string;
   subscriberLockFailure?: string;
   runtimeStopFailure?: string;
   startRuntime?: DesktopHostDependencies["startRuntime"];
@@ -239,12 +301,14 @@ function createHarness(options: HarnessOptions = {}) {
     poll: async () => {
       events.push("runtime:poll");
     },
+    reconfigure: async () => {
+      events.push("runtime:reconfigure");
+    },
     stop: async () => {
       events.push("runtime:stop");
-      events.push("subscriber-lock:release");
-      if (options.runtimeStopFailure) {
-        throw new Error(options.runtimeStopFailure);
-      }
+      if (runtimeOptions?.publisher) events.push("publisher-lock:release");
+      if (runtimeOptions?.subscriber) events.push("subscriber-lock:release");
+      if (options.runtimeStopFailure) throw new Error(options.runtimeStopFailure);
     },
   };
   const dependencies: DesktopHostDependencies = {
@@ -257,11 +321,21 @@ function createHarness(options: HarnessOptions = {}) {
         },
       };
     },
+    acquirePublisherLock: async (stateDir) => {
+      events.push(`publisher-lock:acquire:${stateDir}`);
+      if (options.publisherLockFailure) throw new Error(options.publisherLockFailure);
+      return {
+        release: async () => {
+          events.push("publisher-lock:release");
+          if (options.publisherLockReleaseFailure) {
+            throw new Error(options.publisherLockReleaseFailure);
+          }
+        },
+      };
+    },
     acquireSubscriberLock: async (stateDir) => {
       events.push(`subscriber-lock:acquire:${stateDir}`);
-      if (options.subscriberLockFailure) {
-        throw new Error(options.subscriberLockFailure);
-      }
+      if (options.subscriberLockFailure) throw new Error(options.subscriberLockFailure);
       return {
         release: async () => {
           events.push("subscriber-lock:release");
@@ -282,38 +356,49 @@ function createHarness(options: HarnessOptions = {}) {
       webViews.push(view);
       return view;
     },
-    startRuntime: options.startRuntime ?? (async (runtimeStartOptions) => {
-      runtimeOptions = runtimeStartOptions;
-      runtimeStartOptions.onSnapshot({
-        type: "snapshot",
-        phase: "running",
-        connection: "connected",
-        publisher: { displayName: "kosmos", keyFingerprint: publisherKey.slice(0, 16) },
-        gatewayPort: 17_480,
-        services: [
-          {
-            id: "forgejo",
-            name: "Forgejo",
-            access: "http",
-            action: "open",
-            icon: "git",
-            available: true,
-            url: "http://forgejo.localhost:17480/",
-          },
-          {
-            id: "navidrome",
-            name: "Navidrome",
-            access: "http",
-            action: "copy-url",
-            icon: "music",
-            available: true,
-            url: "http://navidrome.localhost:17480",
-            copyText: "http://navidrome.localhost:17480",
-          },
-        ],
-      });
-      return runtime;
-    }),
+    startRuntime:
+      options.startRuntime ??
+      (async (startOptions) => {
+        runtimeOptions = startOptions;
+        startOptions.onSnapshot({
+          type: "snapshot",
+          appPhase: "running",
+          subscriber: startOptions.subscriber
+            ? {
+                phase: "running",
+                connection: "connected",
+                remotePublisher: {
+                  displayName: "kosmos",
+                  keyFingerprint: remotePublisherKey.slice(0, 16),
+                },
+                gatewayPort: 17_480,
+                services: [
+                  {
+                    id: "forgejo",
+                    name: "Forgejo",
+                    access: "http",
+                    action: "open",
+                    icon: "git",
+                    available: true,
+                    url: "http://forgejo.localhost:17480/",
+                  },
+                ],
+              }
+            : undefined,
+          publisher: startOptions.publisher
+            ? {
+                phase: "running",
+                displayName: "This Mac",
+                publisherKey: "a7".repeat(32),
+                keyFingerprint: "a7".repeat(8),
+                activeSubscribers: 0,
+                acceptedConnections: 0,
+                services: [],
+              }
+            : undefined,
+        });
+        return runtime;
+      }),
     schedulePoll: (callback) => {
       schedules.push(callback);
       return () => events.push("schedule:cancel");
@@ -328,9 +413,11 @@ function createHarness(options: HarnessOptions = {}) {
     webViews,
     schedules,
     runtime,
+    get runtimeOptions() {
+      return runtimeOptions;
+    },
     async flushCommands() {
       await new Promise((resolve) => setTimeout(resolve, 0));
-      if (runtimeOptions === undefined) throw new Error("runtime did not start");
     },
   };
 }

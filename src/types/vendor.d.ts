@@ -1,3 +1,7 @@
+interface ImportMeta {
+  asset?: (specifier: string, parentURL?: string | URL) => string;
+}
+
 declare module "hyperdht" {
   const value: unknown;
   export default value;

@@ -1,35 +1,43 @@
-import { readFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { parse } from "smol-toml";
+import { parse, stringify } from "smol-toml";
 
 import {
   parsePublisherConfig,
   parsePublisherManifest,
-} from "../config.js";
-import type { DhtAddress } from "../mux/hyperdht.js";
-import { parseRoute, type Route } from "../mux/route.js";
-import type { PublisherRuntimePolicy } from "../runtime/publisher.js";
-import type { SubscriberService } from "../runtime/subscriber.js";
+} from "./config.js";
+import type { DhtAddress } from "./mux/hyperdht.js";
+import { parseRoute, type Route } from "./mux/route.js";
+import type { PublisherRuntimePolicy } from "./runtime/publisher.js";
+import type { SubscriberService } from "./runtime/subscriber.js";
 import {
   parseBootstrapValues,
   parseSubscriberService,
-} from "./options.js";
+} from "./cli/options.js";
 
-export interface CliConfig {
+export interface KeposConfig {
   network?: {
     bootstrap?: DhtAddress[];
   };
-  publisher?: PublisherRuntimePolicy;
+  publisher?: PublisherRuntimePolicy & { enabled?: boolean };
   subscriber?: {
+    enabled?: boolean;
     gatewayPort?: number;
     route?: Route;
     services?: SubscriberService[];
   };
 }
 
-export function defaultCliConfigPath(
+export function defaultKeposConfigPath(
   environment: NodeJS.ProcessEnv = process.env,
   homeDirectory = os.homedir(),
 ): string {
@@ -38,11 +46,13 @@ export function defaultCliConfigPath(
   return path.join(configHome, "kepos", "config.toml");
 }
 
-export async function loadCliConfig(
+export async function loadKeposConfig(
   configPath?: string,
   environment: NodeJS.ProcessEnv = process.env,
-): Promise<CliConfig | undefined> {
-  const resolvedPath = configPath ?? defaultCliConfigPath(environment);
+  homeDirectory = os.homedir(),
+): Promise<KeposConfig | undefined> {
+  const resolvedPath =
+    configPath ?? defaultKeposConfigPath(environment, homeDirectory);
   let source: string;
   try {
     source = await readFile(resolvedPath, "utf8");
@@ -59,15 +69,15 @@ export async function loadCliConfig(
       cause: error,
     });
   }
-  return parseCliConfig(source);
+  return parseKeposConfig(source);
 }
 
-export function parseCliConfig(source: string): CliConfig {
+export function parseKeposConfig(source: string): KeposConfig {
   const value: unknown = parse(source);
   const root = requireTable(value, "config");
   rejectUnknownFields(root, [], ["network", "publisher", "subscriber"]);
 
-  const config: CliConfig = {};
+  const config: KeposConfig = {};
   if (root.network !== undefined) config.network = parseNetwork(root.network);
   if (root.publisher !== undefined) {
     config.publisher = parsePublisher(root.publisher);
@@ -78,7 +88,77 @@ export function parseCliConfig(source: string): CliConfig {
   return config;
 }
 
-function parseNetwork(value: unknown): NonNullable<CliConfig["network"]> {
+export function serializeKeposConfig(config: KeposConfig): string {
+  const value: Record<string, unknown> = {};
+  if (config.network) {
+    value.network = {
+      ...(config.network.bootstrap
+        ? {
+            bootstrap: config.network.bootstrap.map(
+              ({ host, port }) => `${host}:${port}`,
+            ),
+          }
+        : {}),
+    };
+  }
+  if (config.publisher) {
+    value.publisher = {
+      ...(config.publisher.enabled === undefined
+        ? {}
+        : { enabled: config.publisher.enabled }),
+      display_name: config.publisher.displayName,
+      allow: config.publisher.allow,
+      services: config.publisher.services.map(({ id, name, targetPort }) => ({
+        id,
+        name,
+        target_port: targetPort,
+      })),
+    };
+  }
+  if (config.subscriber) {
+    value.subscriber = {
+      ...(config.subscriber.enabled === undefined
+        ? {}
+        : { enabled: config.subscriber.enabled }),
+      ...(config.subscriber.gatewayPort === undefined
+        ? {}
+        : { gateway_port: config.subscriber.gatewayPort }),
+      ...(config.subscriber.route === undefined
+        ? {}
+        : { route: config.subscriber.route }),
+      ...(config.subscriber.services === undefined
+        ? {}
+        : {
+            services: config.subscriber.services.map(({ id, localPort }) => ({
+              id,
+              local_port: localPort,
+            })),
+          }),
+    };
+  }
+  const source = stringify(value);
+  parseKeposConfig(source);
+  return source;
+}
+
+export async function saveKeposConfig(
+  config: KeposConfig,
+  configPath = defaultKeposConfigPath(),
+): Promise<void> {
+  const source = serializeKeposConfig(config);
+  const directory = path.dirname(configPath);
+  await mkdir(directory, { mode: 0o700, recursive: true });
+  const temporaryDirectory = await mkdtemp(path.join(directory, ".config-"));
+  const temporaryPath = path.join(temporaryDirectory, "config.toml");
+  try {
+    await writeFile(temporaryPath, source, { flag: "wx", mode: 0o600 });
+    await rename(temporaryPath, configPath);
+  } finally {
+    await rm(temporaryDirectory, { force: true, recursive: true });
+  }
+}
+
+function parseNetwork(value: unknown): NonNullable<KeposConfig["network"]> {
   const network = requireTable(value, "network");
   rejectUnknownFields(network, ["network"], ["bootstrap"]);
   if (network.bootstrap === undefined) return {};
@@ -99,7 +179,7 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
   rejectUnknownFields(
     publisher,
     ["publisher"],
-    ["display_name", "allow", "services"],
+    ["enabled", "display_name", "allow", "services"],
   );
   if (!Array.isArray(publisher.allow)) {
     throw new Error("publisher.allow must be an array");
@@ -132,6 +212,9 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
     allow: publisher.allow,
   }).allow;
   return {
+    ...(publisher.enabled === undefined
+      ? {}
+      : { enabled: parseBoolean(publisher.enabled, "publisher.enabled") }),
     displayName: manifest.displayName,
     allow,
     services: manifest.services.map(({ id, name, targetPort }) => ({
@@ -144,14 +227,17 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
 
 function parseSubscriber(
   value: unknown,
-): NonNullable<CliConfig["subscriber"]> {
+): NonNullable<KeposConfig["subscriber"]> {
   const subscriber = requireTable(value, "subscriber");
   rejectUnknownFields(
     subscriber,
     ["subscriber"],
-    ["gateway_port", "route", "services"],
+    ["enabled", "gateway_port", "route", "services"],
   );
-  const config: NonNullable<CliConfig["subscriber"]> = {};
+  const config: NonNullable<KeposConfig["subscriber"]> = {};
+  if (subscriber.enabled !== undefined) {
+    config.enabled = parseBoolean(subscriber.enabled, "subscriber.enabled");
+  }
   if (subscriber.gateway_port !== undefined) {
     config.gatewayPort = parsePort(
       subscriber.gateway_port,
@@ -193,6 +279,13 @@ function parseSubscriber(
     }
   }
   return config;
+}
+
+function parseBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`${field} must be true or false`);
+  }
+  return value;
 }
 
 function parsePort(value: unknown, field: string, allowZero = false): number {

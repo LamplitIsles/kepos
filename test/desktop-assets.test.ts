@@ -11,7 +11,9 @@ test("desktop UI is a self-contained dark Kepos service console", () => {
   assert.match(html, /#0d1209/);
   assert.match(html, /#b7ee45/);
   assert.match(html, /data-role="services"/);
+  assert.match(html, /data-role="shared-services"/);
   assert.match(html, /data-role="connection"/);
+  assert.match(html, /data-role="sharing"/);
   assert.match(html, /data-role="settings"/);
   assert.match(html, /Copy URL/);
   assert.match(html, /Copy command/);
@@ -20,6 +22,52 @@ test("desktop UI is a self-contained dark Kepos service console", () => {
   assert.match(html, /postMessage\(JSON\.stringify\(\{ type: "ready" \}\)\)/);
   assert.doesNotMatch(html, /https?:\/\/(?:fonts\.|cdn\.|unpkg\.|jsdelivr\.)/);
   assert.doesNotMatch(html, /prefers-color-scheme:\s*light/);
+});
+
+test("desktop UI stays operational instead of repeating product slogans", () => {
+  const html = renderDesktopUi();
+
+  assert.doesNotMatch(html, /Far away\. <em>Here\.<\/em>/);
+  assert.doesNotMatch(html, /From here\. <em>Shared\.<\/em>/);
+  assert.doesNotMatch(html, /LOCAL SURFACE \/ DIRECT/);
+  assert.doesNotMatch(html, /One app<br>Independent identities<br>Direct links/);
+  assert.doesNotMatch(html, /ONE LINK · MANY LOCAL ADDRESSES/);
+  assert.match(html, /data-role="service-count"/);
+});
+
+test("desktop service glyphs use the same Lucide choices as Android", () => {
+  const html = renderDesktopUi();
+
+  assert.match(html, /<path d="M2 10v3"\/>/);
+  assert.match(html, /<path d="M6 6v11"\/>/);
+  assert.match(html, /<path d="M10 3v18"\/>/);
+  assert.match(html, /<path d="M14 8v7"\/>/);
+  assert.match(html, /<path d="M18 5v13"\/>/);
+  assert.match(html, /<path d="M22 10v3"\/>/);
+  assert.match(html, /<path d="m7 11 2-2-2-2"\/>/);
+  assert.match(html, /<path d="m11 13 4 0"\/>/);
+});
+
+test("desktop UI renders subscriber and local publisher as separate roles", () => {
+  const html = renderDesktopUi();
+
+  assert.match(html, /data-role="role-nav"/);
+  assert.match(html, /data-role-tab="subscriber"/);
+  assert.match(html, /data-role-tab="publisher"/);
+  assert.match(html, /const selectRole = \(role\)/);
+  assert.match(html, /button\.classList\.toggle\('selected'/);
+  assert.match(html, /Shared services/);
+  assert.match(html, /Available remotely/);
+  assert.doesNotMatch(html, /Shared from this Mac|Share this Mac/);
+  assert.match(html, /snapshot\.subscriber/);
+  assert.match(html, /snapshot\.publisher/);
+  assert.match(html, /publisher\.activeSubscribers/);
+  assert.match(html, /publisher\.publisherKey/);
+  assert.match(html, /data-action="copy-publisher-key"/);
+  assert.match(html, /publisher\.services\.map\(renderPublishedService\)/);
+  assert.match(html, /escapeHtml\(service\.name\)/);
+  assert.match(html, /escapeHtml\(service\.id\)/);
+  assert.doesNotMatch(html, /type:\s*"copyPublisherKey"/);
 });
 
 test("desktop UI derives actions from snapshots without hard-coded endpoints", () => {

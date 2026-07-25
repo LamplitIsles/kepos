@@ -9,34 +9,46 @@ import {
 
 const snapshot: DesktopSnapshot = {
   type: "snapshot",
-  phase: "running",
-  connection: "connected",
+  appPhase: "running",
   publisher: {
-    displayName: "kosmos",
-    keyFingerprint: "e499c38286e33f48",
+    phase: "running",
+    displayName: "This Mac",
+    publisherKey: "a7".repeat(32),
+    keyFingerprint: "a7".repeat(8),
+    activeSubscribers: 1,
+    acceptedConnections: 2,
+    services: [{ id: "site", name: "Site", targetPort: 8080 }],
   },
-  gatewayPort: 17_480,
-  services: [
-    {
-      id: "navidrome",
-      name: "Navidrome",
-      access: "http",
-      action: "copy-url",
-      icon: "music",
-      available: true,
-      url: "http://navidrome.localhost:17480",
-      copyText: "http://navidrome.localhost:17480",
+  subscriber: {
+    phase: "running",
+    connection: "connected",
+    remotePublisher: {
+      displayName: "kosmos",
+      keyFingerprint: "e499c38286e33f48",
     },
-    {
-      id: "ssh",
-      name: "SSH",
-      access: "ssh",
-      action: "copy-command",
-      icon: "terminal",
-      available: true,
-      copyText: "ssh -p 2222 127.0.0.1",
-    },
-  ],
+    gatewayPort: 17_480,
+    services: [
+      {
+        id: "navidrome",
+        name: "Navidrome",
+        access: "http",
+        action: "copy-url",
+        icon: "music",
+        available: true,
+        url: "http://navidrome.localhost:17480",
+        copyText: "http://navidrome.localhost:17480",
+      },
+      {
+        id: "ssh",
+        name: "SSH",
+        access: "ssh",
+        action: "copy-command",
+        icon: "terminal",
+        available: true,
+        copyText: "ssh -p 2222 127.0.0.1",
+      },
+    ],
+  },
 };
 
 test("desktop protocol accepts only closed page commands", () => {
@@ -88,4 +100,5 @@ test("desktop snapshot serialization is stable and round-trippable", () => {
 
   assert.equal(serialized, serializeDesktopSnapshot({ ...snapshot }));
   assert.deepEqual(JSON.parse(serialized), snapshot);
+  assert.doesNotMatch(serialized, /seed|secret/i);
 });

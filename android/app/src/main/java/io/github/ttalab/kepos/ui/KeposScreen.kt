@@ -23,8 +23,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,7 +58,6 @@ import com.composables.icons.lucide.GitBranch
 import com.composables.icons.lucide.Hammer
 import com.composables.icons.lucide.Images
 import com.composables.icons.lucide.DatabaseBackup
-import com.composables.icons.lucide.EllipsisVertical
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.RefreshCw
 import com.composables.icons.lucide.Settings
@@ -172,7 +169,6 @@ private fun ServiceHome(
   onOpenUrl: (String) -> Unit,
   onSettings: () -> Unit,
 ) {
-  var infoService by rememberSaveable { mutableStateOf<String?>(null) }
   val contentAlpha = if (model.available) 1f else 0.42f
   LazyColumn(
     modifier = Modifier
@@ -226,26 +222,8 @@ private fun ServiceHome(
             -> service.copyText?.let(onCopyText)
           }
         },
-        onCopyAddress = { service.url?.let(onCopyText) },
-        onViewDetails = { infoService = service.id },
       )
     }
-  }
-
-  model.services.firstOrNull { it.id == infoService }?.let { service ->
-    AlertDialog(
-      onDismissRequest = { infoService = null },
-      title = { Text(service.name) },
-      text = {
-        Text(
-          service.url
-            ?: "This TCP service does not have an Android listener yet. Use the Kepos CLI on a desktop.",
-        )
-      },
-      confirmButton = {
-        TextButton(onClick = { infoService = null }) { Text("Done") }
-      },
-    )
   }
 }
 
@@ -346,15 +324,12 @@ private fun ServiceRailItem(
   last: Boolean,
   modifier: Modifier = Modifier,
   onAction: () -> Unit,
-  onCopyAddress: () -> Unit,
-  onViewDetails: () -> Unit,
 ) {
-  var menuExpanded by rememberSaveable { mutableStateOf(false) }
   Row(modifier = modifier.fillMaxWidth()) {
     Box(
       modifier = Modifier
         .width(34.dp)
-        .height(118.dp),
+        .height(82.dp),
       contentAlignment = Alignment.Center,
     ) {
       Canvas(Modifier.fillMaxSize()) {
@@ -392,79 +367,34 @@ private fun ServiceRailItem(
     Surface(
       modifier = Modifier
         .fillMaxWidth()
-        .height(112.dp)
-        .padding(bottom = 8.dp)
+        .height(76.dp)
+        .padding(bottom = 6.dp)
         .border(1.dp, KeposPalette.Line, RoundedCornerShape(5.dp)),
       shape = RoundedCornerShape(5.dp),
       color = KeposPalette.Panel,
     ) {
-      Column(
-        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
+      Row(
+        modifier = Modifier.padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(
-            imageVector = serviceIcon(service.icon),
-            contentDescription = null,
-            tint = KeposPalette.Lime,
-            modifier = Modifier.size(20.dp),
-          )
-          Spacer(Modifier.width(9.dp))
-          Text(
-            text = service.name,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.titleLarge.copy(
-              fontSize = 18.sp,
-              lineHeight = 22.sp,
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-          ServiceActionButton(service, available, onAction)
-          Box {
-            IconButton(
-              onClick = { menuExpanded = true },
-              enabled = available,
-            ) {
-              Icon(
-                Lucide.EllipsisVertical,
-                contentDescription = "More actions for ${service.name}",
-                modifier = Modifier.size(18.dp),
-              )
-            }
-            DropdownMenu(
-              expanded = menuExpanded,
-              onDismissRequest = { menuExpanded = false },
-            ) {
-              if (service.url != null) {
-                DropdownMenuItem(
-                  text = { Text("Copy address") },
-                  onClick = {
-                    menuExpanded = false
-                    onCopyAddress()
-                  },
-                  leadingIcon = { Icon(Lucide.Copy, contentDescription = null) },
-                )
-              }
-              DropdownMenuItem(
-                text = { Text("View details") },
-                onClick = {
-                  menuExpanded = false
-                  onViewDetails()
-                },
-                leadingIcon = { Icon(Lucide.Settings, contentDescription = null) },
-              )
-            }
-          }
-        }
+        Icon(
+          imageVector = serviceIcon(service.icon),
+          contentDescription = null,
+          tint = KeposPalette.Lime,
+          modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(9.dp))
         Text(
-          text = service.url ?: "TCP service · desktop listener required",
-          color = KeposPalette.Muted,
-          fontFamily = KeposMono,
-          fontSize = 10.5.sp,
-          maxLines = 2,
+          text = service.name,
+          modifier = Modifier.weight(1f),
+          style = MaterialTheme.typography.titleLarge.copy(
+            fontSize = 18.sp,
+            lineHeight = 22.sp,
+          ),
+          maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
+        ServiceActionButton(service, available, onAction)
       }
     }
   }

@@ -51,7 +51,7 @@ export function createDesktopController(
       return;
     }
 
-    const service = current.services.find(
+    const service = current.subscriber?.services.find(
       ({ id }) => id === command.serviceId,
     );
     if (

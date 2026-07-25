@@ -1,4 +1,4 @@
-import { readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -117,7 +117,10 @@ export async function runDesktopBuild(repository: string): Promise<void> {
     force: true,
     recursive: true,
   });
-  for (const build of desktopBuildCommands(repository)) {
+  const [compile, ...builds] = desktopBuildCommands(repository);
+  await run(repository, compile);
+  await copyDesktopAssets(repository);
+  for (const build of builds) {
     await run(repository, build);
   }
 
@@ -138,6 +141,16 @@ export async function runDesktopBuild(repository: string): Promise<void> {
       throw new Error(`desktop app is missing ${required} framework`);
     }
   }
+}
+
+export async function copyDesktopAssets(repository: string): Promise<void> {
+  const target = path.join(repository, ".build", "desktop", "home");
+  await mkdir(target, { recursive: true });
+  await Promise.all(
+    ["index.html", "styles.css"].map((name) =>
+      copyFile(path.join(repository, "home", name), path.join(target, name)),
+    ),
+  );
 }
 
 async function run(

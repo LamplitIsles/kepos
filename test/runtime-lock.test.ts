@@ -12,12 +12,14 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  acquirePublisherRuntimeLock,
   acquireRuntimeLock,
   acquireSubscriberRuntimeLock,
   installRuntimeLock,
+  publisherRuntimeLockPath,
   subscriberRuntimeLockPath,
   writeAll,
-} from "../src/runtime/subscriber-lock.js";
+} from "../src/runtime/runtime-lock.js";
 
 test("runtime lock writing supports Bare file handles and short writes", async () => {
   const chunks: Buffer[] = [];
@@ -89,6 +91,30 @@ test("allows only one host runtime for a subscriber state directory", async () =
   } finally {
     await first.release();
     await rm(subscriberRuntimeLockPath(stateDir), { force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("allows only one host runtime for a publisher state directory", async () => {
+  const stateDir = await mkdtemp(path.join(tmpdir(), "kepos-publisher-lock-"));
+  const lockPath = publisherRuntimeLockPath(stateDir);
+  const first = await acquirePublisherRuntimeLock(stateDir);
+
+  try {
+    assert.equal(
+      path.basename(lockPath),
+      `.${path.basename(stateDir)}.publisher.runtime.lock`,
+    );
+    await assert.rejects(
+      () => acquirePublisherRuntimeLock(stateDir),
+      /publisher identity is already in use/i,
+    );
+    await first.release();
+    const next = await acquirePublisherRuntimeLock(stateDir);
+    await next.release();
+  } finally {
+    await first.release().catch(() => undefined);
+    await rm(lockPath, { force: true });
     await rm(stateDir, { recursive: true, force: true });
   }
 });

@@ -170,30 +170,52 @@ for clients that cannot resolve `*.localhost`; it is not the product-facing
 address. Both routes use the same publisher connection. This is not yet a Play
 Store release, and foreground-service policy remains unresolved.
 
-## macOS desktop subscriber
+## macOS desktop
 
-The unsigned Apple Silicon desktop app runs the real subscriber in one Bare
-process. It is an alternative to the subscriber CLI: the desktop and CLI cannot
-use the same subscriber state at the same time, and only one desktop instance
-may run on a Mac.
+The unsigned Apple Silicon desktop app runs the real publisher, subscriber, or
+both roles in one Bare process. The shared Kepos TOML decides which roles start;
+their identities stay in the fixed
+`~/.local/state/kepos-neo/{publisher,subscriber}` directories. Desktop and CLI
+cannot use the same publisher or subscriber state at the same time, and only
+one desktop instance may run on a Mac.
 
 Build and launch it from an initialized recursive checkout:
 
 ```sh
 npm run desktop:build
-dist/desktop/Kepos.app/Contents/MacOS/Kepos \
-  --state ~/.local/state/kepos-neo/subscriber \
-  --service ssh:2222
+dist/desktop/Kepos.app/Contents/MacOS/Kepos
 ```
+
+Set `enabled = true` on either or both role tables. For example, this starts
+only the subscriber:
+
+```toml
+[subscriber]
+enabled = true
+gateway_port = 17480
+route = "auto"
+
+[[subscriber.services]]
+id = "ssh"
+local_port = 2222
+```
+
+An absent role table, or one with `enabled = false`, is not started by desktop.
+Explicit CLI run commands still start the requested role and treat `enabled`
+only as desktop auto-start policy. `--config <path>` selects a non-default TOML
+for the desktop. Role-explicit state flags remain available for isolated smoke
+tests.
 
 The build compiles the pinned Bare WebKit fork before packaging
 `dist/desktop/Kepos.app`; Xcode command-line build tools are required. The app
-shows the publisher's validated Registry. HTTP `OPEN` actions use the macOS
+shows remote services from the subscriber Registry and a separate `Shared
+services` surface for the local publisher. HTTP `OPEN` actions use the macOS
 default browser, Navidrome copies its canonical `*.localhost` URL for Navic,
 and SSH copies its explicit loopback command. No Node or Electron child process
 is used. [ADR 0004](docs/adr/0004-two-level-subscriber-runtime-locking.md)
-defines how the desktop singleton and shared subscriber-state lock prevent
-competing hosts.
+defines the desktop singleton and subscriber lock; [ADR
+0006](docs/adr/0006-desktop-dual-role-runtime-ownership.md) adds independent
+publisher ownership and dual-role shutdown.
 
 ## Persistent multiplex CLI
 
@@ -232,7 +254,7 @@ npm run kepos -- subscriber set-publisher \
   --publisher-key <publisher-public-key>
 ```
 
-Publisher setup and both run commands read persistent CLI settings from
+The CLI and desktop read shared persistent settings from
 `$XDG_CONFIG_HOME/kepos/config.toml`, or `~/.config/kepos/config.toml` when
 `XDG_CONFIG_HOME` is unset:
 
@@ -244,6 +266,7 @@ bootstrap = [
 ]
 
 [publisher]
+enabled = false
 display_name = "kosmos"
 allow = ["<subscriber-public-key>"]
 
@@ -258,6 +281,7 @@ name = "Navidrome"
 target_port = 4533
 
 [subscriber]
+enabled = true
 gateway_port = 17480
 route = "auto"
 
@@ -274,10 +298,12 @@ subscriber, while empty publisher or subscriber service arrays mean Home-only
 publishing or no raw TCP listeners respectively.
 
 When `[publisher]` exists, it is the complete runtime publisher policy and all
-three fields (`display_name`, `allow`, and `services`) are required. Existing
-installations without that table continue to read display name, allowlist, and
-services from publisher state. Publisher and subscriber private keys, plus the
-subscriber's paired publisher contact, always remain in the state directory.
+three fields (`display_name`, `allow`, and `services`) are required. `enabled`
+is optional for CLI compatibility and defaults to not auto-starting that role
+in desktop. Existing installations without that table continue to read display
+name, allowlist, and services from publisher state. Publisher and subscriber
+private keys, plus the subscriber's paired publisher contact, always remain in
+the state directory.
 
 `setup publisher` can create the publisher identity directly from this TOML:
 
