@@ -48,10 +48,18 @@ const initial: DesktopSnapshot = {
   },
 };
 
+const pairingActions = {
+  approvePairing: async (): Promise<void> => undefined,
+  cancelPairing: async (): Promise<void> => undefined,
+  createPairingInvitation: async (): Promise<void> => undefined,
+  denyPairing: async (): Promise<void> => undefined,
+};
+
 test("desktop controller sends the latest snapshot after page readiness", async () => {
   const sent: string[] = [];
   const controller = createDesktopController({
     initialSnapshot: initial,
+    ...pairingActions,
     send: (message) => sent.push(message),
     openService: async () => {},
     quit: async () => {},
@@ -80,6 +88,7 @@ test("desktop controller opens only a current validated HTTP service", async () 
   const opened: string[] = [];
   const controller = createDesktopController({
     initialSnapshot: initial,
+    ...pairingActions,
     send: () => {},
     openService: async (url) => {
       opened.push(url);
@@ -115,6 +124,7 @@ test("desktop controller serializes commands and quits once", async () => {
   });
   const controller = createDesktopController({
     initialSnapshot: initial,
+    ...pairingActions,
     send: () => {},
     openService: async () => {
       events.push("open:start");
@@ -138,4 +148,34 @@ test("desktop controller serializes commands and quits once", async () => {
   await Promise.all([first, second, third]);
 
   assert.deepEqual(events, ["open:start", "open:end", "quit"]);
+});
+
+test("desktop controller forwards pairing actions in command order", async () => {
+  const events: string[] = [];
+  const controller = createDesktopController({
+    initialSnapshot: initial,
+    send: () => undefined,
+    openService: async () => undefined,
+    createPairingInvitation: async () => {
+      events.push("create");
+    },
+    cancelPairing: async () => {
+      events.push("cancel");
+    },
+    approvePairing: async () => {
+      events.push("approve");
+    },
+    denyPairing: async () => {
+      events.push("deny");
+    },
+    quit: async () => undefined,
+  });
+
+  await Promise.all([
+    controller.receive('{"type":"createPairingInvitation"}'),
+    controller.receive('{"type":"cancelPairing"}'),
+    controller.receive('{"type":"approvePairing"}'),
+    controller.receive('{"type":"denyPairing"}'),
+  ]);
+  assert.deepEqual(events, ["create", "cancel", "approve", "deny"]);
 });

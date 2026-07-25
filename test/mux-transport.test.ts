@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
+import compactModule from "compact-encoding";
 import { Duplex, Transform } from "node:stream";
 import { once } from "node:events";
 import { test } from "node:test";
+import ProtomuxModule from "protomux";
 
 import {
   createMuxPublisher,
   createMuxSubscriber,
+  type PairingDecision,
 } from "../src/mux/transport.js";
+
+const compact = compactModule as { string: unknown };
 
 class FramedDuplex extends Duplex {
   destroyCalls = 0;
@@ -119,6 +124,26 @@ function framedPair(): [FramedDuplex, FramedDuplex] {
   return [left, right];
 }
 
+function openRawPairingChannel(outer: Duplex): void {
+  const Protomux = ProtomuxModule as unknown as new (
+    stream: Duplex,
+  ) => {
+    createChannel(options: {
+      protocol: string;
+      id: Uint8Array;
+      handshake: unknown;
+    }): { open(handshake: string): void } | null;
+  };
+  const mux = new Protomux(outer);
+  const channel = mux.createChannel({
+    protocol: "kepos/pair/1",
+    id: Buffer.alloc(16, 1),
+    handshake: compact.string,
+  });
+  assert.ok(channel);
+  channel.open("");
+}
+
 async function flushFrames(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
@@ -219,6 +244,131 @@ test("multiplexes independent service streams over one persistent connection", a
   navidrome.destroy();
   subscriber.close();
   publisher.close();
+});
+
+test("promotes a pairing candidate to services on the same outer", async () => {
+  const [subscriberOuter, publisherOuter] = framedPair();
+  const scheduler = new ManualScheduler();
+  let decision: PairingDecision | undefined;
+  const publisher = createMuxPublisher(publisherOuter, {
+    authorized: false,
+    connect: async (serviceId) => prefixService(`${serviceId}:`),
+    onPairingRequest: (request, candidateDecision) => {
+      assert.deepEqual(request, {
+        token: Buffer.alloc(32, 7).toString("base64url"),
+        label: "Neil's Mac",
+        platform: "macos",
+      });
+      decision = candidateDecision;
+    },
+    schedulePairingRequestDeadline: scheduler.schedule,
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    authorized: false,
+  });
+  let pendingResponses = 0;
+
+  await assert.rejects(() => subscriber.open("home"), /not approved/i);
+  const pairing = subscriber.pair(
+    {
+      token: Buffer.alloc(32, 7).toString("base64url"),
+      label: "Neil's Mac",
+      platform: "macos",
+    },
+    { onPending: () => pendingResponses++ },
+  );
+  await waitFor(() => decision !== undefined, "pairing request was not received");
+  await waitFor(() => pendingResponses === 1, "pending response was not exposed");
+  assert.equal(scheduler.pending(), 0);
+
+  decision?.approve();
+  await pairing;
+  const home = await subscriber.open("home");
+  assert.equal(await exchange(home, "page"), "home:page");
+  assert.equal(subscriberOuter.destroyed, false);
+  assert.equal(publisherOuter.destroyed, false);
+
+  home.destroy();
+  subscriber.close();
+  publisher.close();
+});
+
+test("approval remains valid after the pending outer closes", async () => {
+  const [subscriberOuter, publisherOuter] = framedPair();
+  let decision: PairingDecision | undefined;
+  const publisher = createMuxPublisher(publisherOuter, {
+    authorized: false,
+    connect: async () => prefixService("service:"),
+    onPairingRequest: (_request, candidateDecision) => {
+      decision = candidateDecision;
+    },
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    authorized: false,
+  });
+  const pairing = subscriber.pair({
+    token: Buffer.alloc(32, 7).toString("base64url"),
+    label: "Restarting phone",
+    platform: "android",
+  });
+
+  await waitFor(() => decision !== undefined, "pairing request was not received");
+  subscriber.close();
+  await assert.rejects(pairing, /closed/i);
+  assert.doesNotThrow(() => decision?.approve());
+
+  publisher.close();
+});
+
+test("starts the pairing request deadline only after the channel opens", async () => {
+  const scheduler = new ManualScheduler();
+  const [candidateOuter, publisherOuter] = framedPair();
+  const publisherErrors: Error[] = [];
+  publisherOuter.on("error", (error) => publisherErrors.push(error));
+  const publisher = createMuxPublisher(publisherOuter, {
+    authorized: false,
+    connect: async () => prefixService("service:"),
+    onPairingRequest: () => undefined,
+    schedulePairingRequestDeadline: scheduler.schedule,
+  });
+
+  scheduler.advance(5_000);
+  assert.equal(publisherOuter.destroyed, false);
+  assert.equal(scheduler.pending(), 0);
+
+  openRawPairingChannel(candidateOuter);
+  await flushFrames();
+  assert.equal(scheduler.pending(), 1);
+
+  scheduler.advance(4_999);
+  assert.equal(publisherOuter.destroyed, false);
+  scheduler.advance(1);
+  assert.equal(publisherOuter.destroyed, true);
+  await flushFrames();
+  assert.match(publisherErrors[0]?.message ?? "", /deadline exceeded/i);
+
+  candidateOuter.destroy();
+  publisher.close();
+});
+
+test("closing a pairing mux cancels its request deadline", async () => {
+  const scheduler = new ManualScheduler();
+  const [candidateOuter, publisherOuter] = framedPair();
+  const publisher = createMuxPublisher(publisherOuter, {
+    authorized: false,
+    connect: async () => prefixService("service:"),
+    onPairingRequest: () => undefined,
+    schedulePairingRequestDeadline: scheduler.schedule,
+  });
+
+  openRawPairingChannel(candidateOuter);
+  await flushFrames();
+  assert.equal(scheduler.pending(), 1);
+  publisher.close();
+  await flushFrames();
+  assert.equal(scheduler.pending(), 0);
+
+  candidateOuter.destroy();
 });
 
 test("keeps one outer alive while publisher answers control heartbeats", async () => {

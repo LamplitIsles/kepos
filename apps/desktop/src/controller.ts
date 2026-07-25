@@ -13,6 +13,10 @@ export interface DesktopControllerOptions {
   initialSnapshot: DesktopSnapshot;
   send(message: string): void;
   openService(url: string): Promise<void>;
+  approvePairing(): Promise<void>;
+  cancelPairing(): Promise<void>;
+  createPairingInvitation(): Promise<void>;
+  denyPairing(): Promise<void>;
   quit(): Promise<void>;
 }
 
@@ -43,6 +47,22 @@ export function createDesktopController(
       if (quitStarted) return;
       quitStarted = true;
       await options.quit();
+      return;
+    }
+    if (command.type === "createPairingInvitation") {
+      await options.createPairingInvitation();
+      return;
+    }
+    if (command.type === "cancelPairing") {
+      await options.cancelPairing();
+      return;
+    }
+    if (command.type === "approvePairing") {
+      await options.approvePairing();
+      return;
+    }
+    if (command.type === "denyPairing") {
+      await options.denyPairing();
       return;
     }
 

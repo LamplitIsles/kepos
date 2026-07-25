@@ -173,10 +173,16 @@ ports 18480 and 18481. Android Gradle Plugin cleanup may uninstall that test
 package after the run, but it cannot replace, reconfigure, or remove the
 installed `io.github.ttalab.kepos` app and its state.
 
-The app generates its subscriber identity in app-private storage. Add the
-displayed public key to the publisher allowlist, paste the publisher public key
-into the app, and keep the foreground service running. An explicit Stop remains
-in effect when the Activity is reopened; Start clears that choice. The Navidrome card copies
+The app generates its subscriber identity in app-private storage. For normal
+setup, open **Add device** on a running desktop publisher, scan its QR, inspect
+the phone label and subscriber-key fingerprint on desktop, then choose Allow.
+The phone becomes usable on that already-open P2P connection; no publisher
+restart or second NAT traversal is needed. A denied or expired attempt returns
+the phone to setup for a new QR. Manual public-key entry remains the headless
+fallback.
+
+Keep the foreground service running. An explicit Stop remains in effect when
+the Activity is reopened; Start clears that choice. The Navidrome card copies
 the canonical local URL:
 
 ```text
@@ -234,6 +240,15 @@ is used. [ADR 0004](docs/adr/0004-two-level-subscriber-runtime-locking.md)
 defines the desktop singleton and subscriber lock; [ADR
 0006](docs/adr/0006-desktop-dual-role-runtime-ownership.md) adds independent
 publisher ownership and dual-role shutdown.
+
+The publisher surface also owns interactive pairing. **Add device** creates a
+two-minute QR. Unknown candidates cannot see the Registry or open services;
+desktop shows the authenticated subscriber-key fingerprint before Allow or
+Deny. Allow atomically updates the configured TOML allowlist and the running
+publisher, then promotes the same connection. [ADR
+0007](docs/adr/0007-pair-on-the-final-publisher-connection.md) defines the
+protocol, persistence order, expiry, and recovery rules. The headless CLI still
+uses explicit public-key allowlisting.
 
 ## Persistent multiplex CLI
 

@@ -79,6 +79,7 @@ dependencies {
   implementation("androidx.compose.ui:ui-tooling-preview")
   implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
   implementation("com.composables:icons-lucide:1.1.0")
+  implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
   debugImplementation("androidx.compose.ui:ui-tooling")
   testImplementation("junit:junit:4.13.2")

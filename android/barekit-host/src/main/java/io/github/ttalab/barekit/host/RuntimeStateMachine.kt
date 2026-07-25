@@ -66,6 +66,7 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
     subscriberPublicKey: String? = null,
     configured: Boolean = false,
     connection: String? = null,
+    error: String? = null,
     publisher: PublisherSnapshot? = null,
     services: List<ServiceSnapshot> = emptyList(),
   ) {
@@ -77,6 +78,7 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
       state = RuntimeState.RUNNING,
       runtimeId = runtimeId,
       echoUrl = echoUrl,
+      error = error,
       subscriberPublicKey = subscriberPublicKey,
       configured = configured,
       connection = connection,

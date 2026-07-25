@@ -227,10 +227,114 @@ test("desktop runtime starts both roles concurrently and polls publisher counter
   );
 });
 
+test("desktop runtime exposes publisher pairing invitation and approval actions", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  let status = publisherStatus(0, 0);
+  const runtime = await startDesktopRuntime(
+    {
+      publisher: { stateDir: "/state/publisher" },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      startPublisher: async () => ({
+        ...runningPublisher(() => status, events),
+        createPairingInvitation: () => {
+          events.push("pairing:create");
+          status = {
+            ...status,
+            pairing: {
+              phase: "inviting",
+              expiresAt: 1_750_000_120_000,
+              expired: false,
+            },
+          };
+          return {
+            uri: "kepos://pair?v=1&token=secret",
+            expiresAt: 1_750_000_120_000,
+          };
+        },
+        approvePairing: async () => {
+          events.push("pairing:approve");
+          status = { ...status, pairing: { phase: "idle" } };
+        },
+      }),
+    }),
+  );
+
+  await runtime.createPairingInvitation();
+  assert.equal(events.includes("pairing:create"), true);
+  assert.deepEqual(snapshots.at(-1)?.publisher?.pairing, {
+    phase: "inviting",
+    expiresAt: 1_750_000_120_000,
+    expired: false,
+    qrSvg: "<svg>pairing</svg>",
+  });
+  assert.equal(
+    JSON.stringify(snapshots.at(-1)).includes("token=secret"),
+    false,
+  );
+
+  status = {
+    ...status,
+    pairing: {
+      phase: "pending",
+      subscriberKey: "cd".repeat(32),
+      keyFingerprint: "cd".repeat(8),
+      label: "Neil's Pixel",
+      platform: "android",
+    },
+  };
+  await runtime.poll();
+  assert.equal(snapshots.at(-1)?.publisher?.pairing?.phase, "pending");
+  await runtime.approvePairing();
+  assert.equal(events.includes("pairing:approve"), true);
+  assert.equal(snapshots.at(-1)?.publisher?.pairing, undefined);
+
+  await runtime.stop();
+});
+
+test("desktop keeps a failed approval pending and exposes its error", async () => {
+  const snapshots: DesktopSnapshot[] = [];
+  const status = {
+    ...publisherStatus(0, 0),
+    pairing: {
+      phase: "pending" as const,
+      subscriberKey: "cd".repeat(32),
+      keyFingerprint: "cd".repeat(8),
+      label: "Neil's Pixel",
+      platform: "android",
+    },
+  };
+  const runtime = await startDesktopRuntime(
+    {
+      publisher: { stateDir: "/state/publisher" },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies([], {
+      startPublisher: async () => ({
+        ...runningPublisher(() => status, []),
+        approvePairing: async () => {
+          throw new Error("Cannot save publisher allowlist");
+        },
+      }),
+    }),
+  );
+
+  await assert.rejects(runtime.approvePairing(), /Cannot save/);
+  assert.deepEqual(snapshots.at(-1)?.publisher?.pairing, {
+    ...status.pairing,
+    error: "Cannot save publisher allowlist",
+  });
+
+  await runtime.stop();
+});
+
 test("desktop runtime applies shared network and role policy", async () => {
   const events: string[] = [];
   let publisherStartOptions: Record<string, unknown> | undefined;
   let subscriberStartOptions: Record<string, unknown> | undefined;
+  const persisted: Array<{ configPath: string; allow: string[] }> = [];
   const bootstrap = [{ host: "bootstrap.example", port: 49_737 }];
   const publisherPolicy = {
     displayName: "Configured publisher",
@@ -241,6 +345,7 @@ test("desktop runtime applies shared network and role policy", async () => {
     {
       publisher: {
         stateDir: "/state/publisher",
+        configPath: "/config/kepos.toml",
         bootstrap,
         policy: publisherPolicy,
       },
@@ -265,11 +370,20 @@ test("desktop runtime applies shared network and role policy", async () => {
           events,
         );
       },
+      persistPublisherAllowlist: async (configPath, allow) => {
+        persisted.push({ configPath, allow });
+      },
     }),
   );
 
   assert.deepEqual(publisherStartOptions?.bootstrap, bootstrap);
   assert.deepEqual(publisherStartOptions?.policy, publisherPolicy);
+  await (
+    publisherStartOptions?.persistAllowlist as (allow: string[]) => Promise<void>
+  )(["33".repeat(32)]);
+  assert.deepEqual(persisted, [
+    { configPath: "/config/kepos.toml", allow: ["33".repeat(32)] },
+  ]);
   assert.deepEqual(subscriberStartOptions?.bootstrap, bootstrap);
   assert.equal(subscriberStartOptions?.route, "public");
   await runtime.stop();
@@ -652,6 +766,8 @@ function dependencies(
       );
     },
     readRegistry: async () => registry,
+    renderPairingQr: async () => "<svg>pairing</svg>",
+    persistPublisherAllowlist: async () => undefined,
     ...overrides,
   };
 }
@@ -697,6 +813,7 @@ function publisherStatus(
     homeUrl: "http://127.0.0.1:3000",
     activeSubscribers,
     acceptedConnections,
+    pairing: { phase: "idle" },
   };
 }
 
@@ -714,6 +831,11 @@ function runningPublisher(
     },
     acceptedConnections: () => status().acceptedConnections,
     activeSubscribers: () => status().activeSubscribers,
+    approvePairing: async () => undefined,
+    cancelPairing: () => undefined,
+    createPairingInvitation: () => ({ uri: "kepos://pair", expiresAt: 0 }),
+    denyPairing: () => undefined,
+    pairingStatus: () => ({ phase: "idle" }),
     status,
     stop: async () => {
       events.push("publisher:stop");

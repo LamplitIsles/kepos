@@ -104,7 +104,8 @@ private fun validateEnvelope(envelope: HostEnvelope) {
         envelope.method == "ping" ||
           envelope.method == "status" ||
           envelope.method == "stop" ||
-          envelope.method == "configure"
+          envelope.method == "configure" ||
+          envelope.method == "pair"
       ) {
         "unsupported control request method"
       }

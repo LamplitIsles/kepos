@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import {
+  defaultKeposConfigPath,
   loadKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
@@ -21,6 +22,7 @@ export interface DesktopSubscriberOptions {
 
 export interface DesktopPublisherOptions {
   stateDir: string;
+  configPath?: string;
   bootstrap?: DhtAddress[];
   policy?: PublisherRuntimePolicy;
 }
@@ -34,6 +36,7 @@ export interface DesktopConfigContext {
   homeDirectory: string;
   config?: KeposConfig;
   environment?: Record<string, string | undefined>;
+  configPath?: string;
 }
 
 export interface LoadDesktopOptionsContext {
@@ -63,6 +66,9 @@ export async function loadDesktopOptions(
     homeDirectory: context.homeDirectory,
     environment: context.environment,
     config,
+    configPath:
+      configPath ??
+      defaultKeposConfigPath(context.environment, context.homeDirectory),
   });
 }
 
@@ -148,6 +154,7 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
       ? {
           publisher: {
             stateDir: path.join(stateRoot, "publisher"),
+            ...(context.configPath ? { configPath: context.configPath } : {}),
             ...(bootstrap ? { bootstrap } : {}),
             policy: {
               displayName: publisherConfig.displayName,

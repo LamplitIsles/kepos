@@ -50,6 +50,22 @@ export interface DesktopPublisherRole {
   activeSubscribers: number;
   acceptedConnections: number;
   services: Array<{ id: string; name: string; targetPort: number }>;
+  pairing?:
+    | { phase: "idle" }
+    | {
+        phase: "inviting";
+        expiresAt: number;
+        expired: boolean;
+        qrSvg?: string;
+      }
+    | {
+        phase: "pending";
+        subscriberKey: string;
+        keyFingerprint: string;
+        label: string;
+        platform: string;
+        error?: string;
+      };
   error?: string;
 }
 
@@ -63,6 +79,10 @@ export interface DesktopSnapshot {
 export type DesktopCommand =
   | { type: "ready" }
   | { type: "openService"; serviceId: string }
+  | { type: "createPairingInvitation" }
+  | { type: "cancelPairing" }
+  | { type: "approvePairing" }
+  | { type: "denyPairing" }
   | { type: "quit" };
 
 export function parseDesktopCommand(source: string): DesktopCommand {
@@ -91,7 +111,14 @@ export function parseDesktopCommand(source: string): DesktopCommand {
     return { type: "openService", serviceId: value.serviceId };
   }
 
-  if (value.type === "ready" || value.type === "quit") {
+  if (
+    value.type === "ready" ||
+    value.type === "quit" ||
+    value.type === "createPairingInvitation" ||
+    value.type === "cancelPairing" ||
+    value.type === "approvePairing" ||
+    value.type === "denyPairing"
+  ) {
     rejectUnknownFields(value, ["type"]);
     return { type: value.type };
   }

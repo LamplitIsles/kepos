@@ -20,8 +20,12 @@ import {
   startSubscriber,
   type RunningSubscriber,
 } from "../src/runtime/subscriber.js";
-import { setupPublisher } from "../src/state/publisher.js";
 import {
+  loadPublisherState,
+  setupPublisher,
+} from "../src/state/publisher.js";
+import {
+  setSubscriberPendingPublisher,
   setSubscriberPublisher,
   setupSubscriber,
 } from "../src/state/subscriber.js";
@@ -37,6 +41,7 @@ import {
   type RunningMuxSubscriber,
 } from "../src/mux/transport.js";
 import { loadSubscriberState } from "../src/state/subscriber.js";
+import { parsePairingInvitation } from "../src/pairing/invitation.js";
 
 interface HyperDhtTestnet {
   bootstrap: Array<{ host: string; port: number }>;
@@ -636,6 +641,7 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
   const publisherState = path.join(root, "publisher");
   let testnet: HyperDhtTestnet | undefined;
   let publisher: RunningPublisher | undefined;
+  let allowed: RunningSubscriber | undefined;
   let unknown: RunningSubscriber | undefined;
   let testError: unknown;
   const publisherEvents: Observation[] = [];
@@ -650,6 +656,11 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
       displayName: "kosmos",
       subscriberPublicKeys: [allowedSetup.publicKey],
       services: [],
+    });
+    await setSubscriberPublisher({
+      stateDir: allowedState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
     });
     await setSubscriberPublisher({
       stateDir: unknownState,
@@ -684,11 +695,23 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
     assert.ok(rejected?.outerId);
     assert.equal(typeof rejected.remotePublicKey, "string");
     assert.equal((rejected.remotePublicKey as string).length, 16);
+
+    publisher.createPairingInvitation();
+    allowed = await startSubscriber({
+      stateDir: allowedState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [],
+      log: noLog,
+    });
+    assert.equal((await fetch(`${allowed.home.url}/healthz`)).status, 200);
+    assert.equal(publisher.activeSubscribers(), 1);
   } catch (error) {
     testError = error;
   }
 
   const cleanup = await Promise.allSettled([
+    allowed?.stop(),
     unknown?.stop(),
     publisher?.stop(),
     testnet?.destroy(),
@@ -701,6 +724,429 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
     throw new AggregateError(
       [testError, ...cleanupErrors].filter((error) => error !== undefined),
       "allowlist test or cleanup failed",
+    );
+  }
+});
+
+test("publisher approves an unknown subscriber on its pairing outer", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-pairing-"));
+  const publisherState = path.join(root, "publisher");
+  const subscriberState = path.join(root, "subscriber");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriberDht: DhtNode | undefined;
+  let subscriberMux: RunningMuxSubscriber | undefined;
+  let testError: unknown;
+  const pairingEvents: Observation[] = [];
+
+  try {
+    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [],
+      services: [],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+      observe: (event) => pairingEvents.push(event),
+    });
+    const invitation = publisher.createPairingInvitation();
+    const parsed = parsePairingInvitation(invitation.uri);
+    const state = await loadSubscriberState(subscriberState);
+    const keyPair = keyPairFromSecretKey(state.identity.secretKey);
+    subscriberDht = createDht({ bootstrap: testnet.bootstrap, keyPair });
+    const outer = subscriberDht.connect(
+      Buffer.from(publisherSetup.publisherKey, "hex"),
+      { keyPair, localConnection: true, reusableSocket: true },
+    );
+    if (!outer.connected) await once(outer, "connect");
+    subscriberMux = createMuxSubscriber(outer, {
+      authorized: false,
+      heartbeat: false,
+    });
+
+    const pairing = subscriberMux.pair({
+      token: parsed.token,
+      label: "Neil's test device",
+      platform: "test",
+    });
+    await waitFor(
+      () => publisher?.pairingStatus().phase === "pending",
+      "publisher did not receive the pairing request",
+    );
+    assert.equal(publisher.activeSubscribers(), 0);
+    await assert.rejects(() => subscriberMux!.open("home"), /not approved/i);
+
+    await publisher.approvePairing();
+    await pairing;
+    const home = await subscriberMux.open("home");
+    home.destroy();
+    await waitFor(
+      () => publisher?.activeSubscribers() === 1,
+      "approved subscriber did not become active",
+    );
+    const persisted = await loadPublisherState(publisherState);
+    assert.deepEqual(persisted.config.allow, [subscriberSetup.publicKey]);
+    assert.deepEqual(
+      pairingEvents
+        .filter(({ event }) => event.startsWith("pairing."))
+        .map(({ event }) => event),
+      [
+        "pairing.invitation-created",
+        "pairing.requested",
+        "pairing.approved",
+      ],
+    );
+    assert.equal(JSON.stringify(pairingEvents).includes(parsed.token), false);
+  } catch (error) {
+    testError = error;
+  }
+
+  subscriberMux?.close();
+  const cleanup = await Promise.allSettled([
+    publisher?.stop(),
+    subscriberDht?.destroy({ force: true }),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "pairing test or cleanup failed",
+    );
+  }
+});
+
+test("publisher closes an idle pairing candidate when its invitation expires", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-pairing-expiry-"));
+  const publisherState = path.join(root, "publisher");
+  const subscriberState = path.join(root, "subscriber");
+  let now = 1_750_000_000_000;
+  let expiryTask:
+    | { callback: () => void; cancelled: boolean; delayMs: number }
+    | undefined;
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriberDht: DhtNode | undefined;
+  let candidateOuter: DhtStream | undefined;
+  let testError: unknown;
+  const pairingEvents: Observation[] = [];
+
+  try {
+    await setupSubscriber({ stateDir: subscriberState });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [],
+      services: [],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    const subscriberStateValue = await loadSubscriberState(subscriberState);
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+      now: () => now,
+      observe: (event) => pairingEvents.push(event),
+      schedulePairingExpiry: (delayMs, callback) => {
+        const task = { callback, cancelled: false, delayMs };
+        expiryTask = task;
+        return () => {
+          task.cancelled = true;
+        };
+      },
+    });
+    const invitation = publisher.createPairingInvitation();
+    assert.equal(expiryTask?.delayMs, 120_000);
+
+    const keyPair = keyPairFromSecretKey(subscriberStateValue.identity.secretKey);
+    subscriberDht = createDht({ bootstrap: testnet.bootstrap, keyPair });
+    candidateOuter = subscriberDht.connect(
+      Buffer.from(publisherSetup.publisherKey, "hex"),
+      { keyPair, localConnection: true, reusableSocket: true },
+    );
+    if (!candidateOuter.connected) await once(candidateOuter, "connect");
+    await waitFor(
+      () => publisher?.acceptedConnections() === 1,
+      "publisher did not admit the pairing candidate",
+    );
+    candidateOuter.on("error", () => undefined);
+    const closed = new Promise<void>((resolve) => {
+      candidateOuter?.once("close", () => resolve());
+    });
+    now = invitation.expiresAt;
+    assert.equal(expiryTask?.cancelled, false);
+    expiryTask?.callback();
+    await closed;
+
+    assert.equal(candidateOuter.destroyed, true);
+    assert.deepEqual(publisher.pairingStatus(), {
+      phase: "inviting",
+      expiresAt: invitation.expiresAt,
+      expired: true,
+    });
+    assert.equal(publisher.activeSubscribers(), 0);
+    assert.equal(
+      pairingEvents.some(
+        ({ event }) => event === "pairing.invitation-expired",
+      ),
+      true,
+    );
+  } catch (error) {
+    testError = error;
+  }
+
+  const cleanup = await Promise.allSettled([
+    publisher?.stop(),
+    subscriberDht?.destroy({ force: true }),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    const errors = [testError, ...cleanupErrors].filter(
+      (error) => error !== undefined,
+    );
+    throw new AggregateError(
+      errors,
+      `pairing expiry test or cleanup failed: ${errors.map(String).join("; ")}`,
+    );
+  }
+});
+
+test("publisher persistence failure never authorizes the pairing candidate", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-pairing-persist-fail-"));
+  const publisherState = path.join(root, "publisher");
+  const subscriberState = path.join(root, "subscriber");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriberDht: DhtNode | undefined;
+  let subscriberMux: RunningMuxSubscriber | undefined;
+  let testError: unknown;
+
+  try {
+    await setupSubscriber({ stateDir: subscriberState });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [],
+      services: [],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    const subscriberStateValue = await loadSubscriberState(subscriberState);
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+      persistAllowlist: async () => {
+        throw new Error("disk full");
+      },
+    });
+    const invitation = parsePairingInvitation(
+      publisher.createPairingInvitation().uri,
+    );
+    const keyPair = keyPairFromSecretKey(subscriberStateValue.identity.secretKey);
+    subscriberDht = createDht({ bootstrap: testnet.bootstrap, keyPair });
+    const outer = subscriberDht.connect(
+      Buffer.from(publisherSetup.publisherKey, "hex"),
+      { keyPair, localConnection: true, reusableSocket: true },
+    );
+    outer.on("error", () => undefined);
+    if (!outer.connected) await once(outer, "connect");
+    subscriberMux = createMuxSubscriber(outer, {
+      authorized: false,
+      heartbeat: false,
+    });
+    const pairing = subscriberMux.pair({
+      token: invitation.token,
+      label: "Neil's test device",
+      platform: "test",
+    });
+    await waitFor(
+      () => publisher?.pairingStatus().phase === "pending",
+      "publisher did not receive the persistence-failure candidate",
+    );
+
+    await assert.rejects(() => publisher!.approvePairing(), /disk full/);
+    assert.equal(publisher.activeSubscribers(), 0);
+    assert.equal(publisher.pairingStatus().phase, "pending");
+    await assert.rejects(() => subscriberMux!.open("home"), /not approved/i);
+    assert.deepEqual((await loadPublisherState(publisherState)).config.allow, []);
+
+    publisher.denyPairing();
+    await assert.rejects(pairing, /denied|closed/i);
+    await waitFor(() => outer.destroyed, "denied pairing outer stayed open");
+    assert.equal(publisher.activeSubscribers(), 0);
+    assert.deepEqual(publisher.pairingStatus(), { phase: "idle" });
+  } catch (error) {
+    testError = error;
+  }
+
+  subscriberMux?.close();
+  const cleanup = await Promise.allSettled([
+    publisher?.stop(),
+    subscriberDht?.destroy({ force: true }),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "pairing persistence-failure test or cleanup failed",
+    );
+  }
+});
+
+test("subscriber runtime pairs and promotes its pending contact without reconnecting", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-runtime-pairing-"));
+  const publisherState = path.join(root, "publisher");
+  const subscriberState = path.join(root, "subscriber");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let testError: unknown;
+
+  try {
+    await setupSubscriber({ stateDir: subscriberState });
+    await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [],
+      services: [],
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    const invitation = publisher.createPairingInvitation();
+    const starting = startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [],
+      log: noLog,
+      pairing: {
+        invitation: invitation.uri,
+        deviceLabel: "Neil's test device",
+        platform: "test",
+      },
+    });
+
+    await waitFor(
+      () => publisher?.pairingStatus().phase === "pending",
+      "publisher did not receive runtime pairing request",
+    );
+    await publisher.approvePairing();
+    subscriber = await starting;
+
+    assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
+    assert.equal(publisher.acceptedConnections(), 1);
+    assert.equal((await loadSubscriberState(subscriberState)).contact.label, "kosmos");
+  } catch (error) {
+    testError = error;
+  }
+
+  const cleanup = await Promise.allSettled([
+    subscriber?.stop(),
+    publisher?.stop(),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "subscriber runtime pairing test or cleanup failed",
+    );
+  }
+});
+
+test("subscriber recovers a pending contact after publisher approval response is lost", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-pairing-recovery-"));
+  const publisherState = path.join(root, "publisher");
+  const subscriberState = path.join(root, "subscriber");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let testError: unknown;
+
+  try {
+    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [],
+    });
+    await setSubscriberPendingPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    subscriber = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      services: [],
+      log: noLog,
+    });
+
+    assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
+    assert.equal((await loadSubscriberState(subscriberState)).contact.label, "kosmos");
+  } catch (error) {
+    testError = error;
+  }
+
+  const cleanup = await Promise.allSettled([
+    subscriber?.stop(),
+    publisher?.stop(),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "pairing recovery test or cleanup failed",
     );
   }
 });

@@ -70,6 +70,25 @@ test("desktop UI renders subscriber and local publisher as separate roles", () =
   assert.doesNotMatch(html, /type:\s*"copyPublisherKey"/);
 });
 
+test("desktop publisher UI renders QR invitation and explicit approval states", () => {
+  const html = renderDesktopUi();
+
+  assert.match(html, /data-action="create-pairing"/);
+  assert.match(html, /class="publisher-primary-actions"/);
+  assert.match(html, /class="publisher-meta"/);
+  assert.ok(
+    html.indexOf('class="publisher-primary-actions"') <
+      html.indexOf('class="publisher-meta"'),
+    "Add device must stay ahead of optional publisher metadata",
+  );
+  assert.match(html, /data-role="pairing"/);
+  assert.match(html, /pairing\.qrSvg/);
+  assert.match(html, /type: "approvePairing"/);
+  assert.match(html, /type: "denyPairing"/);
+  assert.match(html, /type: "cancelPairing"/);
+  assert.doesNotMatch(html, /pairing\.uri[^\n]*textContent/);
+});
+
 test("desktop UI derives actions from snapshots without hard-coded endpoints", () => {
   const html = renderDesktopUi();
 

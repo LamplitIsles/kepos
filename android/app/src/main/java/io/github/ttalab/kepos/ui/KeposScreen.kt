@@ -76,6 +76,7 @@ fun KeposScreen(
   onConfigure: (String) -> Unit,
   onCopyText: (String) -> Unit,
   onOpenUrl: (String) -> Unit,
+  onScanPairing: () -> Unit = {},
 ) {
   val model = KeposUiModel.from(snapshot)
   var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -117,10 +118,12 @@ fun KeposScreen(
         )
         model.destination == KeposDestination.SETUP -> SetupScreen(
           title = "Bring your services here.",
-          subtitle = "Connect this phone to one trusted Kepos publisher.",
+          subtitle = snapshot.error
+            ?: "Connect this phone to one trusted Kepos publisher.",
           subscriberPublicKey = snapshot.subscriberPublicKey,
           onCopyText = onCopyText,
           onConfigure = onConfigure,
+          onScanPairing = onScanPairing,
         )
         model.destination == KeposDestination.SERVICES -> ServiceHome(
           model = model,
@@ -143,10 +146,14 @@ fun KeposScreen(
           onAction = onStart,
         )
         else -> ConnectionScreen(
-          title = "Finding your publisher",
+          title = connectionTitle(model.connection),
           detail = connectionDetail(model.connection),
-          action = null,
-          onAction = onStart,
+          action = if (model.connection == "awaiting-approval") {
+            "Scan another code"
+          } else {
+            null
+          },
+          onAction = onScanPairing,
           secondaryAction = "Settings",
           onSecondaryAction = { showSettings = true },
         )
@@ -426,6 +433,7 @@ private fun SetupScreen(
   onBack: (() -> Unit)? = null,
   subscriberPublicKey: String? = null,
   onCopyText: (String) -> Unit = {},
+  onScanPairing: (() -> Unit)? = null,
 ) {
   var publisherKey by rememberSaveable { mutableStateOf("") }
   Column(
@@ -483,8 +491,24 @@ private fun SetupScreen(
       }
     }
     Spacer(Modifier.height(36.dp))
+    if (onScanPairing != null) {
+      Button(
+        onClick = onScanPairing,
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(54.dp),
+        shape = RoundedCornerShape(4.dp),
+        colors = ButtonDefaults.buttonColors(
+          containerColor = KeposPalette.Lime,
+          contentColor = KeposPalette.Ink,
+        ),
+      ) {
+        Text("Scan invitation")
+      }
+      Spacer(Modifier.height(28.dp))
+    }
     Text(
-      "PUBLISHER PUBLIC KEY",
+      "OR ENTER PUBLISHER PUBLIC KEY",
       color = KeposPalette.Lime,
       style = MaterialTheme.typography.labelMedium,
     )
@@ -516,8 +540,8 @@ private fun SetupScreen(
         .height(54.dp),
       shape = RoundedCornerShape(4.dp),
       colors = ButtonDefaults.buttonColors(
-        containerColor = KeposPalette.Lime,
-        contentColor = KeposPalette.Ink,
+        containerColor = KeposPalette.PanelHigh,
+        contentColor = KeposPalette.Cream,
       ),
     ) {
       Text("Connect")
@@ -717,7 +741,17 @@ private fun statusLabel(connection: String?): String = when (connection) {
   else -> "Offline"
 }
 
-private fun connectionDetail(connection: String?): String = when (connection) {
+internal fun connectionTitle(connection: String?): String = when (connection) {
+  "pairing-connecting" -> "Sending pairing request"
+  "awaiting-approval" -> "Waiting for approval"
+  else -> "Finding your publisher"
+}
+
+internal fun connectionDetail(connection: String?): String = when (connection) {
+  "pairing-connecting" ->
+    "Kepos is finding and authenticating the publisher from the invitation."
+  "awaiting-approval" ->
+    "The request reached your publisher. Choose Allow on that device."
   "reconnecting" -> "The previous path closed. Kepos is opening a new one."
   "offline" -> "The publisher is not reachable yet. Kepos will keep trying."
   else -> "Kepos is discovering and authenticating the publisher."

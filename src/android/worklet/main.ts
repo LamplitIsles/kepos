@@ -7,6 +7,7 @@ import {
 import type { RunningSubscriber } from "../../runtime/subscriber.js";
 import { startSubscriber } from "../../runtime/subscriber.js";
 import {
+  loadSubscriberConnectionState,
   setSubscriberPublisher,
   setupSubscriber,
 } from "../../state/subscriber.js";
@@ -31,22 +32,37 @@ if (
 }
 const navidromeUrl = `http://navidrome.localhost:${gatewayPort}/`;
 const setup = await setupSubscriber({ stateDir });
+const initialConnectionState = setup.configured
+  ? await loadSubscriberConnectionState(stateDir)
+  : undefined;
 const registry = new AndroidRegistryState();
 let configured = setup.configured;
 let connection: "offline" | "connecting" = "offline";
+let connectionError: string | undefined;
+let pairingConnection:
+  | "pairing-connecting"
+  | "awaiting-approval"
+  | undefined = initialConnectionState?.pending
+    ? "awaiting-approval"
+    : undefined;
 let running: RunningSubscriber | undefined;
 let connectTask: Promise<void> | undefined;
 let registryTask: Promise<void> | undefined;
 let registryGeneration = 0;
 
 const status = (): Record<string, unknown> => {
-  const currentConnection = running?.status().connection ?? connection;
+  const currentConnection = connectionError
+    ? "offline"
+    : pairingConnection
+      ? pairingConnection
+    : running?.status().connection ?? connection;
   registry.observeConnection(currentConnection);
   const known = registry.snapshot();
   return {
     subscriberPublicKey: setup.publicKey,
-    configured,
+    configured: configured && connectionError === undefined,
     connection: currentConnection,
+    ...(connectionError ? { error: connectionError } : {}),
     ...(known ?? {}),
   };
 };
@@ -100,6 +116,8 @@ const controller = new WorkletController({
     BareKit.IPC.write(frame);
   },
   async configurePublisher(publisherKey) {
+    connectionError = undefined;
+    pairingConnection = undefined;
     registryGeneration++;
     registry.clear();
     await connectTask;
@@ -114,6 +132,56 @@ const controller = new WorkletController({
     connect();
     return status();
   },
+  async pairPublisher(invitation, deviceLabel, platform) {
+    if (configured) {
+      const current = await loadSubscriberConnectionState(stateDir);
+      if (!current.pending) {
+        throw new Error("Subscriber already has an approved publisher");
+      }
+    }
+    registryGeneration++;
+    registry.clear();
+    connectionError = undefined;
+    pairingConnection = "pairing-connecting";
+    await connectTask;
+    await running?.stop();
+    running = undefined;
+    configured = false;
+    connection = "connecting";
+    try {
+      running = await startSubscriber({
+        stateDir,
+        gatewayPort,
+        bootstrap,
+        services: [{ id: "navidrome", localPort: navidromePort }],
+        pairing: {
+          invitation,
+          deviceLabel,
+          platform,
+          onStatus(status) {
+            pairingConnection =
+              status === "awaiting-approval" ? status : undefined;
+            if (status === "awaiting-approval") controller.publishStatus();
+          },
+        },
+        onTerminalConnectionError(error) {
+          connection = "offline";
+          connectionError = error.message;
+          pairingConnection = undefined;
+          controller.publishStatus();
+        },
+        waitForPublisher: false,
+      });
+      configured = true;
+      return status();
+    } catch (error) {
+      connection = "offline";
+      connectionError = error instanceof Error ? error.message : String(error);
+      pairingConnection = undefined;
+      configured = (await setupSubscriber({ stateDir })).configured;
+      throw error;
+    }
+  },
   async stopEcho() {
     clearInterval(statusTimer);
     registryGeneration++;
@@ -121,6 +189,7 @@ const controller = new WorkletController({
     await running?.stop();
     running = undefined;
     connection = "offline";
+    pairingConnection = undefined;
   },
 });
 

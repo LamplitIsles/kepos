@@ -159,6 +159,13 @@ class KeposForegroundService : Service() {
     fun configurePublisher(publisherKey: String): CompletableFuture<RuntimeSnapshot> =
       runtime.configurePublisher(publisherKey)
 
+    fun pairPublisher(
+      invitation: String,
+      deviceLabel: String,
+      platform: String,
+    ): CompletableFuture<RuntimeSnapshot> =
+      runtime.pairPublisher(invitation, deviceLabel, platform)
+
     fun observe(listener: (RuntimeSnapshot) -> Unit): AutoCloseable {
       listeners += listener
       listener(runtime.snapshot())

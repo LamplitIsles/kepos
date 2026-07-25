@@ -217,6 +217,23 @@ test("Bare host protocol carries publisher configuration without exposing eval",
   assert.deepEqual(parseEnvelope(request), request);
 });
 
+test("Bare host protocol carries a pairing invitation without a private key", () => {
+  const request = {
+    version: 1,
+    kind: "request",
+    id: 12,
+    method: "pair",
+    params: {
+      invitation: "kepos://pair?v=1&token=one-time",
+      deviceLabel: "Neil's Pixel",
+      platform: "android",
+    },
+  };
+
+  assert.deepEqual(parseEnvelope(request), request);
+  assert.doesNotMatch(JSON.stringify(request), /privateKey|secretKey|seed/);
+});
+
 function rawFrame(payload: Uint8Array): Uint8Array {
   const frame = new Uint8Array(4 + payload.byteLength);
   new DataView(frame.buffer).setUint32(0, payload.byteLength);

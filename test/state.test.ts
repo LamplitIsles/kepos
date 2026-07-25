@@ -21,6 +21,9 @@ import {
   setupPublisher,
 } from "../src/state/publisher.js";
 import {
+  loadSubscriberConnectionState,
+  promoteSubscriberPendingPublisher,
+  setSubscriberPendingPublisher,
   setSubscriberPublisher,
   setupSubscriber,
 } from "../src/state/subscriber.js";
@@ -84,6 +87,52 @@ test("subscriber state keeps the current identity file and replaces only its pub
     assert.equal((await stat(stateDir)).mode & 0o777, 0o700);
     assert.equal((await stat(identityPath)).mode & 0o777, 0o600);
   }
+});
+
+test("subscriber pairing persists only a pending publisher contact before approval", async () => {
+  const stateDir = await stateDirectory("subscriber-pending");
+  const setup = await setupSubscriber({ stateDir });
+  await setSubscriberPendingPublisher({
+    stateDir,
+    label: "Kosmos",
+    publisherKey: "11".repeat(32),
+  });
+
+  assert.deepEqual(await readdir(stateDir), [
+    "client.identity.json",
+    "publisher.pending.json",
+  ]);
+  const pending = await loadSubscriberConnectionState(stateDir);
+  assert.equal(pending.identity.publicKey, setup.publicKey);
+  assert.deepEqual({ contact: pending.contact, pending: pending.pending }, {
+    contact: {
+      publisherKey: "11".repeat(32),
+      label: "Kosmos",
+      requestedLocalPort: 0,
+    },
+    pending: true,
+  });
+  assert.doesNotMatch(
+    await readFile(path.join(stateDir, "publisher.pending.json"), "utf8"),
+    /token/i,
+  );
+  assert.equal((await setupSubscriber({ stateDir })).configured, true);
+
+  await promoteSubscriberPendingPublisher(stateDir);
+  assert.deepEqual(await readdir(stateDir), [
+    "client.identity.json",
+    "publisher.contact.json",
+  ]);
+  assert.equal((await loadSubscriberConnectionState(stateDir)).pending, false);
+  await assert.rejects(
+    () =>
+      setSubscriberPendingPublisher({
+        stateDir,
+        label: "Other",
+        publisherKey: "22".repeat(32),
+      }),
+    /already has an approved publisher/i,
+  );
 });
 
 test("publisher setup permits deny-all and rejects a different repeated topology", async () => {

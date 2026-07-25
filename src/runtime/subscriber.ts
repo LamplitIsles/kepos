@@ -33,7 +33,13 @@ import {
   createMuxSubscriber,
   type RunningMuxSubscriber,
 } from "../mux/transport.js";
-import { loadSubscriberState } from "../state/subscriber.js";
+import { parsePairingInvitation } from "../pairing/invitation.js";
+import type { PairingRequest } from "../pairing/protocol.js";
+import {
+  loadSubscriberConnectionState,
+  promoteSubscriberPendingPublisher,
+  setSubscriberPendingPublisher,
+} from "../state/subscriber.js";
 
 export interface SubscriberService {
   id: string;
@@ -56,6 +62,13 @@ export interface StartSubscriberOptions {
   log?: (line: string) => void;
   now?: () => number;
   observe?: Observe;
+  onTerminalConnectionError?: (error: Error) => void;
+  pairing?: {
+    invitation: string;
+    deviceLabel: string;
+    platform: string;
+    onStatus?: (status: "awaiting-approval" | "approved") => void;
+  };
   route?: Route;
   sleep?: (delayMs: number) => Promise<void>;
   waitForPublisher?: boolean;
@@ -102,7 +115,26 @@ const defaultConnectTimeoutMs = 20_000;
 export async function startSubscriber(
   options: StartSubscriberOptions,
 ): Promise<RunningSubscriber> {
-  const { contact, identity } = await loadSubscriberState(options.stateDir);
+  let pairingRequest: PairingRequest | undefined;
+  let pairingExpiresAt: number | undefined;
+  if (options.pairing) {
+    const invitation = parsePairingInvitation(options.pairing.invitation, {
+      now: options.now,
+    });
+    await setSubscriberPendingPublisher({
+      stateDir: options.stateDir,
+      label: invitation.displayName,
+      publisherKey: invitation.publisherKey,
+    });
+    pairingRequest = {
+      token: invitation.token,
+      label: options.pairing.deviceLabel,
+      platform: options.pairing.platform,
+    };
+    pairingExpiresAt = invitation.expiresAt;
+  }
+  const { contact, identity, pending } =
+    await loadSubscriberConnectionState(options.stateDir);
   const keyPair = keyPairFromSecretKey(identity.secretKey);
   const dht = createDht({ bootstrap: options.bootstrap, keyPair });
   const now = options.now ?? Date.now;
@@ -134,6 +166,28 @@ export async function startSubscriber(
     log: options.log,
     now,
     observe: options.observe,
+    onTerminalConnectionError: options.onTerminalConnectionError,
+    ...(pairingRequest && pairingExpiresAt !== undefined
+      ? {
+          pairing: {
+            request: pairingRequest,
+            expiresAt: pairingExpiresAt,
+            onPending: () => options.pairing?.onStatus?.("awaiting-approval"),
+            onApproved: async () => {
+              await promoteSubscriberPendingPublisher(options.stateDir);
+              options.pairing?.onStatus?.("approved");
+            },
+          },
+        }
+      : {}),
+    ...(pending && !pairingRequest
+      ? {
+          pendingApproval: {
+            onConfirmed: () =>
+              promoteSubscriberPendingPublisher(options.stateDir),
+          },
+        }
+      : {}),
     route,
     sleep: options.sleep ?? delay,
   });
@@ -277,6 +331,16 @@ export function createPublisherConnection(options: {
   log?: (line: string) => void;
   now: () => number;
   observe?: Observe;
+  onTerminalConnectionError?: (error: Error) => void;
+  pairing?: {
+    request: PairingRequest;
+    expiresAt: number;
+    onPending?: () => void;
+    onApproved: () => Promise<void>;
+  };
+  pendingApproval?: {
+    onConfirmed: () => Promise<void>;
+  };
   route: Route;
   scheduleConnectTimeout?: ScheduleConnectTimeout;
   sleep: (delayMs: number) => Promise<void>;
@@ -293,6 +357,8 @@ export function createPublisherConnection(options: {
   let reconnecting: Promise<RunningMuxSubscriber> | undefined;
   let connectingOuter: DhtStream | undefined;
   let stopped = false;
+  let pairing = options.pairing;
+  let pendingApproval = options.pendingApproval;
   let connectionAttempt = 0;
   let connectionGeneration = 0;
 
@@ -333,6 +399,9 @@ export function createPublisherConnection(options: {
     mux: RunningMuxSubscriber;
     observe: EmitObservation;
   }> => {
+    if (pairing && options.now() >= pairing.expiresAt) {
+      throw new Error("Pairing invitation has expired");
+    }
     const attempt = ++connectionAttempt;
     const attemptStartedAt = options.now();
     const outerId = createObservationId("outer");
@@ -371,25 +440,50 @@ export function createPublisherConnection(options: {
         transport: dhtStreamSnapshot(outer),
         ...(options.dhtStats ? { dht: options.dhtStats() } : {}),
       });
-      return {
-        observe,
-        mux: install(
-          outer,
-          (options.createMuxSubscriber ?? createMuxSubscriber)(outer, {
-            outerId,
-            now: options.now,
-            observe: options.observe,
-            onHeartbeatTimeout: (fields) => {
-              observe("outer.unhealthy", {
-                reason: "heartbeat.timeout",
-                ...fields,
-              });
-            },
-            transportSnapshot: () => dhtStreamSnapshot(outer),
-          }),
-          observe,
-        ),
-      };
+      const activePairing = pairing;
+      const activePendingApproval = activePairing
+        ? undefined
+        : pendingApproval;
+      let controlReadyResolve: (() => void) | undefined;
+      let controlReadyReject: ((error: Error) => void) | undefined;
+      const controlReady = activePendingApproval
+        ? new Promise<void>((resolve, reject) => {
+            controlReadyResolve = resolve;
+            controlReadyReject = reject;
+          })
+        : undefined;
+      const mux = (options.createMuxSubscriber ?? createMuxSubscriber)(outer, {
+        authorized: activePairing === undefined,
+        outerId,
+        now: options.now,
+        observe: options.observe,
+        onControlClosed: () =>
+          controlReadyReject?.(
+            new Error("Publisher did not authorize the pending subscriber"),
+          ),
+        onControlReady: () => controlReadyResolve?.(),
+        onHeartbeatTimeout: (fields) => {
+          observe("outer.unhealthy", {
+            reason: "heartbeat.timeout",
+            ...fields,
+          });
+        },
+        transportSnapshot: () => dhtStreamSnapshot(outer),
+      });
+      if (activePairing) {
+        await mux.pair(activePairing.request, {
+          onPending: activePairing.onPending,
+        });
+        await activePairing.onApproved();
+        if (pairing === activePairing) pairing = undefined;
+      } else if (activePendingApproval && controlReady) {
+        await controlReady;
+        await activePendingApproval.onConfirmed();
+        if (pendingApproval === activePendingApproval) {
+          pendingApproval = undefined;
+        }
+      }
+      return { observe, mux: install(outer, mux, observe) };
     } catch (error) {
       const failure = stopped
         ? new Error("Subscriber stopped")
@@ -433,6 +527,7 @@ export function createPublisherConnection(options: {
           return mux;
         } catch (error) {
           if (stopped) throw error;
+          if (pairing && options.now() >= pairing.expiresAt) throw error;
           const message =
             error instanceof Error ? error.message : String(error);
           failedAttemptObserve?.("outer.retry", {
@@ -461,7 +556,12 @@ export function createPublisherConnection(options: {
     },
     startInBackground(): void {
       if (stopped || current || reconnecting) return;
-      void reconnect().catch(() => undefined);
+      void reconnect().catch((error) => {
+        if (stopped) return;
+        options.onTerminalConnectionError?.(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      });
     },
     generation(): number {
       return connectionGeneration;

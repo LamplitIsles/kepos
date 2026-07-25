@@ -14,6 +14,14 @@ export type ObservationName =
   | "outer.accepted"
   | "outer.rejected"
   | "outer.replaced"
+  | "pairing.invitation-created"
+  | "pairing.invitation-expired"
+  | "pairing.requested"
+  | "pairing.rejected"
+  | "pairing.approved"
+  | "pairing.denied"
+  | "pairing.cancelled"
+  | "pairing.approval-error"
   | "channel.open"
   | "channel.open-ok"
   | "channel.open-error"
@@ -118,7 +126,11 @@ export function sanitizeObservation(value: unknown): unknown {
   const sanitized: ObservationFields = {};
   for (const [key, field] of Object.entries(value)) {
     const normalizedKey = key.toLowerCase();
-    if (normalizedKey.includes("secret") || normalizedKey.includes("seed")) {
+    if (
+      normalizedKey.includes("secret") ||
+      normalizedKey.includes("seed") ||
+      normalizedKey.includes("token")
+    ) {
       continue;
     }
     if (

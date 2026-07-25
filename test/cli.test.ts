@@ -96,6 +96,7 @@ function fakeCli(): {
           homeUrl: "http://127.0.0.1:3000",
           acceptedConnections: 1,
           activeSubscribers: 1,
+          pairing: { phase: "idle" as const },
         }),
         stop: async () => {
           calls.stopped.push("publisher");

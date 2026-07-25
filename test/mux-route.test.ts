@@ -244,6 +244,7 @@ test("service open yields before retrying a destroyed outer connection", async (
     },
     createMuxSubscriber: (outer) => ({
       close: () => outer.destroy(),
+      pair: async () => undefined,
       open: async () => {
         if (outer === initial) throw new Error("outer destroyed");
         return new PassThrough();
@@ -264,6 +265,44 @@ test("service open yields before retrying a destroyed outer connection", async (
   assert.deepEqual(delays, [10]);
 
   stream.destroy();
+  await connection.stop();
+});
+
+test("pairing retries stop after the invitation expires", async () => {
+  let now = 0;
+  let attempts = 0;
+  let terminalError: Error | undefined;
+  const connection = createPublisherConnection({
+    connect: () => {
+      attempts++;
+      throw new Error("publisher unavailable");
+    },
+    now: () => now,
+    onTerminalConnectionError: (error) => {
+      terminalError = error;
+    },
+    pairing: {
+      request: {
+        token: Buffer.alloc(32).toString("base64url"),
+        label: "Neil's Mac",
+        platform: "macos",
+      },
+      expiresAt: 50,
+      onApproved: async () => undefined,
+    },
+    route: "auto",
+    sleep: async (delayMs) => {
+      now += delayMs;
+    },
+  });
+
+  connection.startInBackground();
+  await waitFor(
+    () => terminalError !== undefined,
+    "pairing expiry was not reported to the host",
+  );
+  assert.match(terminalError?.message ?? "", /invitation has expired/);
+  assert.equal(attempts, 1);
   await connection.stop();
 });
 
@@ -291,6 +330,7 @@ test("heartbeat timeout reports one unhealthy outer before reconnecting", async 
       }
       return {
         close: () => outer.destroy(),
+        pair: async () => undefined,
         open: async () => new PassThrough(),
       };
     },
@@ -333,6 +373,7 @@ test("aborting a service open rejects promptly and destroys a late tunnel", asyn
     connect: () => outer,
     createMuxSubscriber: () => ({
       close: () => outer.destroy(),
+      pair: async () => undefined,
       open: async () =>
         new Promise<PassThrough>((resolve) => {
           resolveOpen = resolve;

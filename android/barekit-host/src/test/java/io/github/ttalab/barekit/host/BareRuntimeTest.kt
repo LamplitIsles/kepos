@@ -226,6 +226,58 @@ class BareRuntimeTest {
   }
 
   @Test
+  fun pairPublisherCarriesTheInvitationAndCompletesAfterApproval() {
+    val session = FakeRuntimeSession()
+    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
+    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
+    session.emit(runningEvent(configured = false, connection = "offline"))
+
+    val pairing = runtime.pairPublisher(
+      "kepos://pair?v=1&token=one-time",
+      "Neil's Pixel",
+      "android",
+    )
+    val request = session.writes.single() as RequestEnvelope
+    assertEquals("pair", request.method)
+    assertEquals(
+      "kepos://pair?v=1&token=one-time",
+      request.params?.jsonObject?.get("invitation")?.jsonPrimitive?.content,
+    )
+    assertFalse(pairing.isDone)
+
+    session.emit(runningEvent(configured = true, connection = "connected"))
+    session.emit(
+      ResponseEnvelope(
+        1,
+        "response",
+        request.id,
+        buildJsonObject { put("connection", "connected") },
+      ),
+    )
+
+    assertEquals("connected", pairing.get(1, TimeUnit.SECONDS).connection)
+  }
+
+  @Test
+  fun pairingExpiryReturnsToSetupWithoutFailingTheWorklet() {
+    val session = FakeRuntimeSession()
+    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
+    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
+
+    session.emit(
+      runningEvent(
+        configured = false,
+        connection = "offline",
+        error = "Pairing invitation has expired",
+      ),
+    )
+
+    assertEquals(RuntimeState.RUNNING, runtime.snapshot().state)
+    assertFalse(runtime.snapshot().configured)
+    assertEquals("Pairing invitation has expired", runtime.snapshot().error)
+  }
+
+  @Test
   fun failedRuntimeCanBeStoppedIdempotently() {
     val session = FakeRuntimeSession()
     val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
@@ -394,7 +446,11 @@ class BareRuntimeTest {
     }
   }
 
-  private fun runningEvent(configured: Boolean, connection: String) = EventEnvelope(
+  private fun runningEvent(
+    configured: Boolean,
+    connection: String,
+    error: String? = null,
+  ) = EventEnvelope(
     1,
     "event",
     "runtime.stateChanged",
@@ -405,6 +461,7 @@ class BareRuntimeTest {
       put("subscriberPublicKey", "cd".repeat(32))
       put("configured", configured)
       put("connection", connection)
+      error?.let { put("error", it) }
     },
   )
 

@@ -64,6 +64,14 @@ test("desktop protocol accepts only closed page commands", () => {
   assert.deepEqual(parseDesktopCommand('{"type":"quit"}'), {
     type: "quit",
   });
+  for (const type of [
+    "createPairingInvitation",
+    "cancelPairing",
+    "approvePairing",
+    "denyPairing",
+  ]) {
+    assert.deepEqual(parseDesktopCommand(JSON.stringify({ type })), { type });
+  }
   assert.throws(
     () => parseDesktopCommand('{"type":"showHome"}'),
     /unsupported/,
