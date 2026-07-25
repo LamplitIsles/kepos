@@ -159,6 +159,24 @@ export interface PairingDecision {
   ) => void;
 }
 
+export type TerminalPairingOutcome =
+  | "denied"
+  | Extract<PairingResponse, { status: "error" }>["code"];
+
+export class TerminalPairingError extends Error {
+  readonly outcome: TerminalPairingOutcome;
+
+  constructor(outcome: TerminalPairingOutcome) {
+    super(
+      outcome === "denied"
+        ? "Pairing request was denied"
+        : `Pairing failed: ${outcome}`,
+    );
+    this.name = "TerminalPairingError";
+    this.outcome = outcome;
+  }
+}
+
 interface RunningControlChannel {
   close: () => void;
 }
@@ -682,11 +700,11 @@ export function createMuxSubscriber(
               resolve();
               return;
             }
-            const message =
-              response.status === "denied"
-                ? "Pairing request was denied"
-                : `Pairing failed: ${response.code}`;
-            reject(new Error(message));
+            reject(
+              new TerminalPairingError(
+                response.status === "denied" ? "denied" : response.code,
+              ),
+            );
           },
         });
         pairingChannel = channel;

@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.net.Uri
 import android.os.IBinder
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -75,6 +76,18 @@ class WorkletLifecycleTest {
 
     KeposForegroundService.stop(context)
     binder.awaitState(RuntimeState.STOPPED)
+  }
+
+  @Test
+  fun deepLinkIsConsumedBeforeActivityRecreation() {
+    val launch = Intent(context, MainActivity::class.java).apply {
+      data = Uri.parse("kepos://pair?v=1&publisher=${"ab".repeat(32)}")
+    }
+    ActivityScenario.launch<MainActivity>(launch).use { activity ->
+      activity.onActivity { assertEquals(null, it.intent.data) }
+      activity.recreate()
+      activity.onActivity { assertEquals(null, it.intent.data) }
+    }
   }
 
   private fun assertLoopbackListener(port: Int) {

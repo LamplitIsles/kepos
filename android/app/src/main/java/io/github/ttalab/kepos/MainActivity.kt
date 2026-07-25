@@ -18,10 +18,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import io.github.ttalab.barekit.host.RuntimeSnapshot
@@ -33,7 +35,7 @@ class MainActivity : ComponentActivity() {
   private var subscription: AutoCloseable? = null
   private var service: KeposForegroundService.LocalBinder? = null
   private var bound = false
-  private var pendingPairingInvitation: String? = null
+  private val pairingInvitation by viewModels<PairingInvitationViewModel>()
   private val runtimeStartPreference by lazy { RuntimeStartPreference(this) }
   private val requestNotificationPermission = registerForActivityResult(
     ActivityResultContracts.RequestPermission(),
@@ -82,7 +84,7 @@ class MainActivity : ComponentActivity() {
         },
       )
     }
-    intent?.data?.toString()?.let(::acceptDeepLink)
+    acceptDeepLink(intent)
   }
 
   override fun onStart() {
@@ -106,8 +108,8 @@ class MainActivity : ComponentActivity() {
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
+    acceptDeepLink(intent)
     setIntent(intent)
-    intent.data?.toString()?.let(::acceptDeepLink)
   }
 
   private fun startRuntime() {
@@ -127,7 +129,9 @@ class MainActivity : ComponentActivity() {
     )
   }
 
-  private fun acceptDeepLink(invitation: String) {
+  private fun acceptDeepLink(intent: Intent?) {
+    val invitation = intent?.data?.toString() ?: return
+    intent.data = null
     val uri = Uri.parse(invitation)
     if (uri.scheme == "kepos" && uri.host == "pair") {
       queuePairingInvitation(invitation)
@@ -135,16 +139,16 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun queuePairingInvitation(invitation: String) {
-    pendingPairingInvitation = invitation
+    pairingInvitation.queue(invitation)
     startRuntime()
     dispatchPendingPairing()
   }
 
   private fun dispatchPendingPairing() {
-    val invitation = pendingPairingInvitation ?: return
+    val invitation = pairingInvitation.peek() ?: return
     if (snapshot.state != RuntimeState.RUNNING) return
     val binder = service ?: return
-    pendingPairingInvitation = null
+    pairingInvitation.take()
     binder.pairPublisher(invitation, Build.MODEL, "android").whenComplete { _, error ->
       if (error == null) return@whenComplete
       runOnUiThread {
@@ -162,4 +166,16 @@ class MainActivity : ComponentActivity() {
     .setPrompt("Scan a Kepos invitation")
     .setBeepEnabled(false)
     .setOrientationLocked(false)
+}
+
+internal class PairingInvitationViewModel : ViewModel() {
+  private var pending: String? = null
+
+  fun queue(invitation: String) {
+    pending = invitation
+  }
+
+  fun peek(): String? = pending
+
+  fun take(): String? = pending.also { pending = null }
 }

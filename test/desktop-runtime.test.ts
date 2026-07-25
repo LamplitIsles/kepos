@@ -35,13 +35,22 @@ const registry: HomeRegistry = {
 test("desktop runtime starts and stops a publisher-only role", async () => {
   const events: string[] = [];
   const snapshots: DesktopSnapshot[] = [];
+  let startedPolicy: unknown = "not-started";
   const runtime = await startDesktopRuntime(
     {
       publisher: { stateDir: "/state/publisher" },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
     },
-    dependencies(events),
+    dependencies(events, {
+      startPublisher: async (options) => {
+        startedPolicy = options.policy;
+        events.push(`publisher:start:${options.stateDir}`);
+        return runningPublisher(() => publisherStatus(1, 2), events);
+      },
+    }),
   );
+
+  assert.equal(startedPolicy, undefined);
 
   assert.deepEqual(snapshots, [
     {

@@ -13,6 +13,7 @@ import {
   createPublisherConnection,
   listenSubscriberService,
 } from "../src/runtime/subscriber.js";
+import { TerminalPairingError } from "../src/mux/transport.js";
 
 class FakeDhtStream extends Duplex implements DhtStream {
   connected: boolean;
@@ -303,6 +304,97 @@ test("pairing retries stop after the invitation expires", async () => {
   );
   assert.match(terminalError?.message ?? "", /invitation has expired/);
   assert.equal(attempts, 1);
+  await connection.stop();
+});
+
+test("pairing reconnect confirms approval without resending the token", async () => {
+  const first = new FakeDhtStream(true);
+  const restored = new FakeDhtStream(true);
+  const candidates = [first, restored];
+  const authorizedModes: boolean[] = [];
+  let approved = 0;
+  const connection = createPublisherConnection({
+    connect: () => {
+      const stream = candidates.shift();
+      if (!stream) throw new Error("unexpected connection attempt");
+      return stream;
+    },
+    createMuxSubscriber: (outer, options) => {
+      authorizedModes.push(options?.authorized ?? true);
+      if (outer === restored) setImmediate(() => options?.onControlReady?.());
+      return {
+        close: () => outer.destroy(),
+        open: async () => new PassThrough(),
+        pair: async (_request, pairingOptions) => {
+          pairingOptions?.onPending?.();
+          first.destroy();
+          throw new Error("approval response was lost");
+        },
+      };
+    },
+    now: () => 1_000,
+    pairing: {
+      request: {
+        token: Buffer.alloc(32).toString("base64url"),
+        label: "Neil's Mac",
+        platform: "macos",
+      },
+      expiresAt: 2_000,
+      onApproved: async () => {
+        approved++;
+      },
+    },
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  connection.startInBackground();
+  await waitFor(
+    () => connection.status() === "connected",
+    "pending approval did not recover",
+  );
+  assert.deepEqual(authorizedModes, [false, true]);
+  assert.equal(approved, 1);
+  await connection.stop();
+});
+
+test("terminal pairing outcomes do not retry", async () => {
+  const stream = new FakeDhtStream(true);
+  let attempts = 0;
+  let terminalError: Error | undefined;
+  const connection = createPublisherConnection({
+    connect: () => {
+      attempts++;
+      return stream;
+    },
+    createMuxSubscriber: () => ({
+      close: () => stream.destroy(),
+      open: async () => new PassThrough(),
+      pair: async () => {
+        throw new TerminalPairingError("denied");
+      },
+    }),
+    now: () => 1_000,
+    onTerminalConnectionError: (error) => {
+      terminalError = error;
+    },
+    pairing: {
+      request: {
+        token: Buffer.alloc(32).toString("base64url"),
+        label: "Neil's Mac",
+        platform: "macos",
+      },
+      expiresAt: 2_000,
+      onApproved: async () => undefined,
+    },
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  connection.startInBackground();
+  await waitFor(() => terminalError !== undefined, "denial was not reported");
+  assert.equal(attempts, 1);
+  assert.equal((terminalError as TerminalPairingError).outcome, "denied");
   await connection.stop();
 });
 

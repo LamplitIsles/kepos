@@ -38,6 +38,7 @@ test("publisher pairing persists before activating one approved candidate", asyn
   const parsed = parsePairingInvitation(invitation.uri, { now: () => now });
 
   assert.equal(pairing.receive(candidate(parsed.token, events)), true);
+  assert.equal(JSON.stringify(pairing).includes(parsed.token), false);
   assert.deepEqual(pairing.snapshot(), {
     phase: "pending",
     subscriberKey: "cd".repeat(32),

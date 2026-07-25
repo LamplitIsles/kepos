@@ -158,6 +158,12 @@ export async function startPublisher(
     pendingCandidateAdmissions = 0;
   }
 
+  function closeOtherPairingCandidates(selected: DhtStream): void {
+    for (const stream of pairingCandidates) {
+      if (stream !== selected) muxes.get(stream)?.close();
+    }
+  }
+
   function clearPairingExpiry(): void {
     cancelPairingExpiry?.();
     cancelPairingExpiry = undefined;
@@ -290,6 +296,7 @@ export async function startPublisher(
                 });
                 if (received) {
                   clearPairingExpiry();
+                  closeOtherPairingCandidates(stream);
                   observe("pairing.requested", {
                     remotePublicKey: subscriberKey,
                   });

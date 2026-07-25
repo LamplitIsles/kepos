@@ -174,7 +174,7 @@ export async function startDesktopRuntime(
       runningPublisher = await dependencies.startPublisher({
         stateDir: publisherOptions.stateDir,
         bootstrap: publisherOptions.bootstrap,
-        policy,
+        ...(publisherOptions.policy ? { policy } : {}),
         ...(configPath
           ? {
               persistAllowlist: (allow) =>

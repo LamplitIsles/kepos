@@ -40,7 +40,10 @@ import {
   createMuxSubscriber,
   type RunningMuxSubscriber,
 } from "../src/mux/transport.js";
-import { loadSubscriberState } from "../src/state/subscriber.js";
+import {
+  loadSubscriberConnectionState,
+  loadSubscriberState,
+} from "../src/state/subscriber.js";
 import { parsePairingInvitation } from "../src/pairing/invitation.js";
 
 interface HyperDhtTestnet {
@@ -929,6 +932,121 @@ test("publisher closes an idle pairing candidate when its invitation expires", a
     throw new AggregateError(
       errors,
       `pairing expiry test or cleanup failed: ${errors.map(String).join("; ")}`,
+    );
+  }
+});
+
+test("publisher closes non-selected candidates when one reserves the invitation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-pairing-reserve-"));
+  const publisherState = path.join(root, "publisher");
+  const selectedState = path.join(root, "selected");
+  const idleState = path.join(root, "idle");
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let selectedDht: DhtNode | undefined;
+  let idleDht: DhtNode | undefined;
+  let selectedMux: RunningMuxSubscriber | undefined;
+  let testError: unknown;
+
+  try {
+    const [, , publisherSetup] = await Promise.all([
+      setupSubscriber({ stateDir: selectedState }),
+      setupSubscriber({ stateDir: idleState }),
+      setupPublisher({
+        stateDir: publisherState,
+        displayName: "kosmos",
+        subscriberPublicKeys: [],
+        services: [],
+      }),
+    ]);
+    await Promise.all([
+      setSubscriberPendingPublisher({
+        stateDir: selectedState,
+        label: "kosmos",
+        publisherKey: publisherSetup.publisherKey,
+      }),
+      setSubscriberPendingPublisher({
+        stateDir: idleState,
+        label: "kosmos",
+        publisherKey: publisherSetup.publisherKey,
+      }),
+    ]);
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    const invitation = parsePairingInvitation(
+      publisher.createPairingInvitation().uri,
+    );
+    const [selected, idle] = await Promise.all([
+      loadSubscriberConnectionState(selectedState),
+      loadSubscriberConnectionState(idleState),
+    ]);
+    const selectedKeyPair = keyPairFromSecretKey(selected.identity.secretKey);
+    const idleKeyPair = keyPairFromSecretKey(idle.identity.secretKey);
+    selectedDht = createDht({ bootstrap: testnet.bootstrap, keyPair: selectedKeyPair });
+    idleDht = createDht({ bootstrap: testnet.bootstrap, keyPair: idleKeyPair });
+    const selectedOuter = selectedDht.connect(
+      Buffer.from(publisherSetup.publisherKey, "hex"),
+      { keyPair: selectedKeyPair, localConnection: true, reusableSocket: true },
+    );
+    const idleOuter = idleDht.connect(
+      Buffer.from(publisherSetup.publisherKey, "hex"),
+      { keyPair: idleKeyPair, localConnection: true, reusableSocket: true },
+    );
+    selectedOuter.on("error", () => undefined);
+    idleOuter.on("error", () => undefined);
+    if (!selectedOuter.connected) await once(selectedOuter, "connect");
+    if (!idleOuter.connected) await once(idleOuter, "connect");
+    await waitFor(
+      () => publisher?.acceptedConnections() === 2,
+      "publisher did not admit both candidates",
+    );
+    const idleClosed = new Promise<void>((resolve) => {
+      idleOuter.once("close", resolve);
+    });
+    selectedMux = createMuxSubscriber(selectedOuter, {
+      authorized: false,
+      heartbeat: false,
+    });
+    void selectedMux.pair({
+      token: invitation.token,
+      label: "Selected phone",
+      platform: "test",
+    }).catch(() => undefined);
+
+    await waitFor(
+      () => publisher?.pairingStatus().phase === "pending",
+      "selected request did not reserve the invitation",
+    );
+    await idleClosed;
+    assert.equal(idleOuter.destroyed, true);
+    assert.equal(selectedOuter.destroyed, false);
+    publisher.denyPairing();
+  } catch (error) {
+    testError = error;
+  }
+
+  selectedMux?.close();
+  const cleanup = await Promise.allSettled([
+    publisher?.stop(),
+    selectedDht?.destroy({ force: true }),
+    idleDht?.destroy({ force: true }),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    const errors = [testError, ...cleanupErrors].filter(
+      (error) => error !== undefined,
+    );
+    throw new AggregateError(
+      errors,
+      `pairing reservation test or cleanup failed: ${errors.map(String).join("; ")}`,
     );
   }
 });

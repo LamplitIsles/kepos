@@ -8,6 +8,7 @@ import ProtomuxModule from "protomux";
 import {
   createMuxPublisher,
   createMuxSubscriber,
+  TerminalPairingError,
   type PairingDecision,
 } from "../src/mux/transport.js";
 
@@ -317,6 +318,31 @@ test("approval remains valid after the pending outer closes", async () => {
   await assert.rejects(pairing, /closed/i);
   assert.doesNotThrow(() => decision?.approve());
 
+  publisher.close();
+});
+
+test("pairing denial is a typed terminal outcome", async () => {
+  const [subscriberOuter, publisherOuter] = framedPair();
+  const publisher = createMuxPublisher(publisherOuter, {
+    authorized: false,
+    connect: async () => prefixService("service:"),
+    onPairingRequest: (_request, decision) => decision.deny(),
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    authorized: false,
+  });
+
+  await assert.rejects(
+    subscriber.pair({
+      token: Buffer.alloc(32, 7).toString("base64url"),
+      label: "Denied phone",
+      platform: "android",
+    }),
+    (error) =>
+      error instanceof TerminalPairingError && error.outcome === "denied",
+  );
+
+  subscriber.close();
   publisher.close();
 });
 

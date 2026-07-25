@@ -20,6 +20,14 @@ export interface PairingCandidate {
   fail: (code: PairingErrorCode) => void;
 }
 
+interface PendingPairingCandidate {
+  subscriberKey: string;
+  label: string;
+  platform: string;
+  approve: () => void;
+  deny: () => void;
+}
+
 export type PublisherPairingSnapshot =
   | { phase: "idle" }
   | { phase: "inviting"; expiresAt: number; expired: boolean }
@@ -48,7 +56,7 @@ export class PublisherPairing {
   private readonly options: PublisherPairingOptions;
   private readonly now: () => number;
   private invitation?: InvitationState;
-  private pending?: PairingCandidate;
+  private pending?: PendingPairingCandidate;
   private approving?: Promise<void>;
 
   constructor(options: PublisherPairingOptions) {
@@ -92,7 +100,13 @@ export class PublisherPairing {
       return false;
     }
     this.invitation = undefined;
-    this.pending = candidate;
+    this.pending = {
+      subscriberKey: candidate.subscriberKey,
+      label: candidate.request.label,
+      platform: candidate.request.platform,
+      approve: candidate.approve,
+      deny: candidate.deny,
+    };
     return true;
   }
 
@@ -102,8 +116,8 @@ export class PublisherPairing {
         phase: "pending",
         subscriberKey: this.pending.subscriberKey,
         keyFingerprint: this.pending.subscriberKey.slice(0, 16),
-        label: this.pending.request.label,
-        platform: this.pending.request.platform,
+        label: this.pending.label,
+        platform: this.pending.platform,
       };
     }
     if (this.invitation) {

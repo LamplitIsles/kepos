@@ -31,6 +31,7 @@ import {
 } from "../mux/route.js";
 import {
   createMuxSubscriber,
+  TerminalPairingError,
   type RunningMuxSubscriber,
 } from "../mux/transport.js";
 import { parsePairingInvitation } from "../pairing/invitation.js";
@@ -358,6 +359,7 @@ export function createPublisherConnection(options: {
   let connectingOuter: DhtStream | undefined;
   let stopped = false;
   let pairing = options.pairing;
+  let pairingRequestAccepted = false;
   let pendingApproval = options.pendingApproval;
   let connectionAttempt = 0;
   let connectionGeneration = 0;
@@ -440,10 +442,14 @@ export function createPublisherConnection(options: {
         transport: dhtStreamSnapshot(outer),
         ...(options.dhtStats ? { dht: options.dhtStats() } : {}),
       });
-      const activePairing = pairing;
-      const activePendingApproval = activePairing
-        ? undefined
-        : pendingApproval;
+      const activePairing = pairingRequestAccepted ? undefined : pairing;
+      const activePendingApproval = pairingRequestAccepted
+        ? pairing
+          ? { onConfirmed: pairing.onApproved }
+          : undefined
+        : activePairing
+          ? undefined
+          : pendingApproval;
       let controlReadyResolve: (() => void) | undefined;
       let controlReadyReject: ((error: Error) => void) | undefined;
       const controlReady = activePendingApproval
@@ -472,14 +478,20 @@ export function createPublisherConnection(options: {
       });
       if (activePairing) {
         await mux.pair(activePairing.request, {
-          onPending: activePairing.onPending,
+          onPending: () => {
+            pairingRequestAccepted = true;
+            activePairing.onPending?.();
+          },
         });
         await activePairing.onApproved();
         if (pairing === activePairing) pairing = undefined;
       } else if (activePendingApproval && controlReady) {
         await controlReady;
         await activePendingApproval.onConfirmed();
-        if (pendingApproval === activePendingApproval) {
+        if (pairingRequestAccepted && pairing) {
+          pairing = undefined;
+          pairingRequestAccepted = false;
+        } else if (pendingApproval === activePendingApproval) {
           pendingApproval = undefined;
         }
       }
@@ -527,6 +539,7 @@ export function createPublisherConnection(options: {
           return mux;
         } catch (error) {
           if (stopped) throw error;
+          if (error instanceof TerminalPairingError) throw error;
           if (pairing && options.now() >= pairing.expiresAt) throw error;
           const message =
             error instanceof Error ? error.message : String(error);
