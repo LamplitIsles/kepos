@@ -7,6 +7,7 @@ test("package metadata owns the supported runtime and canonical checks", async (
     await readFile("package.json", "utf8"),
   ) as {
     devEngines?: unknown;
+    devDependencies?: Record<string, string>;
     engines?: unknown;
     scripts?: Record<string, string>;
   };
@@ -28,8 +29,13 @@ test("package metadata owns the supported runtime and canonical checks", async (
   });
   assert.equal(
     packageJson.scripts?.check,
-    "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage && npm run check:home",
+    "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage",
   );
+  assert.equal(packageJson.scripts?.["build:home"], undefined);
+  assert.equal(packageJson.scripts?.["check:home"], undefined);
+  for (const dependency of ["@tailwindcss/cli", "daisyui", "tailwindcss"]) {
+    assert.equal(packageJson.devDependencies?.[dependency], undefined);
+  }
   assert.match(
     packageJson.scripts?.test ?? "",
     /--test "test\/\*\*\/\*\.test\.ts"/u,

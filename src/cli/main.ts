@@ -54,6 +54,7 @@ import {
   loadKeposConfig,
   type KeposConfig,
 } from "../app-config.js";
+import { HOME_REGISTRY_PATH } from "../home/registry.js";
 
 interface CliPublisher {
   home: { url: string };
@@ -322,7 +323,7 @@ async function runPublisherCommand(
       observe: observationWriter(mode, dependencies),
     });
     statusWriter(mode, dependencies)(
-      `Publisher running: key=${running.publisherKey} home=${running.home.url}`,
+      `Publisher running: key=${running.publisherKey} registry=${running.home.url}${HOME_REGISTRY_PATH}`,
     );
     await dependencies.waitForSignal(running.stop);
   } finally {
@@ -367,7 +368,7 @@ async function runSubscriberCommand(
       waitForPublisher: false,
     });
     statusWriter(mode, dependencies)(
-      `Subscriber running: publisher=${running.publisherKey} home=${running.home.url}`,
+      `Subscriber running: publisher=${running.publisherKey} registry=${running.home.url}${HOME_REGISTRY_PATH}`,
     );
     for (const service of running.services) {
       statusWriter(mode, dependencies)(

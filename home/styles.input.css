@@ -1,5 +1,0 @@
-/* Explicit sources only: tests and docs must not change the Home bundle. */
-@import "tailwindcss" source(none);
-@source "./index.html";
-@source "../src/home/server.ts";
-@plugin "daisyui";

@@ -61,12 +61,13 @@ test("desktop protocol accepts only closed page commands", () => {
     ),
     { type: "openService", serviceId: "navidrome" },
   );
-  assert.deepEqual(parseDesktopCommand('{"type":"showHome"}'), {
-    type: "showHome",
-  });
   assert.deepEqual(parseDesktopCommand('{"type":"quit"}'), {
     type: "quit",
   });
+  assert.throws(
+    () => parseDesktopCommand('{"type":"showHome"}'),
+    /unsupported/,
+  );
 });
 
 test("desktop protocol rejects malformed, oversized, and open-ended commands", () => {

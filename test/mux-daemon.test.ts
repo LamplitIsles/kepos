@@ -177,14 +177,14 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     const ssh = subscriber.services.find((service) => service.id === "ssh");
     assert.ok(ssh);
 
-    const [homeResponse, audioResponse, sshResponse] = await Promise.all([
-      fetch(subscriber.home.url),
+    const [healthResponse, audioResponse, sshResponse] = await Promise.all([
+      fetch(`${subscriber.home.url}/healthz`),
       fetch(
         `http://navidrome.localhost:${subscriber.home.port}/rest/stream`,
       ),
       exchangeTcp(ssh.port, "hello"),
     ]);
-    assert.equal(homeResponse.status, 200);
+    assert.equal(healthResponse.status, 200);
     assert.equal(audioResponse.status, 200);
     assert.equal((await audioResponse.arrayBuffer()).byteLength, 64 * 1024);
     assert.equal(sshResponse, "ssh:hello");
@@ -375,8 +375,8 @@ test("one publisher accepts multiple subscribers with independent connections", 
     });
 
     const [homeA, homeB] = await Promise.all([
-      fetch(subscriberA.home.url),
-      fetch(subscriberB.home.url),
+      fetch(`${subscriberA.home.url}/healthz`),
+      fetch(`${subscriberB.home.url}/healthz`),
     ]);
     assert.equal(homeA.status, 200);
     assert.equal(homeB.status, 200);
@@ -449,7 +449,7 @@ test("publisher replaces an older outer for the same subscriber key", async () =
       services: [],
       log: noLog,
     });
-    assert.equal((await fetch(subscriberA.home.url)).status, 200);
+    assert.equal((await fetch(`${subscriberA.home.url}/healthz`)).status, 200);
 
     subscriberB = await startSubscriber({
       stateDir: subscriberState,
@@ -469,7 +469,7 @@ test("publisher replaces an older outer for the same subscriber key", async () =
       "publisher did not retain one current subscriber",
     );
 
-    assert.equal((await fetch(subscriberB.home.url)).status, 200);
+    assert.equal((await fetch(`${subscriberB.home.url}/healthz`)).status, 200);
     assert.equal(publisher.activeSubscribers(), 1);
     assert.ok(publisher.acceptedConnections() >= 2);
     assert.equal(
@@ -539,7 +539,7 @@ test("publisher denies a non-current outer using the same subscriber key", async
       services: [],
       log: noLog,
     });
-    assert.equal((await fetch(subscriber.home.url)).status, 200);
+    assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
 
     const state = await loadSubscriberState(subscriberState);
     const keyPair = keyPairFromSecretKey(state.identity.secretKey);
@@ -564,7 +564,7 @@ test("publisher denies a non-current outer using the same subscriber key", async
       () => candidateMux!.open("home"),
       /subscriber connection is not current/i,
     );
-    assert.equal((await fetch(subscriber.home.url)).status, 200);
+    assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
     assert.equal(publisher.activeSubscribers(), 1);
   } catch (error) {
     testError = error;

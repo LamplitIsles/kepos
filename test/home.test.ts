@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import { createHomeRegistry } from "../src/home/registry.js";
@@ -139,65 +138,14 @@ test("Home server binds only to an ephemeral loopback port", async () => {
   });
 });
 
-test("Home server serves the default Home HTML", async () => {
+test("Home server does not expose a human UI", async () => {
   await withHome(async (home) => {
-    const response = await fetch(`${home.url}/`);
-    const body = await response.text();
-
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
-    assert.match(body, /Local Publisher/);
-    assert.match(body, /Home/);
-    assert.match(body, /\.well-known\/kepos\/services\.json/);
-    assert.doesNotMatch(body, /\/app\.js/);
-  });
-});
-
-test("Home server renders every Registry service", async () => {
-  const home = await startHomeServer({
-    publisherKey,
-    displayName: "Kosmos & NUC",
-    services: [
-      { id: "navidrome", name: "Navidrome", kind: "tcp" },
-      { id: "ssh", name: "SSH", kind: "tcp" },
-    ],
-  });
-  try {
-    const response = await fetch(`${home.url}/`);
-    const body = await response.text();
-
-    assert.equal(response.status, 200);
-    assert.match(body, /Kosmos &amp; NUC/);
-    assert.match(body, /3 available/);
-    assert.match(body, /Navidrome/);
-    assert.match(body, /SSH/);
-    assert.match(
-      body,
-      new RegExp(`href="http://navidrome\\.localhost:${home.port}/"`),
-    );
-    assert.doesNotMatch(body, /href="http:\/\/ssh\.localhost/);
-    assert.doesNotMatch(body, /data-copy-command=/);
-  } finally {
-    await home.close();
-  }
-});
-
-test("Home server does not serve an obsolete copy-button script", async () => {
-  await withHome(async (home) => {
-    const response = await fetch(`${home.url}/app.js`);
-
-    assert.equal(response.status, 404);
-  });
-});
-
-test("Home server serves the local compiled stylesheet", async () => {
-  await withHome(async (home) => {
-    const response = await fetch(`${home.url}/styles.css`);
-    const body = await response.text();
-
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get("content-type"), "text/css; charset=utf-8");
-    assert.equal(body.length > 100, true);
+    for (const pathname of ["/", "/styles.css"]) {
+      const response = await fetch(`${home.url}${pathname}`);
+      assert.equal(response.status, 404);
+      assert.equal(response.headers.get("content-type"), "text/plain; charset=utf-8");
+      assert.equal(await response.text(), "Not Found\n");
+    }
   });
 });
 
@@ -276,30 +224,4 @@ test("Home server returns plain-text 404 for every other path", async () => {
     assert.equal(response.headers.get("content-type"), "text/plain; charset=utf-8");
     assert.equal(await response.text(), "Not Found\n");
   });
-});
-
-test("default Home source stays local, semantic, and responsive", async () => {
-  const html = await readFile(new URL("../home/index.html", import.meta.url), "utf8");
-  const inputCss = await readFile(new URL("../home/styles.input.css", import.meta.url), "utf8");
-
-  for (const component of ["navbar", "list", "link", "status"]) {
-    assert.match(html, new RegExp(`class=[\"'][^\"']*\\b${component}\\b`), component);
-  }
-  for (const semanticColor of ["bg-base-100", "text-base-content", "border-base-300"]) {
-    assert.match(html, new RegExp(`\\b${semanticColor}\\b`), semanticColor);
-  }
-  assert.match(html, /max-w-/);
-  assert.match(html, /sm:/);
-  assert.match(html, /\{\{SERVICE_ROWS\}\}/);
-  assert.doesNotMatch(html, /\/app\.js/i);
-  assert.doesNotMatch(html, /https?:\/\/|data-theme=|gradient|\bcard\b/i);
-
-  assert.match(
-    inputCss,
-    /@import\s+["']tailwindcss["']\s+source\(none\);/,
-  );
-  assert.match(inputCss, /@plugin\s+["']daisyui["'];/);
-  assert.match(inputCss, /@source\s+["']\.\/index\.html["'];/);
-  assert.match(inputCss, /@source\s+["']\.\.\/src\/home\/server\.ts["'];/);
-  assert.doesNotMatch(inputCss, /daisyui\/theme|gradient/i);
 });

@@ -2,11 +2,11 @@ import { request } from "node:http";
 
 import {
   createHomeRegistry,
+  HOME_REGISTRY_PATH,
   type HomeRegistry,
   type HomeRegistryService,
 } from "../home/registry.js";
 
-const registryPath = "/.well-known/kepos/services.json";
 const maximumRegistryBytes = 64 * 1024;
 
 export function readHomeRegistry(
@@ -17,7 +17,7 @@ export function readHomeRegistry(
     const pending = request({
       host: "127.0.0.1",
       port: gatewayPort,
-      path: registryPath,
+      path: HOME_REGISTRY_PATH,
       method: "GET",
       headers: {
         accept: "application/json",

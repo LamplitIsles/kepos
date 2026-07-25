@@ -192,7 +192,6 @@ export async function startDesktopHost(
     },
     send: (message) => mainWebView.postMessage(message),
     openService,
-    showHome: async () => undefined,
     quit: shutdown,
   });
   try {

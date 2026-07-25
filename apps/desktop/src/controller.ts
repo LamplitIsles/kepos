@@ -13,7 +13,6 @@ export interface DesktopControllerOptions {
   initialSnapshot: DesktopSnapshot;
   send(message: string): void;
   openService(url: string): Promise<void>;
-  showHome(): Promise<void>;
   quit(): Promise<void>;
 }
 
@@ -38,10 +37,6 @@ export function createDesktopController(
     if (command.type === "ready") {
       ready = true;
       sendCurrent();
-      return;
-    }
-    if (command.type === "showHome") {
-      await options.showHome();
       return;
     }
     if (command.type === "quit") {

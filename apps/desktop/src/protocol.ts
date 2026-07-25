@@ -63,7 +63,6 @@ export interface DesktopSnapshot {
 export type DesktopCommand =
   | { type: "ready" }
   | { type: "openService"; serviceId: string }
-  | { type: "showHome" }
   | { type: "quit" };
 
 export function parseDesktopCommand(source: string): DesktopCommand {
@@ -92,11 +91,7 @@ export function parseDesktopCommand(source: string): DesktopCommand {
     return { type: "openService", serviceId: value.serviceId };
   }
 
-  if (
-    value.type === "ready" ||
-    value.type === "showHome" ||
-    value.type === "quit"
-  ) {
+  if (value.type === "ready" || value.type === "quit") {
     rejectUnknownFields(value, ["type"]);
     return { type: value.type };
   }

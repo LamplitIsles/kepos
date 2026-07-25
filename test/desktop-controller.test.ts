@@ -54,7 +54,6 @@ test("desktop controller sends the latest snapshot after page readiness", async 
     initialSnapshot: initial,
     send: (message) => sent.push(message),
     openService: async () => {},
-    showHome: async () => {},
     quit: async () => {},
   });
 
@@ -85,7 +84,6 @@ test("desktop controller opens only a current validated HTTP service", async () 
     openService: async (url) => {
       opened.push(url);
     },
-    showHome: async () => {},
     quit: async () => {},
   });
 
@@ -123,9 +121,6 @@ test("desktop controller serializes commands and quits once", async () => {
       await opening;
       events.push("open:end");
     },
-    showHome: async () => {
-      events.push("home");
-    },
     quit: async () => {
       events.push("quit");
     },
@@ -134,14 +129,13 @@ test("desktop controller serializes commands and quits once", async () => {
   const first = controller.receive(
     '{"type":"openService","serviceId":"forgejo"}',
   );
-  const second = controller.receive('{"type":"showHome"}');
+  const second = controller.receive('{"type":"quit"}');
   const third = controller.receive('{"type":"quit"}');
-  const fourth = controller.receive('{"type":"quit"}');
 
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.deepEqual(events, ["open:start"]);
   releaseOpen?.();
-  await Promise.all([first, second, third, fourth]);
+  await Promise.all([first, second, third]);
 
-  assert.deepEqual(events, ["open:start", "open:end", "home", "quit"]);
+  assert.deepEqual(events, ["open:start", "open:end", "quit"]);
 });

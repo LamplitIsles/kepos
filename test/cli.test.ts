@@ -331,7 +331,11 @@ test("publisher run prints human status and awaits signal-safe stop", async () =
     `acquire:${path.resolve("./publisher")}`,
     `release:${path.resolve("./publisher")}`,
   ]);
-  assert.match(cli.stdout.join("\n"), /Publisher running/);
+  assert.match(
+    cli.stdout.join("\n"),
+    /Publisher running: key=[0-9a-f]+ registry=http:\/\/127\.0\.0\.1:3000\/\.well-known\/kepos\/services\.json/,
+  );
+  assert.doesNotMatch(cli.stdout.join("\n"), / home=http:/);
   assert.match(cli.stdout.join("\n"), /outer\.connected/);
   assert.match(cli.stdout.join("\n"), /attempt=2/);
 });
@@ -574,7 +578,11 @@ test("subscriber run maps services and writes NDJSON observations", async () => 
   ]);
   assert.equal(cli.stdout.length, 1);
   assert.equal(JSON.parse(cli.stdout[0] ?? "").event, "outer.connected");
-  assert.match(cli.stderr.join("\n"), /Subscriber running/);
+  assert.match(
+    cli.stderr.join("\n"),
+    /Subscriber running: publisher=[0-9a-f]+ registry=http:\/\/127\.0\.0\.1:4000\/\.well-known\/kepos\/services\.json/,
+  );
+  assert.doesNotMatch(cli.stderr.join("\n"), / home=http:/);
 });
 
 test("subscriber run releases its identity lock when startup fails", async () => {

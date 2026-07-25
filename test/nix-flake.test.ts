@@ -22,6 +22,7 @@ test("Nix package is locked and carries its own Node runtime", async () => {
   assert.match(packageSource, /!lib\.hasPrefix "apps\/" path/);
   assert.match(packageSource, /nodejs_22/);
   assert.doesNotMatch(packageSource, /sourceDir/);
+  assert.doesNotMatch(packageSource, /\.\.\/home|cp -r home/);
 });
 
 test("Home Manager module owns policy but keeps identity in mutable state", async () => {
