@@ -138,6 +138,17 @@ npm run android:assemble
 npm run android:install
 ```
 
+Build the optimized, unsigned arm64 release APK and print its size beside the
+debug APK:
+
+```sh
+npm run android:release
+```
+
+The release build enables R8 code shrinking and Android resource shrinking.
+It is an unsigned size/CI build output, not an installable or Play Store
+release; signing remains separate distribution work.
+
 `android:install` uses `adb install -r`: it installs Kepos Neo when absent and
 updates the existing app while preserving app-private state, including the
 subscriber identity. Set `ANDROID_SERIAL` when more than one device is
