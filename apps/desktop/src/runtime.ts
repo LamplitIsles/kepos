@@ -37,6 +37,8 @@ export interface StartDesktopPublisherOptions {
 export interface StartDesktopSubscriberOptions {
   stateDir: string;
   gatewayPort: number;
+  gatewayHost?: StartSubscriberOptions["gatewayHost"];
+  gatewayDomain?: StartSubscriberOptions["gatewayDomain"];
   services: StartSubscriberOptions["services"];
   lock?: RuntimeLock;
   bootstrap?: StartSubscriberOptions["bootstrap"];
@@ -176,6 +178,8 @@ export async function startDesktopRuntime(
       runningSubscriber = await dependencies.startSubscriber({
         stateDir: subscriberOptions.stateDir,
         gatewayPort: subscriberOptions.gatewayPort,
+        gatewayHost: subscriberOptions.gatewayHost,
+        gatewayDomain: subscriberOptions.gatewayDomain,
         services: subscriberOptions.services,
         bootstrap: subscriberOptions.bootstrap,
         route: subscriberOptions.route,

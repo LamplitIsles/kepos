@@ -9,15 +9,22 @@ import {
   CancellationController,
   type CancellationSignal,
 } from "../runtime/cancellation.js";
+import {
+  DEFAULT_GATEWAY_HOST,
+  parseGatewayDomain,
+  parseGatewayHost,
+} from "./gateway-options.js";
 
 export const DEFAULT_GATEWAY_PORT = 17_480;
 
 const maximumHeaderBytes = 16 * 1024;
 const headerTerminator = Buffer.from("\r\n\r\n");
-const serviceHostPattern = /^([a-z][a-z0-9-]*)\.localhost(?::\d+)?$/i;
+const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
 
 export interface StartHttpGatewayOptions {
   port?: number;
+  host?: string;
+  domain?: string;
   acquisitionTimeoutMs?: number;
   open(serviceId: string, signal?: CancellationSignal): Promise<Duplex>;
 }
@@ -31,18 +38,26 @@ export interface RunningHttpGateway {
 export async function startHttpGateway(
   options: StartHttpGatewayOptions,
 ): Promise<RunningHttpGateway> {
+  const host = parseGatewayHost(
+    options.host ?? DEFAULT_GATEWAY_HOST,
+    "gateway host",
+  );
+  const domain = options.domain === undefined
+    ? undefined
+    : parseGatewayDomain(options.domain, "gateway domain");
   const server = createServer({ allowHalfOpen: true }, (socket) => {
     routeSocket(
       socket,
       options.open,
       options.acquisitionTimeoutMs ?? 10_000,
+      domain,
     );
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(
       options.port ?? DEFAULT_GATEWAY_PORT,
-      "127.0.0.1",
+      host,
       () => {
         server.off("error", reject);
         resolve();
@@ -65,6 +80,7 @@ function routeSocket(
   socket: Socket,
   open: (serviceId: string, signal?: CancellationSignal) => Promise<Duplex>,
   acquisitionTimeoutMs: number,
+  domain?: string,
 ): void {
   let buffered = Buffer.alloc(0);
   let tunnel: Duplex | undefined;
@@ -86,6 +102,7 @@ function routeSocket(
     socket.off("data", onData);
     const serviceId = parseServiceId(
       buffered.subarray(0, headerEnd).toString("latin1"),
+      domain,
     );
     if (!serviceId) {
       replyAndClose(socket, 421, "Misdirected Request");
@@ -125,7 +142,7 @@ function routeSocket(
   }
 }
 
-function parseServiceId(header: string): string | null {
+function parseServiceId(header: string, domain?: string): string | null {
   const hosts = header
     .split("\r\n")
     .slice(1)
@@ -138,7 +155,16 @@ function parseServiceId(header: string): string | null {
       return [line.slice(separator + 1).trim()];
     });
   if (hosts.length !== 1) return null;
-  return hosts[0].match(serviceHostPattern)?.[1]?.toLowerCase() ?? null;
+  const authority = hosts[0].toLowerCase();
+  const hostname = authority.replace(/:\d+$/, "");
+  const domains = domain === undefined ? ["localhost"] : ["localhost", domain];
+  for (const acceptedDomain of domains) {
+    const suffix = `.${acceptedDomain}`;
+    if (!hostname.endsWith(suffix)) continue;
+    const serviceId = hostname.slice(0, -suffix.length);
+    if (serviceIdPattern.test(serviceId)) return serviceId;
+  }
+  return null;
 }
 
 function replyAndClose(

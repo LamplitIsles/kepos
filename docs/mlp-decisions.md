@@ -97,6 +97,12 @@ certificate. Kepos does not rewrite Host, cookies, redirects, CSP, CORS,
 OAuth callbacks, absolute URLs, or application payloads. A service must work
 through the local hostname as configured, or it is outside MLP compatibility.
 
+Headless node subscribers may explicitly bind the gateway beyond loopback and
+add one private DNS suffix, for example `0.0.0.0` plus `kepos.internal`.
+`.localhost` remains accepted for node-local clients. DNS, ClusterIP routing,
+same-node endpoint selection, and firewall limits remain deployment concerns;
+Kepos does not make a non-loopback listener safe or private by itself.
+
 Arbitrary Blog HTML must open in a normal browser or isolated origin, never a
 privileged desktop WebView. A normal link may navigate across service origins;
 cross-origin JavaScript still follows CORS, CSP, cookie, and Origin rules.

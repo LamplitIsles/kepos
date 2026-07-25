@@ -12,6 +12,8 @@ import type { SubscriberService } from "../../../src/runtime/subscriber.js";
 export interface DesktopSubscriberOptions {
   stateDir: string;
   gatewayPort: number;
+  gatewayHost?: string;
+  gatewayDomain?: string;
   bootstrap?: DhtAddress[];
   route?: Route;
   services: SubscriberService[];
@@ -160,6 +162,12 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
           subscriber: {
             stateDir: path.join(stateRoot, "subscriber"),
             gatewayPort: subscriberConfig.gatewayPort ?? 17_480,
+            ...(subscriberConfig.gatewayHost
+              ? { gatewayHost: subscriberConfig.gatewayHost }
+              : {}),
+            ...(subscriberConfig.gatewayDomain
+              ? { gatewayDomain: subscriberConfig.gatewayDomain }
+              : {}),
             ...(bootstrap ? { bootstrap } : {}),
             ...(subscriberConfig.route
               ? { route: subscriberConfig.route }

@@ -17,6 +17,10 @@ import {
 } from "./config.js";
 import type { DhtAddress } from "./mux/hyperdht.js";
 import { parseRoute, type Route } from "./mux/route.js";
+import {
+  parseGatewayDomain,
+  parseGatewayHost,
+} from "./home/gateway-options.js";
 import type { PublisherRuntimePolicy } from "./runtime/publisher.js";
 import type { SubscriberService } from "./runtime/subscriber.js";
 import {
@@ -32,6 +36,8 @@ export interface KeposConfig {
   subscriber?: {
     enabled?: boolean;
     gatewayPort?: number;
+    gatewayHost?: string;
+    gatewayDomain?: string;
     route?: Route;
     services?: SubscriberService[];
   };
@@ -151,6 +157,12 @@ export function serializeKeposConfig(config: KeposConfig): string {
       ...(config.subscriber.gatewayPort === undefined
         ? {}
         : { gateway_port: config.subscriber.gatewayPort }),
+      ...(config.subscriber.gatewayHost === undefined
+        ? {}
+        : { gateway_host: config.subscriber.gatewayHost }),
+      ...(config.subscriber.gatewayDomain === undefined
+        ? {}
+        : { gateway_domain: config.subscriber.gatewayDomain }),
       ...(config.subscriber.route === undefined
         ? {}
         : { route: config.subscriber.route }),
@@ -260,7 +272,14 @@ function parseSubscriber(
   rejectUnknownFields(
     subscriber,
     ["subscriber"],
-    ["enabled", "gateway_port", "route", "services"],
+    [
+      "enabled",
+      "gateway_port",
+      "gateway_host",
+      "gateway_domain",
+      "route",
+      "services",
+    ],
   );
   const config: NonNullable<KeposConfig["subscriber"]> = {};
   if (subscriber.enabled !== undefined) {
@@ -270,6 +289,24 @@ function parseSubscriber(
     config.gatewayPort = parsePort(
       subscriber.gateway_port,
       "subscriber.gateway_port",
+    );
+  }
+  if (subscriber.gateway_host !== undefined) {
+    if (typeof subscriber.gateway_host !== "string") {
+      throw new Error("subscriber.gateway_host must be a string");
+    }
+    config.gatewayHost = parseGatewayHost(
+      subscriber.gateway_host,
+      "subscriber.gateway_host",
+    );
+  }
+  if (subscriber.gateway_domain !== undefined) {
+    if (typeof subscriber.gateway_domain !== "string") {
+      throw new Error("subscriber.gateway_domain must be a string");
+    }
+    config.gatewayDomain = parseGatewayDomain(
+      subscriber.gateway_domain,
+      "subscriber.gateway_domain",
     );
   }
   if (subscriber.route !== undefined) {
