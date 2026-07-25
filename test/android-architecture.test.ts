@@ -211,7 +211,7 @@ test("Android subscriber waits for startup and exposes the real service registry
   assert.match(worklet!, /createAndroidRegistrySnapshot/);
   assert.match(runtimeState!, /val publisher: PublisherSnapshot\?/);
   assert.match(runtimeState!, /val services: List<ServiceSnapshot>/);
-  assert.match(screen!, /Your services/);
+  assert.match(screen!, /Remote services/);
   assert.doesNotMatch(screen!, /Copy Home URL/);
   assert.doesNotMatch(evidence!, /124\.160\.204\.171/);
 });

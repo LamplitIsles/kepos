@@ -58,6 +58,26 @@ class KeposUiModelTest {
   }
 
   @Test
+  fun buildServicesUseTheSharedHammerIconKind() {
+    val snapshot = connectedSnapshot().copy(
+      services = listOf(
+        ServiceSnapshot(
+          id = "woodpecker",
+          name = "Woodpecker",
+          access = "http",
+          action = "open",
+          icon = "build",
+          url = "http://woodpecker.localhost:17480/",
+        ),
+      ),
+    )
+
+    val service = KeposUiModel.from(snapshot).services.single()
+
+    assertEquals(ServiceIcon.BUILD, service.icon)
+  }
+
+  @Test
   fun servicesWithoutAnActionAreOmitted() {
     val snapshot = connectedSnapshot().copy(
       services = listOf(
