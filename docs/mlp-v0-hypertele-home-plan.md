@@ -40,7 +40,7 @@ P0 是单机协议和进程 smoke，不得作为以下结论的证据：
 - 独立设备互通；
 - 公网 DHT 可达性；
 - NAT hole punching 或 CGNAT 成功率；
-- 国内运营商或跨境网络质量；
+- 受限网络或跨区域网络质量；
 - Android 生命周期；
 - blind relay、TCP relay 或生产可用性；
 - Hypertele backpressure 和长时间流媒体性能已经合格。

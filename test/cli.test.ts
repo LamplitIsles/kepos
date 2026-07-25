@@ -309,9 +309,9 @@ test("publisher run prints human status and awaits signal-safe stop", async () =
       "--state",
       "./publisher",
       "--bootstrap",
-      "47.94.213.63:49737",
+      "bootstrap-one.example:49737",
       "--bootstrap",
-      "203.91.75.19:49738",
+      "bootstrap-two.example:49738",
     ],
     cli.dependencies,
   );
@@ -323,8 +323,8 @@ test("publisher run prints human status and awaits signal-safe stop", async () =
   }>;
   assert.equal(options.stateDir, path.resolve("./publisher"));
   assert.deepEqual(options.bootstrap, [
-    { host: "47.94.213.63", port: 49737 },
-    { host: "203.91.75.19", port: 49738 },
+    { host: "bootstrap-one.example", port: 49737 },
+    { host: "bootstrap-two.example", port: 49738 },
   ]);
   assert.deepEqual(cli.calls.stopped, ["publisher"]);
   assert.deepEqual(cli.calls.publisherLocks, [
@@ -618,7 +618,7 @@ test("run commands reject malformed bootstrap endpoints", async () => {
           "--state",
           "./subscriber",
           "--bootstrap",
-          "47.94.213.63",
+          "bootstrap.example",
         ],
         cli.dependencies,
       ),
@@ -633,7 +633,7 @@ test("run commands reject malformed bootstrap endpoints", async () => {
           "--state",
           "./publisher",
           "--bootstrap",
-          "47.94.213.63:70000",
+          "bootstrap.example:70000",
         ],
         cli.dependencies,
       ),

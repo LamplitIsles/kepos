@@ -46,7 +46,6 @@ Import and configure the module in a Home Manager configuration:
 
   services.kepos.publisher = {
     enable = true;
-    bootstrap = ["47.94.213.63:49737"];
     displayName = "kosmos";
     allow = ["<subscriber-public-key>"];
     services = {
@@ -137,6 +136,11 @@ Build or install the debug app:
 npm run android:assemble
 npm run android:install
 ```
+
+Local Android builds read only `[network].bootstrap` from the same default
+`~/.config/kepos/config.toml` used by the CLI and embed those endpoints in the
+APK. Other config fields are not copied. If the file or bootstrap list is
+absent, the app uses HyperDHT's official bootstrap defaults.
 
 Build the optimized, unsigned arm64 release APK and print its size beside the
 debug APK:
@@ -275,8 +279,8 @@ The CLI and desktop read shared persistent settings from
 ```toml
 [network]
 bootstrap = [
-  "47.94.213.63:49737",
-  "203.91.75.19:49738",
+  "bootstrap-one.example:49737",
+  "bootstrap-two.example:49738",
 ]
 
 [publisher]
@@ -336,8 +340,8 @@ options replace the configured bootstrap list:
 ```sh
 npm run kepos -- subscriber run \
   --state ~/.local/state/kepos-neo/subscriber \
-  --bootstrap 47.94.213.63:49737 \
-  --bootstrap 203.91.75.19:49738
+  --bootstrap bootstrap-one.example:49737 \
+  --bootstrap bootstrap-two.example:49738
 ```
 
 Bootstrap nodes only help the process enter the public DHT. They do not relay

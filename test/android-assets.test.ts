@@ -235,3 +235,91 @@ test("Bare Kit installer exposes only the Android prebuild to Gradle", async () 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("Android build embeds only bootstrap endpoints from the local Kepos config", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "kepos-android-bootstrap-"));
+  try {
+    const configHome = path.join(directory, "config");
+    const configDirectory = path.join(configHome, "kepos");
+    const outputPath = path.join(directory, "assets", "kepos-bootstrap.json");
+    await mkdir(configDirectory, { recursive: true });
+    await writeFile(
+      path.join(configDirectory, "config.toml"),
+      [
+        "[network]",
+        'bootstrap = ["bootstrap-one.example:49737", "bootstrap-two.example:49738"]',
+        "",
+        "[subscriber]",
+        "gateway_port = 17480",
+        "",
+      ].join("\n"),
+    );
+
+    const builder = await import("../scripts/android-bootstrap-config.js").catch(
+      () => null,
+    ) as null | {
+      writeAndroidBootstrapAsset(options: {
+        outputPath: string;
+        environment: NodeJS.ProcessEnv;
+      }): Promise<void>;
+    };
+    assert.notEqual(builder, null, "missing Android bootstrap asset builder");
+    await builder!.writeAndroidBootstrapAsset({
+      outputPath,
+      environment: { XDG_CONFIG_HOME: configHome },
+    });
+
+    assert.deepEqual(JSON.parse(await readFile(outputPath, "utf8")), [
+      { host: "bootstrap-one.example", port: 49_737 },
+      { host: "bootstrap-two.example", port: 49_738 },
+    ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Android build leaves bootstrap selection to HyperDHT without local config", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "kepos-android-bootstrap-"));
+  try {
+    const outputPath = path.join(directory, "assets", "kepos-bootstrap.json");
+    const builder = await import("../scripts/android-bootstrap-config.js").catch(
+      () => null,
+    ) as null | {
+      writeAndroidBootstrapAsset(options: {
+        outputPath: string;
+        environment: NodeJS.ProcessEnv;
+      }): Promise<void>;
+    };
+    assert.notEqual(builder, null, "missing Android bootstrap asset builder");
+    await builder!.writeAndroidBootstrapAsset({
+      outputPath,
+      environment: { XDG_CONFIG_HOME: path.join(directory, "missing") },
+    });
+
+    assert.equal(await readFile(outputPath, "utf8"), "null\n");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Android Worklet accepts embedded endpoints and treats null as official defaults", async () => {
+  const bootstrap = await import("../src/android/bootstrap.js").catch(() => null) as
+    | null
+    | {
+        parseAndroidBootstrapAsset(source: string):
+          | Array<{ host: string; port: number }>
+          | undefined;
+      };
+  assert.notEqual(bootstrap, null, "missing Android bootstrap asset parser");
+  assert.deepEqual(
+    bootstrap!.parseAndroidBootstrapAsset(
+      '[{"host":"bootstrap.example","port":49737}]',
+    ),
+    [{ host: "bootstrap.example", port: 49_737 }],
+  );
+  assert.equal(bootstrap!.parseAndroidBootstrapAsset("null"), undefined);
+  assert.throws(
+    () => bootstrap!.parseAndroidBootstrapAsset('[{"host":"","port":0}]'),
+    /invalid Android bootstrap asset/,
+  );
+});

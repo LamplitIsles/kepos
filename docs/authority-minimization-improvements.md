@@ -235,7 +235,7 @@ MLP 允许修改 allowlist 后重启 daemon 生效。这能验证 fail-closed �
 
 ### 问题
 
-国内跨运营商、移动、校园、酒店和企业网络可能允许 TCP/443，但阻断或严重限制 UDP。
+跨网络、移动、校园、酒店和企业网络可能允许 TCP/443，但阻断或严重限制 UDP。
 
 ### 安全边界
 
@@ -259,7 +259,7 @@ Outer TLS 只保护 endpoint 到 gateway 的一跳。真正的 peer identity 和
 - path selection 根据持续质量，而不只是首次连接成功；
 - carrier 切换不能静默降低认证或加密强度。
 
-这是高优先级可用性候选。如果国内和受限网络测试证明 UDP 连接率或持续质量不足，应优先于 Person root、pairwise identity 和 capability 工作。
+这是高优先级可用性候选。如果受限网络测试证明 UDP 连接率或持续质量不足，应优先于 Person root、pairwise identity 和 capability 工作。
 
 ## 12. 改进七：明确 metadata 与 IP 隐私选项
 
@@ -362,7 +362,7 @@ session_revoked
 1. 保持当前静态 publisher-wide allowlist，完成真实 direct P2P、one-to-many 和长期服务验证；
 2. 以原始网络路径为基线，测量 direct 和 relay 的 p50/p95 RTT、额外 RTT、抖动、首次响应时间和切网恢复时间；
 3. 优先消除绕路、慢打洞和不必要的中继；延迟不达标时，不进入安全扩展工作；
-4. 测量持续吞吐和国内多运营商成功率；
+4. 测量持续吞吐和多种网络的成功率；
 5. 优化 Home、命名服务、错误提示和首次连接 UX；
 6. 用 QR 降低 pairing 操作成本，按风险提供短指纹核对；
 7. 验证有基本 admission、quota 和诊断的非托管 UDP blind relay；
@@ -384,4 +384,4 @@ session_revoked
 - 不把静态 peer key 包装成已经解决的 Person identity；
 - 不在缺少真实需求时建设完整 RBAC、PKI 或 capability language；
 - 不把“隧道建立成功”当作性能合格；
-- 不让安全模型工作持续推迟 direct path、relay、国内网络验证或真实用户 UX。
+- 不让安全模型工作持续推迟 direct path、relay、受限网络验证或真实用户 UX。

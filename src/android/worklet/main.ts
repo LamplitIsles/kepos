@@ -10,6 +10,7 @@ import {
   setSubscriberPublisher,
   setupSubscriber,
 } from "../../state/subscriber.js";
+import { parseAndroidBootstrapAsset } from "../bootstrap.js";
 
 const runtimeId = Bare.argv[0] ?? "runtime-unknown";
 const stateDir = Bare.argv[1];
@@ -17,6 +18,7 @@ if (!stateDir) throw new Error("Android subscriber state directory is required")
 
 const gatewayPort = Number(Bare.argv[2] ?? "17480");
 const navidromePort = Number(Bare.argv[3] ?? "17481");
+const bootstrap = parseAndroidBootstrapAsset(Bare.argv[4] ?? "null");
 if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65_535) {
   throw new Error("Android gateway port is invalid");
 }
@@ -74,6 +76,7 @@ const connect = (): void => {
   connectTask = startSubscriber({
     stateDir,
     gatewayPort,
+    bootstrap,
     services: [{ id: "navidrome", localPort: navidromePort }],
     waitForPublisher: false,
   })
