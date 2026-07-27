@@ -13,7 +13,10 @@ import {
   createPublisherConnection,
   listenSubscriberService,
 } from "../src/runtime/subscriber.js";
-import { TerminalPairingError } from "../src/mux/transport.js";
+import {
+  createMuxSubscriber as createRealMuxSubscriber,
+  TerminalPairingError,
+} from "../src/mux/transport.js";
 
 class FakeDhtStream extends Duplex implements DhtStream {
   connected: boolean;
@@ -47,6 +50,21 @@ async function waitFor(
   }
 }
 
+function createReadyMuxSubscriber(
+  outer: Parameters<typeof createRealMuxSubscriber>[0],
+  options?: Parameters<typeof createRealMuxSubscriber>[1],
+) {
+  options?.onControlReady?.();
+  return {
+    close: () => {
+      outer.destroy();
+    },
+    controlReady: Promise.resolve("ready" as const),
+    open: async () => new PassThrough(),
+    pair: async () => undefined,
+  };
+}
+
 test("auto route permits the HyperDHT local shortcut", () => {
   assert.equal(parseRoute("auto"), "auto");
   assert.deepEqual(connectionOptionsForRoute("auto"), {
@@ -71,6 +89,142 @@ test("unknown route is rejected", () => {
   );
 });
 
+test("does not install an approved outer before control is ready", async () => {
+  const stream = new FakeDhtStream(true);
+  let resolveControl: (() => void) | undefined;
+  const controlReady = new Promise<"ready">((resolve) => {
+    resolveControl = () => resolve("ready");
+  });
+  const connection = createPublisherConnection({
+    connect: () => stream,
+    createMuxSubscriber: () => ({
+      close: () => stream.destroy(),
+      controlReady,
+      open: async () => new PassThrough(),
+      pair: async () => undefined,
+    }),
+    now: () => 1_000,
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  const starting = connection.start();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(connection.status(), "connecting");
+  assert.equal(connection.generation(), 0);
+
+  resolveControl?.();
+  await starting;
+  assert.equal(connection.status(), "connected");
+  assert.equal(connection.generation(), 1);
+
+  await connection.stop();
+});
+
+test("recovers with a different outer when control readiness fails", async () => {
+  const failed = new FakeDhtStream(true);
+  const restored = new FakeDhtStream(true);
+  const candidates = [failed, restored];
+  const connection = createPublisherConnection({
+    connect: () => {
+      const stream = candidates.shift();
+      if (!stream) throw new Error("unexpected connection attempt");
+      return stream;
+    },
+    createMuxSubscriber: (outer) => ({
+      close: () => outer.destroy(),
+      controlReady: outer === failed
+        ? Promise.reject(new Error("control channel timed out"))
+        : Promise.resolve("ready" as const),
+      open: async () => new PassThrough(),
+      pair: async () => undefined,
+    }),
+    now: () => 1_000,
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  connection.startInBackground();
+  await waitFor(
+    () => connection.status() === "connected",
+    "control failure did not recover",
+  );
+
+  assert.equal(failed.destroyed, true);
+  assert.equal(restored.destroyed, false);
+  assert.equal(connection.status(), "connected");
+  assert.equal(connection.generation(), 1);
+
+  await connection.stop();
+});
+
+test("does not install a legacy outer that closes as negotiation settles", async () => {
+  const stream = new FakeDhtStream(true);
+  const controlReady = new Promise<"legacy">((resolve) => {
+    setImmediate(() => {
+      resolve("legacy");
+      stream.destroy();
+    });
+  });
+  const connection = createPublisherConnection({
+    connect: () => stream,
+    createMuxSubscriber: () => ({
+      close: () => stream.destroy(),
+      controlReady,
+      open: async () => new PassThrough(),
+      pair: async () => undefined,
+    }),
+    now: () => 1_000,
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  await assert.rejects(connection.start(), /closed before control was ready/i);
+  assert.equal(connection.generation(), 0);
+  assert.notEqual(connection.status(), "connected");
+
+  await connection.stop();
+});
+
+test("invalidates only the matching connection generation once", async () => {
+  const events: Observation[] = [];
+  const initial = new FakeDhtStream(true);
+  const restored = new FakeDhtStream(true);
+  const candidates = [initial, restored];
+  const connection = createPublisherConnection({
+    connect: () => {
+      const stream = candidates.shift();
+      if (!stream) throw new Error("unexpected connection attempt");
+      return stream;
+    },
+    createMuxSubscriber: createReadyMuxSubscriber,
+    now: () => 1_000,
+    observe: (event) => events.push(event),
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  await connection.start();
+  assert.equal(connection.invalidate(0, "home.registry.timeout"), false);
+  assert.equal(connection.invalidate(1, "home.registry.timeout"), true);
+  assert.equal(connection.invalidate(1, "home.registry.timeout"), false);
+  assert.equal(connection.status(), "reconnecting");
+  await waitFor(
+    () => connection.generation() === 2,
+    "invalidated connection did not restore",
+  );
+
+  const unhealthy = events.filter(
+    ({ event }) => event === "outer.unhealthy",
+  );
+  assert.equal(unhealthy.length, 1);
+  assert.equal(unhealthy[0]?.reason, "home.registry.timeout");
+  assert.equal(connection.invalidate(1, "home.registry.timeout"), false);
+
+  await connection.stop();
+});
+
 test("reconnect observations report failed attempt delay and total recovery", async () => {
   const events: Observation[] = [];
   const delays: number[] = [];
@@ -88,6 +242,7 @@ test("reconnect observations report failed attempt delay and total recovery", as
       }
       return stream;
     },
+    createMuxSubscriber: createReadyMuxSubscriber,
     now: () => now,
     observe: (event) => events.push(event),
     route: "public",
@@ -131,6 +286,7 @@ test("connection attempts carry holepunch details and DHT stats", async () => {
       });
       return stream;
     },
+    createMuxSubscriber: createReadyMuxSubscriber,
     dhtStats: () => ({
       punches: { consistent: 1, random: 1, open: 0 },
       relaying: { attempts: 1, successes: 0, aborts: 1 },
@@ -152,6 +308,10 @@ test("connection attempts carry holepunch details and DHT stats", async () => {
       relaying: { attempts: 1, successes: 0, aborts: 1 },
     },
   );
+  assert.equal(
+    events.some(({ event }) => event === "outer.control-ready"),
+    true,
+  );
   await connection.stop();
 });
 
@@ -168,6 +328,7 @@ test("a pending DHT attempt times out before the next retry", async () => {
       if (!stream) throw new Error("unexpected connection attempt");
       return stream;
     },
+    createMuxSubscriber: createReadyMuxSubscriber,
     connectTimeoutMs: 20_000,
     scheduleConnectTimeout: (_delayMs, onTimeout) => {
       timeout = onTimeout;
@@ -209,6 +370,7 @@ test("background start keeps retrying without blocking local listeners", async (
       if (!stream) throw new Error("unexpected connection attempt");
       return stream;
     },
+    createMuxSubscriber: createReadyMuxSubscriber,
     connectTimeoutMs: 20_000,
     scheduleConnectTimeout: (_delayMs, onTimeout) => {
       timeout = onTimeout;
@@ -325,6 +487,7 @@ test("pairing reconnect confirms approval without resending the token", async ()
       if (outer === restored) setImmediate(() => options?.onControlReady?.());
       return {
         close: () => outer.destroy(),
+        controlReady: Promise.resolve("ready" as const),
         open: async () => new PassThrough(),
         pair: async (_request, pairingOptions) => {
           pairingOptions?.onPending?.();

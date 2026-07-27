@@ -8,6 +8,7 @@ import {
 import type { DesktopSnapshot } from "../apps/desktop/src/protocol.js";
 import type { HomeRegistry } from "../src/home/registry.js";
 import { derivePublisherHomeKey } from "../src/keys.js";
+import { HomeRegistryTimeoutError } from "../src/runtime/registry-client.js";
 import type {
   PublisherRuntimeStatus,
   RunningPublisher,
@@ -177,6 +178,308 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
     snapshots.at(-1)?.subscriber?.services.map(({ available }) => available),
     [true, true],
   );
+  await runtime.stop();
+});
+
+test("desktop runtime invalidates a connected generation after Home times out", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  let connection: SubscriberRuntimeStatus["connection"] = "connected";
+  const timeout = new HomeRegistryTimeoutError(5_000);
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      startSubscriber: async () =>
+        runningSubscriber(
+          () => subscriberStatus(connection, 1),
+          events,
+          (generation, reason) => {
+            events.push(`subscriber:invalidate:${generation}:${reason}`);
+            connection = "reconnecting";
+            return true;
+          },
+        ),
+      readRegistry: async () => {
+        throw timeout;
+      },
+    }),
+  );
+
+  assert.deepEqual(
+    events.filter((event) => event.startsWith("subscriber:invalidate:")),
+    ["subscriber:invalidate:1:home.registry.timeout"],
+  );
+  assert.equal(snapshots.at(-1)?.subscriber?.connection, "reconnecting");
+  assert.equal(snapshots.at(-1)?.subscriber?.services.length, 0);
+
+  await runtime.poll();
+  assert.equal(
+    events.filter((event) => event.startsWith("subscriber:invalidate:")).length,
+    1,
+  );
+  await runtime.stop();
+});
+
+test("desktop runtime rate-limits Home-triggered resets across generations", async () => {
+  const invalidations: number[] = [];
+  let connection: SubscriberRuntimeStatus["connection"] = "connected";
+  let generation = 1;
+  let now = 0;
+  const timeout = new HomeRegistryTimeoutError(5_000);
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: () => undefined,
+    },
+    dependencies([], {
+      startSubscriber: async () =>
+        runningSubscriber(
+          () => subscriberStatus(connection, generation),
+          [],
+          (invalidatedGeneration) => {
+            invalidations.push(invalidatedGeneration);
+            connection = "reconnecting";
+            return true;
+          },
+        ),
+      readRegistry: async () => {
+        throw timeout;
+      },
+      now: () => now,
+      random: () => 0.5,
+    } as Partial<DesktopRuntimeDependencies>),
+  );
+
+  assert.deepEqual(invalidations, [1]);
+  generation = 2;
+  connection = "connected";
+  await runtime.poll();
+  assert.deepEqual(invalidations, [1]);
+
+  now = 30_000;
+  await runtime.poll();
+  assert.deepEqual(invalidations, [1, 2]);
+
+  generation = 3;
+  connection = "connected";
+  await runtime.poll();
+  now = 149_999;
+  await runtime.poll();
+  assert.deepEqual(invalidations, [1, 2]);
+  now = 151_999;
+  await runtime.poll();
+  assert.deepEqual(invalidations, [1, 2, 3]);
+
+  generation = 4;
+  connection = "connected";
+  await runtime.poll();
+  now = 451_998;
+  await runtime.poll();
+  assert.deepEqual(invalidations, [1, 2, 3]);
+  now = 453_998;
+  await runtime.poll();
+  assert.deepEqual(invalidations, [1, 2, 3, 4]);
+  await runtime.stop();
+});
+
+test("a healthy Home response re-arms immediate reset recovery", async () => {
+  const invalidations: number[] = [];
+  let connection: SubscriberRuntimeStatus["connection"] = "connected";
+  let generation = 1;
+  let read = 0;
+  const timeout = new HomeRegistryTimeoutError(5_000);
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: () => undefined,
+    },
+    dependencies([], {
+      startSubscriber: async () =>
+        runningSubscriber(
+          () => subscriberStatus(connection, generation),
+          [],
+          (invalidatedGeneration) => {
+            invalidations.push(invalidatedGeneration);
+            connection = "reconnecting";
+            return true;
+          },
+        ),
+      readRegistry: async () => {
+        read++;
+        if (read === 2) return registry;
+        throw timeout;
+      },
+      now: () => 0,
+      random: () => 0.5,
+    } as Partial<DesktopRuntimeDependencies>),
+  );
+
+  generation = 2;
+  connection = "connected";
+  await runtime.poll();
+  generation = 3;
+  await runtime.poll();
+
+  assert.deepEqual(invalidations, [1, 3]);
+  await runtime.stop();
+});
+
+test("desktop ignores a stale Home timeout from an older generation", async () => {
+  const invalidations: number[] = [];
+  let generation = 1;
+  let rejectRead: ((error: Error) => void) | undefined;
+  let reads = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: () => undefined,
+    },
+    dependencies([], {
+      startSubscriber: async () =>
+        runningSubscriber(
+          () => subscriberStatus("connected", generation),
+          [],
+          (invalidatedGeneration) => {
+            invalidations.push(invalidatedGeneration);
+            return true;
+          },
+        ),
+      readRegistry: async () => {
+        reads++;
+        if (reads === 1) return registry;
+        return new Promise<HomeRegistry>((_resolve, reject) => {
+          rejectRead = reject;
+        });
+      },
+    }),
+  );
+
+  generation = 2;
+  const polling = runtime.poll();
+  await new Promise((resolve) => setImmediate(resolve));
+  generation = 3;
+  rejectRead?.(new HomeRegistryTimeoutError(5_000));
+  await polling;
+
+  assert.deepEqual(invalidations, []);
+  await runtime.stop();
+});
+
+test("desktop ignores a Home timeout that completes after stop begins", async () => {
+  const invalidations: number[] = [];
+  let generation = 1;
+  let rejectRead: ((error: Error) => void) | undefined;
+  let reads = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: () => undefined,
+    },
+    dependencies([], {
+      startSubscriber: async () =>
+        runningSubscriber(
+          () => subscriberStatus("connected", generation),
+          [],
+          (invalidatedGeneration) => {
+            invalidations.push(invalidatedGeneration);
+            return true;
+          },
+        ),
+      readRegistry: async () => {
+        reads++;
+        if (reads === 1) return registry;
+        return new Promise<HomeRegistry>((_resolve, reject) => {
+          rejectRead = reject;
+        });
+      },
+    }),
+  );
+
+  generation = 2;
+  const polling = runtime.poll();
+  await new Promise((resolve) => setImmediate(resolve));
+  const stopping = runtime.stop();
+  rejectRead?.(new HomeRegistryTimeoutError(5_000));
+  await Promise.all([polling, stopping]);
+
+  assert.deepEqual(invalidations, []);
+});
+
+test("desktop backs off non-timeout registry errors and disables stale services", async () => {
+  const snapshots: DesktopSnapshot[] = [];
+  let generation = 1;
+  let now = 0;
+  let reads = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [{ id: "ssh", localPort: 2222 }],
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies([], {
+      startSubscriber: async () =>
+        runningSubscriber(
+          () => subscriberStatus("connected", generation),
+          [],
+        ),
+      readRegistry: async () => {
+        reads++;
+        if (reads === 1) return registry;
+        throw new Error("Home registry returned HTTP 503");
+      },
+      now: () => now,
+      random: () => 0.5,
+    } as Partial<DesktopRuntimeDependencies>),
+  );
+
+  generation = 2;
+  await runtime.poll();
+  assert.deepEqual(
+    snapshots.at(-1)?.subscriber?.services.map(({ available }) => available),
+    [false, false],
+  );
+  assert.equal(reads, 2);
+
+  await runtime.poll();
+  assert.equal(reads, 2);
+  now = 1_000;
+  await runtime.poll();
+  assert.equal(reads, 3);
+
+  for (const expectedAt of [3_000, 7_000, 15_000, 31_000, 61_000, 91_000]) {
+    now = expectedAt - 1;
+    await runtime.poll();
+    const readsBeforeDeadline: number = reads;
+    now = expectedAt;
+    await runtime.poll();
+    assert.equal(reads, readsBeforeDeadline + 1);
+  }
   await runtime.stop();
 });
 
@@ -775,6 +1078,8 @@ function dependencies(
       );
     },
     readRegistry: async () => registry,
+    now: Date.now,
+    random: () => 0.5,
     renderPairingQr: async () => "<svg>pairing</svg>",
     persistPublisherAllowlist: async () => undefined,
     ...overrides,
@@ -799,11 +1104,19 @@ function subscriberStatus(
 function runningSubscriber(
   status: () => SubscriberRuntimeStatus,
   events: string[],
+  invalidateConnection: RunningSubscriber["invalidateConnection"] = (
+    generation,
+    reason,
+  ) => {
+    events.push(`subscriber:invalidate:${generation}:${reason}`);
+    return true;
+  },
 ): RunningSubscriber {
   return {
     publisherKey: remotePublisherKey,
     home: { port: 17_480, url: "http://home.localhost:17480" },
     services: [{ id: "ssh", port: 2222 }],
+    invalidateConnection,
     status,
     stop: async () => {
       events.push("subscriber:stop");

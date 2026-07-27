@@ -17,6 +17,8 @@ const compact = compactModule as { string: unknown };
 class FramedDuplex extends Duplex {
   destroyCalls = 0;
   dropWrites = false;
+  userData: unknown = null;
+  writeCalls = 0;
   peer?: FramedDuplex;
 
   override _read(): void {}
@@ -26,6 +28,7 @@ class FramedDuplex extends Duplex {
     _encoding: BufferEncoding,
     callback: (error?: Error | null) => void,
   ): void {
+    this.writeCalls++;
     const frame = Buffer.from(chunk);
     if (!this.dropWrites) setImmediate(() => this.peer?.push(frame));
     callback();
@@ -146,12 +149,14 @@ function openRawPairingChannel(outer: Duplex): void {
 }
 
 async function flushFrames(): Promise<void> {
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
+  for (let index = 0; index < 4; index++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 }
 
 function heartbeatOptions(scheduler: ManualScheduler) {
   return {
+    establishmentTimeoutMs: 20,
     intervalMs: 15,
     missedPongsBeforeTimeout: 2,
     responseTimeoutMs: 10,
@@ -397,6 +402,25 @@ test("closing a pairing mux cancels its request deadline", async () => {
   candidateOuter.destroy();
 });
 
+test("closing an unauthorized subscriber settles control readiness", async () => {
+  const [subscriberOuter] = framedPair();
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    authorized: false,
+  });
+
+  subscriber.close();
+
+  await assert.rejects(
+    Promise.race([
+      subscriber.controlReady,
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("control readiness did not settle")), 50);
+      }),
+    ]),
+    /subscriber closed before control was ready/i,
+  );
+});
+
 test("keeps one outer alive while publisher answers control heartbeats", async () => {
   const scheduler = new ManualScheduler();
   const [subscriberOuter, publisherOuter] = framedPair();
@@ -409,6 +433,8 @@ test("keeps one outer alive while publisher answers control heartbeats", async (
   });
 
   await flushFrames();
+  assert.equal(await subscriber.controlReady, "ready");
+  assert.equal(subscriberOuter.writeCalls >= 2, true);
   assert.equal(scheduler.pending(), 1);
 
   scheduler.advance(15);
@@ -421,6 +447,42 @@ test("keeps one outer alive while publisher answers control heartbeats", async (
   assert.equal(subscriberOuter.destroyCalls, 0);
 
   subscriber.close();
+  publisher.close();
+});
+
+test("destroys an outer when its control channel never opens", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  const errors: Error[] = [];
+  let establishmentTimeouts = 0;
+  subscriberOuter.on("error", (error) => errors.push(error));
+  subscriberOuter.dropWrites = true;
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("service:"),
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+    onControlEstablishmentTimeout: () => {
+      establishmentTimeouts++;
+    },
+  });
+  const controlResult = subscriber.controlReady?.catch((error: unknown) =>
+    error instanceof Error ? error : new Error(String(error))
+  );
+
+  scheduler.advance(19);
+  assert.equal(subscriberOuter.destroyed, false);
+  scheduler.advance(1);
+  await flushFrames();
+
+  assert.equal(subscriberOuter.destroyCalls, 1);
+  assert.equal(establishmentTimeouts, 1);
+  assert.match(errors[0]?.message ?? "", /control channel timed out/i);
+  const result = await controlResult;
+  assert.ok(result instanceof Error);
+  assert.match(result.message, /control channel timed out/i);
+
   publisher.close();
 });
 
@@ -447,6 +509,33 @@ test("destroys a silent outer after two missed heartbeat replies", async () => {
 
   assert.equal(subscriberOuter.destroyCalls, 1);
   assert.match(errors[0]?.message ?? "", /heartbeat timed out/i);
+
+  publisher.close();
+});
+
+test("does not destroy an outer twice when Home races heartbeat timeout", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  subscriberOuter.on("error", () => undefined);
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("service:"),
+  });
+  createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+    onHeartbeatTimeout: () => {
+      subscriberOuter.destroy(new Error("Home registry timed out"));
+    },
+  });
+
+  await flushFrames();
+  subscriberOuter.dropWrites = true;
+  scheduler.advance(15);
+  scheduler.advance(10);
+  scheduler.advance(10);
+  await flushFrames();
+
+  assert.equal(subscriberOuter.destroyCalls, 1);
 
   publisher.close();
 });
@@ -490,6 +579,7 @@ test("leaves heartbeat disabled for a publisher without control protocol support
   });
 
   await flushFrames();
+  assert.equal(await subscriber.controlReady, "legacy");
   scheduler.advance(100);
   assert.equal(scheduler.pending(), 0);
   assert.equal(subscriberOuter.destroyed, false);
@@ -499,6 +589,69 @@ test("leaves heartbeat disabled for a publisher without control protocol support
 
   stream.destroy();
   subscriber.close();
+  publisher.close();
+});
+
+test("does not treat outer shutdown during control opening as legacy", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  subscriberOuter.on("error", () => undefined);
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("legacy:"),
+    heartbeat: false,
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+  });
+
+  publisherOuter.destroy();
+  await flushFrames();
+
+  assert.ok(subscriber.controlReady);
+  await assert.rejects(
+    subscriber.controlReady,
+    /connection closed before control was ready/i,
+  );
+  assert.equal(subscriberOuter.destroyed, true);
+
+  subscriber.close();
+  publisher.close();
+});
+
+test("destroys the outer when a ready control channel closes remotely", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  subscriberOuter.on("error", () => undefined);
+  let unexpectedCloses = 0;
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("service:"),
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+    onControlUnexpectedClose: () => {
+      unexpectedCloses++;
+    },
+  });
+
+  await flushFrames();
+  assert.equal(await subscriber.controlReady, "ready");
+  const Protomux = ProtomuxModule as unknown as {
+    from(stream: Duplex): Iterable<{ protocol: string; close(): void }>;
+  };
+  const publisherMux = Protomux.from(publisherOuter);
+  const control = [...publisherMux].find(
+    (channel) => channel.protocol === "kepos/control/1",
+  );
+  assert.ok(control);
+  control.close();
+  await flushFrames();
+
+  assert.equal(subscriberOuter.destroyCalls, 1);
+  assert.equal(subscriberOuter.destroyed, true);
+  assert.equal(unexpectedCloses, 1);
+
   publisher.close();
 });
 
