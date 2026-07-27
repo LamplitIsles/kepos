@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -144,6 +151,53 @@ test("desktop output is ignored without ignoring desktop source", async () => {
 
   assert.match(gitignore, /^dist\/desktop\/$/m);
   assert.doesNotMatch(gitignore, /^apps\/desktop\/$/m);
+});
+
+test("desktop install has one canonical npm command", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(repository, "package.json"), "utf8"),
+  ) as { scripts?: Record<string, string> };
+
+  assert.equal(
+    packageJson.scripts?.["desktop:install"],
+    "npm run desktop:build && tsx scripts/install-desktop.ts",
+  );
+});
+
+test("desktop installer replaces the app bundle without retaining stale files", async () => {
+  const moduleUrl = new URL("../scripts/install-desktop.js", import.meta.url).href;
+  const installer = await import(moduleUrl).catch(() => undefined) as
+    | {
+        desktopInstallPath(home: string): string;
+        replaceDesktopApp(source: string, target: string): Promise<void>;
+      }
+    | undefined;
+  assert.ok(installer, "desktop installer module must exist");
+
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "kepos-install-test-"));
+  const source = path.join(temporary, "build", "Kepos.app");
+  const target = installer.desktopInstallPath(
+    path.join(temporary, "home"),
+  );
+  try {
+    await mkdir(path.join(source, "Contents"), { recursive: true });
+    await writeFile(path.join(source, "Contents", "version"), "new");
+    await mkdir(path.join(target, "Contents"), { recursive: true });
+    await writeFile(path.join(target, "Contents", "version"), "old");
+    await writeFile(path.join(target, "stale"), "remove me");
+
+    await installer.replaceDesktopApp(source, target);
+
+    assert.equal(
+      await readFile(path.join(target, "Contents", "version"), "utf8"),
+      "new",
+    );
+    await assert.rejects(readFile(path.join(target, "stale"), "utf8"), {
+      code: "ENOENT",
+    });
+  } finally {
+    await rm(temporary, { force: true, recursive: true });
+  }
 });
 
 test("desktop maps every added Node dependency to Bare", async () => {
