@@ -233,6 +233,7 @@ function createSubscriberControlChannel(
   let closed = false;
   let opened = false;
   let outerClosed = false;
+  let outerErrored = false;
   let locallyClosing = false;
   let lastPongAt = now();
   let missedPongs = 0;
@@ -271,7 +272,7 @@ function createSubscriberControlChannel(
         }
         queueMicrotask(() => {
           if (readySettled) return;
-          if (outerClosed || outer.destroyed) {
+          if (outerClosed || outerErrored || outer.destroyed) {
             settleFailure(
               new Error("Publisher connection closed before control was ready"),
             );
@@ -311,6 +312,14 @@ function createSubscriberControlChannel(
         new Error("Publisher connection closed before control was ready"),
       );
     }
+    finish();
+  });
+  outer.once("error", () => {
+    outerErrored = true;
+    if (readySettled) return;
+    settleFailure(
+      new Error("Publisher connection errored before control was ready"),
+    );
     finish();
   });
   arm(establishmentTimeoutMs, establishmentTimedOut);

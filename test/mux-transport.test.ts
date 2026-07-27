@@ -619,6 +619,35 @@ test("does not treat outer shutdown during control opening as legacy", async () 
   publisher.close();
 });
 
+test("does not treat an outer error during control rejection as legacy", async () => {
+  const scheduler = new ManualScheduler();
+  const [subscriberOuter, publisherOuter] = framedPair();
+  subscriberOuter.on("error", () => undefined);
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async () => prefixService("legacy:"),
+    heartbeat: false,
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter, {
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+    onControlClosed: () => {
+      subscriberOuter.emit("error", new Error("outer failed"));
+    },
+  });
+
+  await flushFrames();
+
+  const controlReady = subscriber.controlReady;
+  assert.ok(controlReady);
+  await assert.rejects(
+    controlReady,
+    /connection errored before control was ready/i,
+  );
+
+  subscriber.close();
+  publisher.close();
+});
+
 test("destroys the outer when a ready control channel closes remotely", async () => {
   const scheduler = new ManualScheduler();
   const [subscriberOuter, publisherOuter] = framedPair();

@@ -11,6 +11,11 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { desktopAppBundle, desktopBuildCommands } from "../scripts/build-desktop.js";
+import {
+  desktopInstallPath,
+  quitRunningDesktop,
+  replaceDesktopApp,
+} from "../scripts/install-desktop.js";
 
 const repository = process.cwd();
 
@@ -165,18 +170,9 @@ test("desktop install has one canonical npm command", async () => {
 });
 
 test("desktop installer replaces the app bundle without retaining stale files", async () => {
-  const moduleUrl = new URL("../scripts/install-desktop.js", import.meta.url).href;
-  const installer = await import(moduleUrl).catch(() => undefined) as
-    | {
-        desktopInstallPath(home: string): string;
-        replaceDesktopApp(source: string, target: string): Promise<void>;
-      }
-    | undefined;
-  assert.ok(installer, "desktop installer module must exist");
-
   const temporary = await mkdtemp(path.join(os.tmpdir(), "kepos-install-test-"));
   const source = path.join(temporary, "build", "Kepos.app");
-  const target = installer.desktopInstallPath(
+  const target = desktopInstallPath(
     path.join(temporary, "home"),
   );
   try {
@@ -186,7 +182,7 @@ test("desktop installer replaces the app bundle without retaining stale files", 
     await writeFile(path.join(target, "Contents", "version"), "old");
     await writeFile(path.join(target, "stale"), "remove me");
 
-    await installer.replaceDesktopApp(source, target);
+    await replaceDesktopApp(source, target);
 
     assert.equal(
       await readFile(path.join(target, "Contents", "version"), "utf8"),
@@ -198,6 +194,19 @@ test("desktop installer replaces the app bundle without retaining stale files", 
   } finally {
     await rm(temporary, { force: true, recursive: true });
   }
+});
+
+test("desktop installer skips bundle lookup when Kepos is not running", async () => {
+  let quitRequests = 0;
+
+  await quitRunningDesktop(
+    async () => false,
+    async () => {
+      quitRequests++;
+    },
+  );
+
+  assert.equal(quitRequests, 0);
 });
 
 test("desktop maps every added Node dependency to Bare", async () => {

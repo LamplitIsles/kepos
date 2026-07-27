@@ -450,8 +450,12 @@ export function createPublisherConnection(options: {
     observe("outer.attempt", { attempt });
     const outer = options.connect(observe);
     let attemptOuterClosed = false;
+    let attemptOuterErrored = false;
     outer.once("close", () => {
       attemptOuterClosed = true;
+    });
+    outer.once("error", () => {
+      attemptOuterErrored = true;
     });
     connectingOuter = outer;
     const reportHandshake = observeHandshake(
@@ -539,6 +543,9 @@ export function createPublisherConnection(options: {
         } else if (pendingApproval === activePendingApproval) {
           pendingApproval = undefined;
         }
+      }
+      if (attemptOuterErrored) {
+        throw new Error("Publisher connection errored before control was ready");
       }
       if (attemptOuterClosed || outer.destroyed) {
         throw new Error("Publisher connection closed before control was ready");

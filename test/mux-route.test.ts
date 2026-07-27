@@ -187,6 +187,35 @@ test("does not install a legacy outer that closes as negotiation settles", async
   await connection.stop();
 });
 
+test("does not install a legacy outer that errors as negotiation settles", async () => {
+  const stream = new FakeDhtStream(true);
+  stream.on("error", () => undefined);
+  const controlReady = new Promise<"legacy">((resolve) => {
+    setImmediate(() => {
+      resolve("legacy");
+      stream.emit("error", new Error("outer failed"));
+    });
+  });
+  const connection = createPublisherConnection({
+    connect: () => stream,
+    createMuxSubscriber: () => ({
+      close: () => stream.destroy(),
+      controlReady,
+      open: async () => new PassThrough(),
+      pair: async () => undefined,
+    }),
+    now: () => 1_000,
+    route: "auto",
+    sleep: async () => undefined,
+  });
+
+  await assert.rejects(connection.start(), /errored before control was ready/i);
+  assert.equal(connection.generation(), 0);
+  assert.notEqual(connection.status(), "connected");
+
+  await connection.stop();
+});
+
 test("invalidates only the matching connection generation once", async () => {
   const events: Observation[] = [];
   const initial = new FakeDhtStream(true);

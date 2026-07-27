@@ -57,18 +57,26 @@ async function runDesktopInstall(repository: string): Promise<string> {
   return target;
 }
 
-async function quitRunningDesktop(): Promise<void> {
-  await execute("/usr/bin/osascript", [
-    "-e",
-    `if application id "${bundleIdentifier}" is running then tell application id "${bundleIdentifier}" to quit`,
-  ]);
+export async function quitRunningDesktop(
+  isRunning: () => Promise<boolean> = desktopIsRunning,
+  requestQuit: () => Promise<void> = requestDesktopQuit,
+): Promise<void> {
+  if (!(await isRunning())) return;
+  await requestQuit();
   const deadline = Date.now() + 5_000;
-  while (await desktopIsRunning()) {
+  while (await isRunning()) {
     if (Date.now() >= deadline) {
       throw new Error("Kepos did not quit within 5 seconds");
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+}
+
+async function requestDesktopQuit(): Promise<void> {
+  await execute("/usr/bin/osascript", [
+    "-e",
+    `if application id "${bundleIdentifier}" is running then tell application id "${bundleIdentifier}" to quit`,
+  ]);
 }
 
 async function desktopIsRunning(): Promise<boolean> {
