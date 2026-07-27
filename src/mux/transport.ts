@@ -26,6 +26,7 @@ const compact = compactModule as CompactEncoding;
 const protocol = "kepos/tcp/1";
 const controlProtocol = "kepos/control/1";
 const pairingProtocol = "kepos/pair/1";
+const defaultControlEstablishmentTimeoutMs = 20_000;
 const defaultHeartbeatIntervalMs = 15_000;
 const defaultHeartbeatResponseTimeoutMs = 10_000;
 const defaultMissedPongsBeforeTimeout = 2;
@@ -67,7 +68,7 @@ interface MuxInstance {
     id: Uint8Array;
     handshake: Encoding<string>;
     onopen?: (handshake: string) => void | Promise<void>;
-    onclose?: () => void;
+    onclose?: (isRemote: boolean) => void;
     ondrain?: () => void;
   }) => MuxChannel | null;
   pair: (
@@ -101,6 +102,7 @@ type ScheduleHeartbeat = (
 ) => () => void;
 
 export interface HeartbeatOptions {
+  establishmentTimeoutMs?: number;
   intervalMs?: number;
   missedPongsBeforeTimeout?: number;
   responseTimeoutMs?: number;
@@ -128,7 +130,9 @@ export interface MuxSubscriberOptions {
   heartbeat?: false | HeartbeatOptions;
   now?: () => number;
   onControlClosed?: () => void;
+  onControlEstablishmentTimeout?: () => void;
   onControlReady?: () => void;
+  onControlUnexpectedClose?: () => void;
   onHeartbeatTimeout?: (fields: {
     lastPongElapsedMs: number;
     missedPongs: number;
@@ -144,12 +148,15 @@ export interface RunningMuxPublisher {
 
 export interface RunningMuxSubscriber {
   close: () => void;
+  controlReady?: Promise<ControlNegotiation>;
   open: (serviceId: string) => Promise<Duplex>;
   pair: (
     request: PairingRequest,
     options?: { onPending?: () => void },
   ) => Promise<void>;
 }
+
+export type ControlNegotiation = "disabled" | "legacy" | "ready";
 
 export interface PairingDecision {
   approve: () => void;
@@ -179,6 +186,7 @@ export class TerminalPairingError extends Error {
 
 interface RunningControlChannel {
   close: () => void;
+  ready: Promise<ControlNegotiation>;
 }
 
 function scheduleHeartbeat(
@@ -198,10 +206,16 @@ function createSubscriberControlChannel(
   outer: OuterStream,
   options: MuxSubscriberOptions,
   now: () => number,
-): RunningControlChannel | undefined {
-  if (options.heartbeat === false) return undefined;
+): RunningControlChannel {
+  if (options.heartbeat === false) {
+    return { close: () => undefined, ready: Promise.resolve("disabled") };
+  }
 
   const heartbeat = options.heartbeat ?? {};
+  const establishmentTimeoutMs = positiveInteger(
+    heartbeat.establishmentTimeoutMs,
+    defaultControlEstablishmentTimeoutMs,
+  );
   const intervalMs = positiveInteger(
     heartbeat.intervalMs,
     defaultHeartbeatIntervalMs,
@@ -217,26 +231,69 @@ function createSubscriberControlChannel(
   const schedule = heartbeat.schedule ?? scheduleHeartbeat;
   let cancelTimer: (() => void) | undefined;
   let closed = false;
+  let opened = false;
+  let outerClosed = false;
+  let outerErrored = false;
+  let locallyClosing = false;
   let lastPongAt = now();
   let missedPongs = 0;
   let pendingSequence: string | undefined;
   let sequence = 0;
   let messages: ControlMessages;
+  let readyResolve!: (result: ControlNegotiation) => void;
+  let readyReject!: (error: Error) => void;
+  let readySettled = false;
+  const ready = new Promise<ControlNegotiation>((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  void ready.catch(() => undefined);
 
   const channel = mux.createChannel({
     protocol: controlProtocol,
     id: crypto.randomBytes(16),
     handshake: compact.string,
     onopen: () => {
+      if (closed) return;
+      opened = true;
+      settleReady("ready");
       options.onControlReady?.();
-      arm(intervalMs, sendPing);
+      sendPing();
     },
-    onclose: () => {
-      stop();
+    onclose: (isRemote) => {
+      const wasOpened = opened;
+      finish();
       options.onControlClosed?.();
+      if (locallyClosing) return;
+      if (!wasOpened) {
+        if (!isRemote) {
+          settleFailure(new Error("Subscriber control channel closed"));
+          return;
+        }
+        queueMicrotask(() => {
+          if (readySettled) return;
+          if (outerClosed || outerErrored || outer.destroyed) {
+            settleFailure(
+              new Error("Publisher connection closed before control was ready"),
+            );
+            return;
+          }
+          settleReady("legacy");
+        });
+        return;
+      }
+      if (!isRemote) return;
+      queueMicrotask(() => {
+        if (outerClosed || outer.destroyed || locallyClosing) return;
+        options.onControlUnexpectedClose?.();
+        outer.destroy(new Error("Publisher control channel closed unexpectedly"));
+      });
     },
   });
-  if (!channel) return undefined;
+  if (!channel) {
+    settleFailure(new Error("Subscriber control channel could not be created"));
+    return { close: () => undefined, ready };
+  }
 
   messages = {
     ping: channel.addMessage({
@@ -248,10 +305,27 @@ function createSubscriberControlChannel(
       onmessage: receivePong,
     }),
   };
-  outer.once("close", stop);
+  outer.once("close", () => {
+    outerClosed = true;
+    if (!readySettled) {
+      settleFailure(
+        new Error("Publisher connection closed before control was ready"),
+      );
+    }
+    finish();
+  });
+  outer.once("error", () => {
+    outerErrored = true;
+    if (readySettled) return;
+    settleFailure(
+      new Error("Publisher connection errored before control was ready"),
+    );
+    finish();
+  });
+  arm(establishmentTimeoutMs, establishmentTimedOut);
   channel.open("1");
 
-  return { close: stop };
+  return { close: stop, ready };
 
   function arm(delayMs: number, callback: () => void): void {
     cancelTimer?.();
@@ -263,6 +337,17 @@ function createSubscriberControlChannel(
     pendingSequence = String(++sequence);
     messages.ping.send(pendingSequence);
     arm(responseTimeoutMs, missPong);
+  }
+
+  function establishmentTimedOut(): void {
+    if (closed || opened) return;
+    const error = new Error(
+      `Publisher control channel timed out after ${establishmentTimeoutMs}ms`,
+    );
+    options.onControlEstablishmentTimeout?.();
+    settleFailure(error);
+    finish();
+    destroyOuter(error);
   }
 
   function receivePong(receivedSequence: string): void {
@@ -285,8 +370,8 @@ function createSubscriberControlChannel(
       lastPongElapsedMs: Math.max(0, now() - lastPongAt),
       missedPongs,
     });
-    stop();
-    outer.destroy(
+    finish();
+    destroyOuter(
       new Error(
         `Publisher heartbeat timed out after ${missedPongs} missed replies`,
       ),
@@ -294,12 +379,37 @@ function createSubscriberControlChannel(
   }
 
   function stop(): void {
+    locallyClosing = true;
+    if (!readySettled) {
+      settleFailure(new Error("Subscriber control channel closed"));
+    }
+    finish();
+    channel?.close();
+  }
+
+  function finish(): void {
     if (closed) return;
     closed = true;
     pendingSequence = undefined;
     cancelTimer?.();
     cancelTimer = undefined;
-    channel?.close();
+  }
+
+  function settleReady(result: ControlNegotiation): void {
+    if (readySettled) return;
+    readySettled = true;
+    readyResolve(result);
+  }
+
+  function settleFailure(error: Error): void {
+    if (readySettled) return;
+    readySettled = true;
+    readyReject(error);
+  }
+
+  function destroyOuter(error: Error): void {
+    if (outer.destroyed) return;
+    outer.destroy(error);
   }
 }
 
@@ -601,18 +711,44 @@ export function createMuxSubscriber(
   const now = options.now ?? Date.now;
   const outerId = options.outerId ?? createObservationId("outer");
   let authorized = options.authorized ?? true;
-  let control = authorized
-    ? createSubscriberControlChannel(mux, outer, options, now)
-    : undefined;
+  let control: RunningControlChannel | undefined;
+  let controlReadyResolve!: (result: ControlNegotiation) => void;
+  let controlReadyReject!: (error: Error) => void;
+  let controlReadySettled = false;
+  const controlReady = new Promise<ControlNegotiation>((resolve, reject) => {
+    controlReadyResolve = resolve;
+    controlReadyReject = reject;
+  });
+  void controlReady.catch(() => undefined);
   let pairingChannel: MuxChannel | undefined;
+
+  const startControl = (): void => {
+    control = createSubscriberControlChannel(mux, outer, options, now);
+    void control.ready.then(resolveControlReady, rejectControlReady);
+  };
+
+  const resolveControlReady = (result: ControlNegotiation): void => {
+    if (controlReadySettled) return;
+    controlReadySettled = true;
+    controlReadyResolve(result);
+  };
+
+  const rejectControlReady = (error: Error): void => {
+    if (controlReadySettled) return;
+    controlReadySettled = true;
+    controlReadyReject(error);
+  };
+
+  if (authorized) startControl();
 
   const authorize = (): void => {
     if (authorized) return;
     authorized = true;
-    control = createSubscriberControlChannel(mux, outer, options, now);
+    startControl();
   };
 
   return {
+    controlReady,
     async open(serviceId: string): Promise<Duplex> {
       if (!authorized) {
         throw new Error("Subscriber pairing is not approved");
@@ -713,6 +849,11 @@ export function createMuxSubscriber(
     },
     close(): void {
       pairingChannel?.close();
+      if (!control) {
+        rejectControlReady(
+          new Error("Subscriber closed before control was ready"),
+        );
+      }
       control?.close();
       outer.destroy();
     },

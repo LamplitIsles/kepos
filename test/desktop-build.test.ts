@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import { desktopAppBundle, desktopBuildCommands } from "../scripts/build-desktop.js";
+import {
+  desktopInstallPath,
+  quitRunningDesktop,
+  replaceDesktopApp,
+} from "../scripts/install-desktop.js";
 
 const repository = process.cwd();
 
@@ -144,6 +156,57 @@ test("desktop output is ignored without ignoring desktop source", async () => {
 
   assert.match(gitignore, /^dist\/desktop\/$/m);
   assert.doesNotMatch(gitignore, /^apps\/desktop\/$/m);
+});
+
+test("desktop install has one canonical npm command", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(repository, "package.json"), "utf8"),
+  ) as { scripts?: Record<string, string> };
+
+  assert.equal(
+    packageJson.scripts?.["desktop:install"],
+    "npm run desktop:build && tsx scripts/install-desktop.ts",
+  );
+});
+
+test("desktop installer replaces the app bundle without retaining stale files", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "kepos-install-test-"));
+  const source = path.join(temporary, "build", "Kepos.app");
+  const target = desktopInstallPath(
+    path.join(temporary, "home"),
+  );
+  try {
+    await mkdir(path.join(source, "Contents"), { recursive: true });
+    await writeFile(path.join(source, "Contents", "version"), "new");
+    await mkdir(path.join(target, "Contents"), { recursive: true });
+    await writeFile(path.join(target, "Contents", "version"), "old");
+    await writeFile(path.join(target, "stale"), "remove me");
+
+    await replaceDesktopApp(source, target);
+
+    assert.equal(
+      await readFile(path.join(target, "Contents", "version"), "utf8"),
+      "new",
+    );
+    await assert.rejects(readFile(path.join(target, "stale"), "utf8"), {
+      code: "ENOENT",
+    });
+  } finally {
+    await rm(temporary, { force: true, recursive: true });
+  }
+});
+
+test("desktop installer skips bundle lookup when Kepos is not running", async () => {
+  let quitRequests = 0;
+
+  await quitRunningDesktop(
+    async () => false,
+    async () => {
+      quitRequests++;
+    },
+  );
+
+  assert.equal(quitRequests, 0);
 });
 
 test("desktop maps every added Node dependency to Bare", async () => {

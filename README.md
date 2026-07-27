@@ -203,11 +203,17 @@ their identities stay in the fixed
 cannot use the same publisher or subscriber state at the same time, and only
 one desktop instance may run on a Mac.
 
-Build and launch it from an initialized recursive checkout:
+Build and install it from an initialized recursive checkout:
 
 ```sh
-npm run desktop:build
-dist/desktop/Kepos.app/Contents/MacOS/Kepos
+npm run desktop:install
+```
+
+This replaces `~/Applications/Kepos.app` and launches the new build. To run
+the checkout without installing it:
+
+```sh
+npm run desktop:run
 ```
 
 Set `enabled = true` on either or both role tables. For example, this starts

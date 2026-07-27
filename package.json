@@ -82,6 +82,7 @@
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-include=\"packages/*/src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info \"test/**/*.test.ts\"",
     "desktop:build": "tsx scripts/build-desktop.ts",
     "desktop:check": "npm run desktop:typecheck && node --import tsx --test \"test/desktop-*.test.ts\"",
+    "desktop:install": "npm run desktop:build && tsx scripts/install-desktop.ts",
     "desktop:run": "npm run desktop:build && dist/desktop/Kepos.app/Contents/MacOS/Kepos",
     "desktop:typecheck": "tsc -p tsconfig.desktop.json --noEmit",
     "kepos": "tsx src/cli/main.ts"

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { test } from "node:test";
 
-import { readHomeRegistry } from "../src/runtime/registry-client.js";
+import {
+  HomeRegistryTimeoutError,
+  readHomeRegistry,
+} from "../src/runtime/registry-client.js";
 import {
   AndroidRegistryState,
   createAndroidRegistrySnapshot,
@@ -134,6 +138,27 @@ test("Android reads the publisher registry through its local HTTP surface", asyn
     });
   } finally {
     await home.close();
+  }
+});
+
+test("Home registry timeout has a stable error type", async () => {
+  const server = createServer(() => undefined);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+
+  try {
+    await assert.rejects(
+      readHomeRegistry(address.port, 5),
+      (error) => error instanceof HomeRegistryTimeoutError,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
   }
 });
 

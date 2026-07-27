@@ -98,6 +98,7 @@ export interface RunningSubscriber {
     url: string;
   };
   services: RunningSubscriberService[];
+  invalidateConnection: (generation: number, reason: string) => boolean;
   status: () => SubscriberRuntimeStatus;
   stop: () => Promise<void>;
 }
@@ -235,6 +236,7 @@ export async function startSubscriber(
         url: gateway.url,
       },
       services,
+      invalidateConnection: connection.invalidate,
       status: () => ({
         role: "subscriber",
         state: stopped ? "stopped" : "running",
@@ -349,11 +351,18 @@ export function createPublisherConnection(options: {
   start: () => Promise<void>;
   startInBackground: () => void;
   generation: () => number;
+  invalidate: (generation: number, reason: string) => boolean;
   status: () => SubscriberConnectionStatus;
   stop: () => Promise<void>;
 } {
   let current:
-    | { mux: RunningMuxSubscriber; outer: DhtStream }
+    | {
+        generation: number;
+        invalidated: boolean;
+        mux: RunningMuxSubscriber;
+        observe: EmitObservation;
+        outer: DhtStream;
+      }
     | undefined;
   let reconnecting: Promise<RunningMuxSubscriber> | undefined;
   let connectingOuter: DhtStream | undefined;
@@ -363,14 +372,34 @@ export function createPublisherConnection(options: {
   let pendingApproval = options.pendingApproval;
   let connectionAttempt = 0;
   let connectionGeneration = 0;
+  const unhealthyOuters = new WeakSet<DhtStream>();
+
+  const markOuterUnhealthy = (
+    outer: DhtStream,
+    observe: EmitObservation,
+    reason: string,
+    fields: Record<string, unknown> = {},
+  ): boolean => {
+    if (unhealthyOuters.has(outer)) return false;
+    unhealthyOuters.add(outer);
+    if (current?.outer === outer) current.invalidated = true;
+    observe("outer.unhealthy", { reason, ...fields });
+    return true;
+  };
 
   const install = (
     outer: DhtStream,
     mux: RunningMuxSubscriber,
     observe: EmitObservation,
   ): RunningMuxSubscriber => {
-    current = { outer, mux };
     connectionGeneration++;
+    current = {
+      generation: connectionGeneration,
+      invalidated: false,
+      mux,
+      observe,
+      outer,
+    };
     let streamError: string | undefined;
     outer.once("error", (error) => {
       streamError = error.message;
@@ -420,6 +449,14 @@ export function createPublisherConnection(options: {
     });
     observe("outer.attempt", { attempt });
     const outer = options.connect(observe);
+    let attemptOuterClosed = false;
+    let attemptOuterErrored = false;
+    outer.once("close", () => {
+      attemptOuterClosed = true;
+    });
+    outer.once("error", () => {
+      attemptOuterErrored = true;
+    });
     connectingOuter = outer;
     const reportHandshake = observeHandshake(
       outer,
@@ -454,29 +491,29 @@ export function createPublisherConnection(options: {
         : activePairing
           ? undefined
           : pendingApproval;
-      let controlReadyResolve: (() => void) | undefined;
-      let controlReadyReject: ((error: Error) => void) | undefined;
-      const controlReady = activePendingApproval
-        ? new Promise<void>((resolve, reject) => {
-            controlReadyResolve = resolve;
-            controlReadyReject = reject;
-          })
-        : undefined;
       const mux = (options.createMuxSubscriber ?? createMuxSubscriber)(outer, {
         authorized: activePairing === undefined,
         outerId,
         now: options.now,
         observe: options.observe,
-        onControlClosed: () =>
-          controlReadyReject?.(
-            new Error("Publisher did not authorize the pending subscriber"),
-          ),
-        onControlReady: () => controlReadyResolve?.(),
-        onHeartbeatTimeout: (fields) => {
-          observe("outer.unhealthy", {
-            reason: "heartbeat.timeout",
-            ...fields,
+        onControlEstablishmentTimeout: () => {
+          markOuterUnhealthy(
+            outer,
+            observe,
+            "control.establishment.timeout",
+          );
+        },
+        onControlReady: () => {
+          observe("outer.control-ready", {
+            attempt,
+            attemptElapsedMs: options.now() - attemptStartedAt,
           });
+        },
+        onControlUnexpectedClose: () => {
+          markOuterUnhealthy(outer, observe, "control.unexpected-close");
+        },
+        onHeartbeatTimeout: (fields) => {
+          markOuterUnhealthy(outer, observe, "heartbeat.timeout", fields);
         },
         transportSnapshot: () => dhtStreamSnapshot(outer),
       });
@@ -489,8 +526,16 @@ export function createPublisherConnection(options: {
         });
         await activePairing.onApproved();
         if (pairing === activePairing) pairing = undefined;
-      } else if (activePendingApproval && controlReady) {
-        await controlReady;
+      }
+      const controlNegotiation = await (mux.controlReady ??
+        Promise.resolve("legacy" as const));
+      if (
+        (activePairing || activePendingApproval) &&
+        controlNegotiation !== "ready"
+      ) {
+        throw new Error("Publisher did not confirm subscriber approval");
+      }
+      if (activePendingApproval) {
         await activePendingApproval.onConfirmed();
         if (pairingRequestAccepted && pairing) {
           pairing = undefined;
@@ -498,6 +543,12 @@ export function createPublisherConnection(options: {
         } else if (pendingApproval === activePendingApproval) {
           pendingApproval = undefined;
         }
+      }
+      if (attemptOuterErrored) {
+        throw new Error("Publisher connection errored before control was ready");
+      }
+      if (attemptOuterClosed || outer.destroyed) {
+        throw new Error("Publisher connection closed before control was ready");
       }
       return { observe, mux: install(outer, mux, observe) };
     } catch (error) {
@@ -522,7 +573,7 @@ export function createPublisherConnection(options: {
   };
 
   const reconnect = (): Promise<RunningMuxSubscriber> => {
-    if (current) return Promise.resolve(current.mux);
+    if (current && !current.invalidated) return Promise.resolve(current.mux);
     if (reconnecting) return reconnecting;
     reconnecting = (async () => {
       let delayMs = 100;
@@ -589,10 +640,28 @@ export function createPublisherConnection(options: {
     generation(): number {
       return connectionGeneration;
     },
+    invalidate(generation: number, reason: string): boolean {
+      const active = current;
+      if (
+        stopped ||
+        !active ||
+        active.generation !== generation ||
+        active.invalidated
+      ) {
+        return false;
+      }
+      if (!markOuterUnhealthy(active.outer, active.observe, reason)) {
+        return false;
+      }
+      active.outer.destroy(
+        new Error(`Publisher connection invalidated: ${reason}`),
+      );
+      return true;
+    },
     async open(serviceId: string, signal?: CancellationSignal): Promise<Duplex> {
       while (!stopped) {
         throwIfAborted(signal);
-        const activeConnection = current;
+        const activeConnection = current?.invalidated ? undefined : current;
         const active = activeConnection?.mux ??
           (await waitWithAbort(reconnect(), signal));
         throwIfAborted(signal);
@@ -612,6 +681,7 @@ export function createPublisherConnection(options: {
     },
     status(): SubscriberConnectionStatus {
       if (stopped) return "stopped";
+      if (current?.invalidated) return "reconnecting";
       if (current) return "connected";
       if (reconnecting) return "reconnecting";
       return "connecting";

@@ -9,6 +9,14 @@ import {
 
 const maximumRegistryBytes = 64 * 1024;
 
+export class HomeRegistryTimeoutError extends Error {
+  override readonly name = "HomeRegistryTimeoutError";
+
+  constructor(timeoutMs: number) {
+    super(`Home registry request timed out after ${timeoutMs}ms`);
+  }
+}
+
 export function readHomeRegistry(
   gatewayPort: number,
   timeoutMs = 5_000,
@@ -50,7 +58,7 @@ export function readHomeRegistry(
       });
     });
     pending.setTimeout(timeoutMs, () => {
-      pending.destroy(new Error("Home registry request timed out"));
+      pending.destroy(new HomeRegistryTimeoutError(timeoutMs));
     });
     pending.once("error", reject);
     pending.end();

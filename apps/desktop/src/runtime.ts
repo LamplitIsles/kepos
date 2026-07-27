@@ -1,7 +1,10 @@
 import type { HomeRegistry } from "../../../src/home/registry.js";
 import { renderSVG } from "uqr";
 import { derivePublisherHomeKey } from "../../../src/keys.js";
-import { readHomeRegistry } from "../../../src/runtime/registry-client.js";
+import {
+  HomeRegistryTimeoutError,
+  readHomeRegistry,
+} from "../../../src/runtime/registry-client.js";
 import { createServicePresentations } from "../../../src/runtime/service-handlers.js";
 import {
   acquirePublisherRuntimeLock,
@@ -66,6 +69,8 @@ export interface DesktopRuntimeDependencies {
   startPublisher(options: StartPublisherOptions): Promise<RunningPublisher>;
   startSubscriber(options: StartSubscriberOptions): Promise<RunningSubscriber>;
   readRegistry(gatewayPort: number): Promise<HomeRegistry>;
+  now(): number;
+  random(): number;
   renderPairingQr(uri: string): Promise<string>;
   persistPublisherAllowlist(configPath: string, allow: string[]): Promise<void>;
 }
@@ -91,6 +96,8 @@ const defaultDependencies: DesktopRuntimeDependencies = {
   startPublisher,
   startSubscriber,
   readRegistry: readHomeRegistry,
+  now: Date.now,
+  random: Math.random,
   renderPairingQr: async (uri) =>
     renderSVG(uri, {
       ecc: "M",
@@ -119,7 +126,14 @@ export async function startDesktopRuntime(
   let runningPublisher: RunningPublisher | undefined;
   let runningSubscriber: RunningSubscriber | undefined;
   let registry: HomeRegistry | undefined;
+  let registryError: string | undefined;
   let refreshedGeneration: number | undefined;
+  let observedGeneration: number | undefined;
+  let resetIssuedGeneration: number | undefined;
+  let registryRetryAttempt = 0;
+  let nextRegistryAttemptAt = 0;
+  let forcedResetStreak = 0;
+  let nextForcedResetAt = 0;
   let stopped = false;
   let pollTask: Promise<void> | undefined;
   let reconfigureTail = Promise.resolve();
@@ -255,23 +269,89 @@ export async function startDesktopRuntime(
 
   async function updateSubscriberRole(): Promise<void> {
     if (!runningSubscriber || !subscriberOptions || !subscriberRole) return;
-    const status = runningSubscriber.status();
-    let registryError: string | undefined;
+    let status = runningSubscriber.status();
     if (
       status.connection === "connected" &&
-      status.connectionGeneration !== refreshedGeneration
+      status.connectionGeneration !== observedGeneration
     ) {
+      observedGeneration = status.connectionGeneration;
+      resetIssuedGeneration = undefined;
+      registryError = undefined;
+      registryRetryAttempt = 0;
+      nextRegistryAttemptAt = 0;
+    }
+    if (
+      status.connection === "connected" &&
+      status.connectionGeneration !== refreshedGeneration &&
+      dependencies.now() >= nextRegistryAttemptAt
+    ) {
+      const attemptGeneration = status.connectionGeneration;
       try {
-        const next = await dependencies.readRegistry(runningSubscriber.home.port);
+        const next = await dependencies.readRegistry(
+          runningSubscriber.home.port,
+        );
         if (stopped) return;
+        status = runningSubscriber.status();
+        if (
+          status.connection !== "connected" ||
+          status.connectionGeneration !== attemptGeneration ||
+          observedGeneration !== attemptGeneration
+        ) {
+          subscriberRole = createSubscriberRole(
+            status,
+            subscriberOptions.gatewayPort,
+            registry,
+            refreshedGeneration === status.connectionGeneration,
+            registryError,
+          );
+          return;
+        }
         if (next.publisher.publisherKey !== runningSubscriber.publisherKey) {
           throw new Error("Home registry publisher does not match the connection");
         }
         registry = next;
-        refreshedGeneration = status.connectionGeneration;
+        refreshedGeneration = attemptGeneration;
+        registryError = undefined;
+        registryRetryAttempt = 0;
+        nextRegistryAttemptAt = 0;
+        forcedResetStreak = 0;
+        nextForcedResetAt = 0;
       } catch (error) {
         if (stopped) return;
+        status = runningSubscriber.status();
+        if (
+          status.connection !== "connected" ||
+          status.connectionGeneration !== attemptGeneration ||
+          observedGeneration !== attemptGeneration
+        ) {
+          subscriberRole = createSubscriberRole(
+            status,
+            subscriberOptions.gatewayPort,
+            registry,
+            refreshedGeneration === status.connectionGeneration,
+            registryError,
+          );
+          return;
+        }
         registryError = errorMessage(error);
+        scheduleRegistryRetry();
+        if (
+          error instanceof HomeRegistryTimeoutError &&
+          resetIssuedGeneration !== attemptGeneration &&
+          dependencies.now() >= nextForcedResetAt
+        ) {
+          resetIssuedGeneration = attemptGeneration;
+          forcedResetStreak++;
+          nextForcedResetAt = dependencies.now() + jitteredDelay(
+            forcedResetDelay(forcedResetStreak),
+            dependencies.random(),
+          );
+          runningSubscriber.invalidateConnection(
+            attemptGeneration,
+            "home.registry.timeout",
+          );
+          status = runningSubscriber.status();
+        }
       }
     }
     if (stopped) return;
@@ -279,7 +359,17 @@ export async function startDesktopRuntime(
       status,
       subscriberOptions.gatewayPort,
       registry,
+      refreshedGeneration === status.connectionGeneration,
       registryError,
+    );
+  }
+
+  function scheduleRegistryRetry(): void {
+    const delay = registryRetryDelay(registryRetryAttempt);
+    registryRetryAttempt++;
+    nextRegistryAttemptAt = dependencies.now() + jitteredDelay(
+      delay,
+      dependencies.random(),
     );
   }
 
@@ -402,7 +492,14 @@ export async function startDesktopRuntime(
       subscriberLock = configuration.subscriber?.lock;
       subscriberRole = configuration.subscriber ? initialSubscriberRole() : undefined;
       registry = undefined;
+      registryError = undefined;
       refreshedGeneration = undefined;
+      observedGeneration = undefined;
+      resetIssuedGeneration = undefined;
+      registryRetryAttempt = 0;
+      nextRegistryAttemptAt = 0;
+      forcedResetStreak = 0;
+      nextForcedResetAt = 0;
     }
     if (stopped) return;
     publish();
@@ -574,11 +671,13 @@ function createSubscriberRole(
   status: SubscriberRuntimeStatus,
   gatewayPort: number,
   registry?: HomeRegistry,
+  registryCurrent = false,
   error?: string,
 ): DesktopSubscriberRole {
-  const connected = status.connection === "connected";
+  const servicesAvailable =
+    status.connection === "connected" && registryCurrent;
   const services = registry
-    ? createServices(registry, status, gatewayPort, connected)
+    ? createServices(registry, status, gatewayPort, servicesAvailable)
     : [];
   return {
     phase: status.state === "stopped" ? "stopped" : "running",
@@ -611,6 +710,22 @@ function createServices(
     gatewayPort,
     localPorts,
   ).map((service) => ({ ...service, available: connected }));
+}
+
+function registryRetryDelay(attempt: number): number {
+  const delays = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+  return delays[Math.min(attempt, delays.length - 1)]!;
+}
+
+function forcedResetDelay(streak: number): number {
+  if (streak === 1) return 30_000;
+  if (streak === 2) return 120_000;
+  return 300_000;
+}
+
+function jitteredDelay(delayMs: number, random: number): number {
+  const bounded = Math.min(1, Math.max(0, random));
+  return Math.round(delayMs * (0.9 + bounded * 0.2));
 }
 
 function clonePublisherRole(role: DesktopPublisherRole): DesktopPublisherRole {

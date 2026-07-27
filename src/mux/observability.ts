@@ -7,6 +7,7 @@ export type ObservationName =
   | "outer.handshake"
   | "outer.holepunch"
   | "outer.connected"
+  | "outer.control-ready"
   | "outer.unhealthy"
   | "outer.retry"
   | "outer.restored"
