@@ -6,6 +6,11 @@ Device: Pixel 7a (`lynx`), Android 16, arm64-v8a
 
 Bare Kit: 2.3.0
 
+> Superseded product behavior: the dated device gate below used ports 18480
+> and 18481. Current `deviceTest` builds use 18480 for the hostname gateway and
+> 18490 for the raw Mihomo mapping. The old result remains unchanged here as
+> historical evidence.
+
 ## Build inputs
 
 The Bare Kit release archive is pinned by `scripts/fetch-bare-kit.ts`:

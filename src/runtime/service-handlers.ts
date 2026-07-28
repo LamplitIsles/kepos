@@ -2,12 +2,15 @@ import type { HomeRegistryService } from "../home/registry.js";
 
 export type ServiceAction = "open" | "copy-command" | "copy-url";
 export type ServiceIcon =
+  | "book"
   | "build"
+  | "dashboard"
   | "dagger"
   | "git"
   | "music"
   | "photos"
   | "port"
+  | "proxy"
   | "storage"
   | "terminal"
   | "web";
@@ -34,6 +37,12 @@ interface BuiltInServiceHandler {
 }
 
 export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
+  bookorbit: {
+    action: "open",
+    httpUrl: "open",
+    icon: "book",
+    sortGroup: 0,
+  },
   ente: {
     action: "copy-url",
     httpUrl: "origin",
@@ -57,6 +66,21 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
     sortGroup: 1,
   },
   forgejo: { action: "open", httpUrl: "open", icon: "git", sortGroup: 0 },
+  mihomo: {
+    action: "copy-url",
+    icon: "proxy",
+    localCommand: {
+      access: "tcp",
+      format: (localPort) => `socks5://127.0.0.1:${localPort}`,
+    },
+    sortGroup: 1,
+  },
+  "mihomo-dashboard": {
+    action: "open",
+    httpUrl: "open",
+    icon: "dashboard",
+    sortGroup: 0,
+  },
   navidrome: {
     action: "copy-url",
     httpUrl: "origin",
@@ -80,6 +104,13 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
   },
 } satisfies Readonly<Record<string, BuiltInServiceHandler>>);
 
+const DEFAULT_HTTP_SERVICE_HANDLER = Object.freeze({
+  action: "open",
+  httpUrl: "open",
+  icon: "web",
+  sortGroup: 0,
+} satisfies BuiltInServiceHandler);
+
 export function createServicePresentations(
   services: readonly HomeRegistryService[],
   gatewayPort: number,
@@ -89,7 +120,6 @@ export function createServicePresentations(
     .filter(({ id }) => id !== "home")
     .flatMap((service, registryIndex) => {
       const handler = handlerFor(service.id);
-      if (handler === undefined) return [];
       const presentation = createPresentation(
         service,
         handler,
@@ -111,10 +141,10 @@ export function createServicePresentations(
     .map(({ presentation }) => presentation);
 }
 
-function handlerFor(id: string): BuiltInServiceHandler | undefined {
+function handlerFor(id: string): BuiltInServiceHandler {
   return BUILT_IN_SERVICE_HANDLERS[
     id as keyof typeof BUILT_IN_SERVICE_HANDLERS
-  ];
+  ] ?? DEFAULT_HTTP_SERVICE_HANDLER;
 }
 
 function createPresentation(

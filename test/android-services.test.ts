@@ -10,6 +10,7 @@ import {
   AndroidRegistryState,
   createAndroidRegistrySnapshot,
 } from "../src/android/services.js";
+import { createAndroidSubscriberServices } from "../src/android/worklet/services.js";
 import type { HomeRegistry } from "../src/home/registry.js";
 import { startHomeServer } from "../src/home/server.js";
 
@@ -101,7 +102,7 @@ test("Android registry snapshot preserves publisher service order", () => {
   );
 });
 
-test("Android omits services without a built-in action", () => {
+test("Android gives unknown registry services an HTTP fallback", () => {
   const registry: HomeRegistry = {
     schemaVersion: 2,
     revision: 1,
@@ -112,7 +113,80 @@ test("Android omits services without a built-in action", () => {
     ],
   };
 
-  assert.deepEqual(createAndroidRegistrySnapshot(registry, 17_480).services, []);
+  assert.deepEqual(createAndroidRegistrySnapshot(registry, 17_480).services, [
+    {
+      id: "postgres",
+      name: "PostgreSQL",
+      access: "http",
+      action: "open",
+      icon: "web",
+      url: "http://postgres.localhost:17480/",
+    },
+  ]);
+});
+
+test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated actions", () => {
+  const registry: HomeRegistry = {
+    schemaVersion: 2,
+    revision: 1,
+    publisher: { displayName: "kosmos", publisherKey },
+    services: [
+      { id: "home", name: "Home", kind: "tcp" },
+      { id: "navidrome", name: "Navidrome", kind: "tcp" },
+      { id: "mihomo", name: "Mihomo", kind: "tcp" },
+      { id: "bookorbit", name: "BookOrbit", kind: "tcp" },
+      { id: "mihomo-dashboard", name: "Mihomo Dashboard", kind: "tcp" },
+    ],
+  };
+
+  assert.deepEqual(
+    createAndroidRegistrySnapshot(
+      registry,
+      17_480,
+      new Map([["mihomo", 17_890]]),
+    ).services,
+    [
+      {
+        id: "bookorbit",
+        name: "BookOrbit",
+        access: "http",
+        action: "open",
+        icon: "book",
+        url: "http://bookorbit.localhost:17480/",
+      },
+      {
+        id: "mihomo-dashboard",
+        name: "Mihomo Dashboard",
+        access: "http",
+        action: "open",
+        icon: "dashboard",
+        url: "http://mihomo-dashboard.localhost:17480/",
+      },
+      {
+        id: "mihomo",
+        name: "Mihomo",
+        access: "tcp",
+        action: "copy-url",
+        icon: "proxy",
+        copyText: "socks5://127.0.0.1:17890",
+      },
+      {
+        id: "navidrome",
+        name: "Navidrome",
+        access: "http",
+        action: "copy-url",
+        icon: "music",
+        url: "http://navidrome.localhost:17480",
+        copyText: "http://navidrome.localhost:17480",
+      },
+    ],
+  );
+});
+
+test("Android maps its fixed raw listener to Mihomo", () => {
+  assert.deepEqual(createAndroidSubscriberServices(17_890), [
+    { id: "mihomo", localPort: 17_890 },
+  ]);
 });
 
 test("Android reads the publisher registry through its local HTTP surface", async () => {

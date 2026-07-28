@@ -4,6 +4,9 @@ Status: Accepted
 
 Date: 2026-07-24
 
+Amended: 2026-07-28 to add the registry HTTP fallback and dedicated
+BookOrbit/Mihomo presentations.
+
 ## Context
 
 The publisher registry describes service identity and transport, but it does
@@ -21,17 +24,21 @@ The current policy is:
 
 | Service | Action | Icon |
 | --- | --- | --- |
+| BookOrbit | Open | Book |
 | Forgejo | Open | Git |
+| Mihomo Dashboard | Open | Dashboard |
 | Woodpecker | Open | Build |
 | Dagger | Copy runner environment variable when a local port exists | Sword |
+| Mihomo | Copy local SOCKS5 URL when a local port exists | Network |
 | SSH | Copy command when a local port exists | Terminal |
 | Navidrome | Copy URL | Music |
 | Ente | Copy URL | Photos |
 | Ente Storage | Copy URL | Storage |
 
-Services are shown in three stable groups: open, copy command, then copy URL.
-Publisher registry order is preserved within each group. Unknown services are
-omitted until they have a built-in action.
+Services are shown in three stable groups: open, local-port actions, then copy
+URL. Publisher registry order is preserved within each group. An unknown
+service uses the open group with a Web icon and
+`http://<service-id>.localhost:<gateway-port>/`; `home` remains hidden.
 
 URLs opened in a browser include a trailing slash. Navidrome, Ente Photos, and
 Ente Storage copy their origin without a trailing slash because another app
@@ -51,6 +58,6 @@ SSH is omitted there.
 - Android and desktop share one tested behavior table.
 - Adding a built-in service requires one policy entry plus platform icon
   rendering, not a new set of service-id branches.
-- Registry metadata cannot make an unknown TCP service open a browser or copy
-  unsafe text by accident.
+- Unknown registry services get only the fixed HTTP gateway fallback; registry
+  metadata cannot supply a URL, command, or copy text.
 - The map is a client presentation policy, not a new publisher protocol field.

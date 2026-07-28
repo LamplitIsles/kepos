@@ -98,7 +98,7 @@ class KeposForegroundService : Service() {
         arguments = arrayOf(
           stateDir.absolutePath,
           BuildConfig.GATEWAY_PORT.toString(),
-          BuildConfig.NAVIDROME_PORT.toString(),
+          BuildConfig.MIHOMO_PORT.toString(),
           readBootstrapAsset(),
         ),
       )

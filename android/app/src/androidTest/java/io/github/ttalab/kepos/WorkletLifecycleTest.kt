@@ -58,7 +58,7 @@ class WorkletLifecycleTest {
     val configured = binder.configurePublisher("ab".repeat(32)).get(10, TimeUnit.SECONDS)
     assertTrue(configured.configured)
     assertLoopbackListener(BuildConfig.GATEWAY_PORT)
-    assertLoopbackListener(BuildConfig.NAVIDROME_PORT)
+    assertLoopbackListener(BuildConfig.MIHOMO_PORT)
 
     ActivityScenario.launch(MainActivity::class.java).use { activity ->
       activity.recreate()

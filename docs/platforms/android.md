@@ -28,9 +28,11 @@ Only public keys cross between devices. Each device keeps the secret identity
 it generated locally.
 
 The service home reads the publisher's real registry and shows its display name
-and allowed services. Known web services open through `*.localhost` URLs,
-Navidrome copies its URL for Navic, and unknown TCP services show a usage note.
-During reconnect, the last known list remains visible but disabled.
+and allowed services. BookOrbit and Mihomo Dashboard open through their
+`*.localhost` URLs, Navidrome copies its URL for Navic, and other registry
+services without a built-in action use the same HTTP fallback. Mihomo copies
+its local SOCKS5 URL. During reconnect, the last known list remains visible but
+disabled.
 
 The canonical Navidrome address is:
 
@@ -38,8 +40,11 @@ The canonical Navidrome address is:
 http://navidrome.localhost:17480/
 ```
 
-An internal `127.0.0.1:17481` listener supports clients that cannot resolve
-`*.localhost`. It is not the product-facing address.
+The fixed raw listener at `127.0.0.1:17890` maps to publisher service `mihomo`.
+Mihomo's mixed port accepts HTTP proxy and SOCKS5 TCP clients, so Telegram can
+use server `127.0.0.1`, port `17890`, with blank credentials while Kepos is
+running. Kepos does not carry Mihomo's UDP listener, so SOCKS5 UDP ASSOCIATE is
+outside the supported path.
 
 Keep the foreground service running. An explicit Stop remains in effect when
 the Activity reopens; Start clears that choice.
@@ -79,7 +84,7 @@ npm run android:device-check
 ```
 
 The gate uses the isolated `io.github.ttalab.kepos.devicetest` package and
-ports 18480 and 18481. Android Gradle Plugin cleanup may remove that package,
+ports 18480 and 18490. Android Gradle Plugin cleanup may remove that package,
 but it cannot replace or remove the installed `io.github.ttalab.kepos` app.
 
 ## Release boundary

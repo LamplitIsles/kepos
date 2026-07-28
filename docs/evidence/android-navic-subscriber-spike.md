@@ -6,6 +6,12 @@ Device: Pixel 7a (`lynx`), Android 16, arm64-v8a
 
 Bare Kit: 2.3.0
 
+> Superseded product behavior: this dated gate used a Navidrome compatibility
+> listener on port 17481 (18481 in `deviceTest`). Current Android builds keep
+> Navidrome on the hostname gateway and use port 17890 (18490 in `deviceTest`)
+> as a raw TCP mapping to Mihomo. The results below remain unchanged as
+> historical evidence.
+
 ## Implemented path
 
 ```text

@@ -14,7 +14,7 @@ android {
     versionCode = 1
     versionName = "0.1.0"
     buildConfigField("int", "GATEWAY_PORT", "17480")
-    buildConfigField("int", "NAVIDROME_PORT", "17481")
+    buildConfigField("int", "MIHOMO_PORT", "17890")
 
     ndk {
       abiFilters += "arm64-v8a"
@@ -38,7 +38,7 @@ android {
       applicationIdSuffix = ".devicetest"
       matchingFallbacks += listOf("debug")
       buildConfigField("int", "GATEWAY_PORT", "18480")
-      buildConfigField("int", "NAVIDROME_PORT", "18481")
+      buildConfigField("int", "MIHOMO_PORT", "18490")
     }
   }
 

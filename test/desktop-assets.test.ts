@@ -46,6 +46,9 @@ test("desktop service glyphs use the same Lucide choices as Android", () => {
   assert.match(html, /<path d="M22 10v3"\/>/);
   assert.match(html, /<path d="m7 11 2-2-2-2"\/>/);
   assert.match(html, /<path d="m11 13 4 0"\/>/);
+  assert.match(html, /<path d="M12 7v14"\/>/);
+  assert.match(html, /<rect x="16" y="16" width="6" height="6" rx="1"\/>/);
+  assert.match(html, /<path d="m12 14 4-4"\/>/);
 });
 
 test("desktop UI renders subscriber and local publisher as separate roles", () => {

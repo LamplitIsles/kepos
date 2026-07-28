@@ -92,6 +92,29 @@ class KeposUiModelTest {
   }
 
   @Test
+  fun newRegistryServicesUseDedicatedIcons() {
+    val snapshot = connectedSnapshot().copy(
+      services = listOf(
+        ServiceSnapshot("bookorbit", "BookOrbit", "http", "open", "book"),
+        ServiceSnapshot("mihomo", "Mihomo", "tcp", "copy-url", "proxy"),
+        ServiceSnapshot(
+          "mihomo-dashboard",
+          "Mihomo Dashboard",
+          "http",
+          "open",
+          "dashboard",
+        ),
+      ),
+    )
+
+    val services = KeposUiModel.from(snapshot).services
+
+    assertEquals(ServiceIcon.BOOK, services[0].icon)
+    assertEquals(ServiceIcon.PROXY, services[1].icon)
+    assertEquals(ServiceIcon.DASHBOARD, services[2].icon)
+  }
+
+  @Test
   fun servicesWithoutAnActionAreOmitted() {
     val snapshot = connectedSnapshot().copy(
       services = listOf(
