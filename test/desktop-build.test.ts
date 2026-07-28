@@ -34,6 +34,42 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
       arguments: [
         "generate",
         "--source",
+        path.join(repository, "node_modules", "bare-app-kit"),
+        "--build",
+        path.join(repository, ".cache", "bare-app-kit", "build"),
+        "--platform",
+        "darwin",
+        "--arch",
+        "arm64",
+        "--define",
+        `CMAKE_PREFIX_PATH:PATH=${path.join(repository, "node_modules")}`,
+        "--define",
+        "FETCHCONTENT_UPDATES_DISCONNECTED:BOOL=ON",
+      ],
+    },
+    {
+      command: "bare-make",
+      arguments: [
+        "build",
+        "--build",
+        path.join(repository, ".cache", "bare-app-kit", "build"),
+      ],
+    },
+    {
+      command: "bare-make",
+      arguments: [
+        "install",
+        "--build",
+        path.join(repository, ".cache", "bare-app-kit", "build"),
+        "--prefix",
+        path.join(repository, "node_modules", "bare-app-kit", "prebuilds"),
+      ],
+    },
+    {
+      command: "bare-make",
+      arguments: [
+        "generate",
+        "--source",
         path.join(repository, "vendor", "holepunch", "bare-web-kit"),
         "--build",
         path.join(repository, "vendor", "holepunch", "bare-web-kit", "build"),

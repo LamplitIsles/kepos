@@ -1,0 +1,77 @@
+diff --git a/node_modules/bare-app-kit/lib/runtime.m b/node_modules/bare-app-kit/lib/runtime.m
+index 91c3202..d1e2247 100644
+--- a/node_modules/bare-app-kit/lib/runtime.m
++++ b/node_modules/bare-app-kit/lib/runtime.m
+@@ -170,6 +170,12 @@ - (void)applicationDidFinishLaunching:(NSNotification *)notification {
+ }
+ 
+ - (void)applicationWillTerminate:(NSNotification *)notification {
++  SEL prepare = @selector(prepareForBareTermination);
++  for (NSWindow *window in NSApp.windows) {
++    if ([window respondsToSelector:prepare]) {
++      [window performSelector:prepare];
++    }
++  }
+   bare__terminate();
+ }
+ 
+diff --git a/node_modules/bare-app-kit/lib/window.h b/node_modules/bare-app-kit/lib/window.h
+index 191e21b..f1433d2 100644
+--- a/node_modules/bare-app-kit/lib/window.h
++++ b/node_modules/bare-app-kit/lib/window.h
+@@ -19,9 +19,13 @@
+ 
+ @implementation BareWindow
+ 
+-- (void)dealloc {
++- (void)prepareForBareTermination {
++  if (env == NULL) return;
++
+   int err;
+ 
++  self.delegate = nil;
++
+   err = js_delete_reference(env, on_did_resize);
+   assert(err == 0);
+ 
+@@ -34,10 +38,22 @@
+   err = js_delete_reference(env, ctx);
+   assert(err == 0);
+ 
++  env = NULL;
++  ctx = NULL;
++  on_did_resize = NULL;
++  on_did_move = NULL;
++  on_will_close = NULL;
++}
++
++- (void)dealloc {
++  [self prepareForBareTermination];
++
+   [super dealloc];
+ }
+ 
+ - (void)windowDidResize:(NSNotification *)notification {
++  if (env == NULL) return;
++
+   int err;
+ 
+   js_handle_scope_t *scope;
+@@ -60,6 +76,8 @@
+ }
+ 
+ - (void)windowDidMove:(NSNotification *)notification {
++  if (env == NULL) return;
++
+   int err;
+ 
+   js_handle_scope_t *scope;
+@@ -82,6 +100,8 @@
+ }
+ 
+ - (void)windowWillClose:(NSNotification *)notification {
++  if (env == NULL) return;
++
+   int err;
+ 
+   js_handle_scope_t *scope;
