@@ -15,11 +15,18 @@ import {
 } from "./runtime.js";
 import { acquireDesktopSingleton } from "./singleton.js";
 import { renderDesktopUi } from "./ui.js";
+import {
+  buildDesktopTray,
+  type DesktopTray,
+  trayItemIds,
+  updateDesktopTray,
+} from "./tray.js";
 
 export interface DesktopNativeWindow {
   on(event: "willClose", listener: () => void): this;
   content(view: DesktopNativeWebView): this;
   close(): this;
+  show(): this;
 }
 
 export interface DesktopNativeWebView {
@@ -42,6 +49,7 @@ export interface DesktopHostDependencies {
   acquireSubscriberLock(stateDir: string): Promise<RuntimeLock>;
   createWindow(width: number, height: number): DesktopNativeWindow;
   createWebView(): DesktopNativeWebView;
+  createTray(): DesktopTray;
   startRuntime(
     options: StartDesktopRuntimeOptions,
   ): Promise<RunningDesktopRuntime>;
@@ -93,13 +101,17 @@ export async function startDesktopHost(
   }
   let createdWindow: DesktopNativeWindow | undefined;
   let createdWebView: DesktopNativeWebView | undefined;
+  let createdTray: DesktopTray | undefined;
   try {
     createdWindow = dependencies.createWindow(720, 620);
     createdWebView = dependencies.createWebView();
+    createdTray = dependencies.createTray();
+    buildDesktopTray(createdTray);
   } catch (error) {
     await cleanNativeSetup(
       createdWindow,
       createdWebView,
+      createdTray,
       publisherLock,
       subscriberLock,
       singleton,
@@ -108,6 +120,8 @@ export async function startDesktopHost(
   }
   const mainWindow = createdWindow;
   const mainWebView = createdWebView;
+  const mainTray = createdTray;
+  let liveTray: DesktopTray | undefined = mainTray;
   let runtime: RunningDesktopRuntime | undefined;
   let runtimeStartTask: Promise<RunningDesktopRuntime> | undefined;
   let cancelPoll: (() => void) | undefined;
@@ -124,7 +138,9 @@ export async function startDesktopHost(
   function shutdown(): Promise<void> {
     shutdownPromise ??= (async () => {
       let failure: unknown;
-      const cleanup = async (step: () => void | Promise<void>): Promise<void> => {
+      const cleanup = async (
+        step: () => void | Promise<void>,
+      ): Promise<void> => {
         try {
           await step();
         } catch (error) {
@@ -132,6 +148,11 @@ export async function startDesktopHost(
         }
       };
 
+      const trayToDestroy = liveTray;
+      liveTray = undefined;
+      await cleanup(() => {
+        trayToDestroy?.destroy();
+      });
       await cleanup(() => cancelPoll?.());
       cancelPoll = undefined;
       let runtimeToStop = runtime;
@@ -200,6 +221,15 @@ export async function startDesktopHost(
     quit: shutdown,
   });
   try {
+    mainTray.on("select", (id) => {
+      if (id === trayItemIds.open) {
+        mainWindow.show();
+        return;
+      }
+      if (id === trayItemIds.quit) {
+        void shutdown().catch((error: unknown) => console.error(error));
+      }
+    });
     mainWebView.on("message", (message) => {
       void controller.receive(message).catch((error: unknown) => {
         console.error(error);
@@ -211,6 +241,7 @@ export async function startDesktopHost(
     await cleanNativeSetup(
       mainWindow,
       mainWebView,
+      liveTray,
       publisherLock,
       subscriberLock,
       singleton,
@@ -244,7 +275,10 @@ export async function startDesktopHost(
             },
           }
         : {}),
-      onSnapshot: (snapshot) => controller.publish(snapshot),
+      onSnapshot: (snapshot) => {
+        if (liveTray) updateDesktopTray(liveTray, snapshot);
+        controller.publish(snapshot);
+      },
     });
     startedRuntime = await runtimeStartTask;
   } catch {
@@ -277,11 +311,13 @@ function requireRuntime(
 async function cleanNativeSetup(
   mainWindow: DesktopNativeWindow | undefined,
   mainWebView: DesktopNativeWebView | undefined,
+  tray: DesktopTray | undefined,
   publisherLock: RuntimeLock | undefined,
   subscriberLock: RuntimeLock | undefined,
   singleton: RuntimeLock,
 ): Promise<void> {
   const steps = [
+    () => tray?.destroy(),
     () => mainWebView?.destroy(),
     () => mainWindow?.close(),
     () => subscriberLock?.release(),

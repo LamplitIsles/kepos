@@ -25,12 +25,12 @@ test(
       ["--publisher-state", path.join(homeDirectory, "publisher")],
       {
         env: { ...process.env, HOME: homeDirectory },
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "inherit"],
       },
     );
 
     try {
-      await waitUntilRunning(child);
+      await waitUntilReady(child);
       await execute("/usr/bin/osascript", [
         "-e",
         `tell application "${app}" to quit`,
@@ -50,20 +50,28 @@ test(
   },
 );
 
-async function waitUntilRunning(child: ChildProcess): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (child.exitCode === null && child.signalCode === null) {
-    const { stdout } = await execute("/usr/bin/osascript", [
-      "-e",
-      `application "${desktopAppBundle(repository)}" is running`,
-    ]);
-    if (stdout.trim() === "true") return;
-    if (Date.now() >= deadline) {
-      throw new Error("Kepos did not become ready within 5 seconds");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error("Kepos exited before the Quit event was sent");
+async function waitUntilReady(child: ChildProcess): Promise<void> {
+  const stdout = child.stdout;
+  if (!stdout) throw new Error("Kepos stdout is unavailable");
+  return await new Promise((resolve, reject) => {
+    let output = "";
+    const timeout = setTimeout(() => {
+      reject(
+        new Error("Kepos did not emit KEPOS_DESKTOP_READY within 10 seconds"),
+      );
+    }, 10_000);
+    stdout.setEncoding("utf8");
+    stdout.on("data", (chunk: string) => {
+      output += chunk;
+      if (!output.split(/\r?\n/u).includes("KEPOS_DESKTOP_READY")) return;
+      clearTimeout(timeout);
+      resolve();
+    });
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      reject(new Error("Kepos exited before KEPOS_DESKTOP_READY"));
+    });
+  });
 }
 
 async function waitForExit(

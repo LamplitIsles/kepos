@@ -10,6 +10,7 @@ import {
   type StartDesktopHostOptions,
 } from "../apps/desktop/src/host.js";
 import type { RunningDesktopRuntime } from "../apps/desktop/src/runtime.js";
+import type { DesktopTray } from "../apps/desktop/src/tray.js";
 
 const remotePublisherKey = "e4".repeat(32);
 
@@ -17,16 +18,27 @@ test("desktop host acquires dual-role locks before one control window", async ()
   const harness = createHarness();
   const host = await startDesktopHost(dualOptions(), harness.dependencies);
 
-  assert.deepEqual(harness.events.slice(0, 6), [
-    "singleton:acquire:/Users/neil",
-    "publisher-lock:acquire:/state/publisher",
-    "subscriber-lock:acquire:/state/subscriber",
-    "window:create:720x620",
-    "webview:create",
-    "window:content",
-  ]);
+  assert.deepEqual(
+    harness.events
+      .filter(
+        (event) => !event.startsWith("tray:add:") && event !== "tray:separator",
+      )
+      .slice(0, 7),
+    [
+      "singleton:acquire:/Users/neil",
+      "publisher-lock:acquire:/state/publisher",
+      "subscriber-lock:acquire:/state/subscriber",
+      "window:create:720x620",
+      "webview:create",
+      "tray:create",
+      "window:content",
+    ],
+  );
   assert.equal(harness.runtimeOptions?.publisher?.stateDir, "/state/publisher");
-  assert.equal(harness.runtimeOptions?.subscriber?.stateDir, "/state/subscriber");
+  assert.equal(
+    harness.runtimeOptions?.subscriber?.stateDir,
+    "/state/subscriber",
+  );
   assert.match(harness.webViews[0]?.html ?? "", /<title>Kepos<\/title>/);
   assert.equal(harness.schedules.length, 1);
 
@@ -49,8 +61,14 @@ test("desktop host acquires dual-role locks before one control window", async ()
 
   await host.shutdown();
   await host.shutdown();
-  assert.equal(harness.events.filter((event) => event === "runtime:stop").length, 1);
-  assert.equal(harness.events.filter((event) => event === "singleton:release").length, 1);
+  assert.equal(
+    harness.events.filter((event) => event === "runtime:stop").length,
+    1,
+  );
+  assert.equal(
+    harness.events.filter((event) => event === "singleton:release").length,
+    1,
+  );
   assert.equal(harness.events.filter((event) => event === "exit:0").length, 1);
 });
 
@@ -68,7 +86,10 @@ test("desktop host supports publisher-only mode", async () => {
     harness.events.includes("publisher-lock:acquire:/state/publisher"),
     true,
   );
-  assert.equal(harness.events.some((event) => event.startsWith("subscriber-lock")), false);
+  assert.equal(
+    harness.events.some((event) => event.startsWith("subscriber-lock")),
+    false,
+  );
   await host.shutdown();
 });
 
@@ -112,7 +133,10 @@ test("desktop host forwards configured role policy to the runtime", async () => 
 
 test("desktop host exposes in-process role reconfiguration", async () => {
   const harness = createHarness();
-  const host = await startDesktopHost(subscriberOptions(), harness.dependencies);
+  const host = await startDesktopHost(
+    subscriberOptions(),
+    harness.dependencies,
+  );
 
   await host.reconfigure({
     publisher: { stateDir: "/state/publisher" },
@@ -133,7 +157,9 @@ test("desktop host rejects a second process without creating a window", async ()
 });
 
 test("desktop host releases acquired locks when the next role lock fails", async () => {
-  const publisherFailure = createHarness({ publisherLockFailure: "publisher in use" });
+  const publisherFailure = createHarness({
+    publisherLockFailure: "publisher in use",
+  });
   await assert.rejects(
     startDesktopHost(dualOptions(), publisherFailure.dependencies),
     /publisher in use/,
@@ -144,7 +170,9 @@ test("desktop host releases acquired locks when the next role lock fails", async
     "singleton:release",
   ]);
 
-  const subscriberFailure = createHarness({ subscriberLockFailure: "subscriber in use" });
+  const subscriberFailure = createHarness({
+    subscriberLockFailure: "subscriber in use",
+  });
   await assert.rejects(
     startDesktopHost(dualOptions(), subscriberFailure.dependencies),
     /subscriber in use/,
@@ -204,6 +232,56 @@ test("native close and UI quit share one ordered dual-role shutdown", async () =
   );
 });
 
+test("tray Open and Quit retain one window and one shutdown", async () => {
+  const harness = createHarness();
+  await startDesktopHost(dualOptions(), harness.dependencies);
+  harness.trays[0]?.emit("select", "open");
+  assert.equal(harness.events.includes("window:show"), true);
+  assert.equal(harness.events.includes("runtime:stop"), false);
+
+  harness.trays[0]?.emit("select", "quit");
+  harness.trays[0]?.emit("select", "quit");
+  await harness.flushCommands();
+  assert.equal(
+    harness.events.filter((event) => event === "tray:destroy").length,
+    1,
+  );
+  assert.equal(
+    harness.events.filter((event) => event === "runtime:stop").length,
+    1,
+  );
+  assert.ok(
+    harness.events.indexOf("tray:destroy") <
+      harness.events.indexOf("runtime:stop"),
+  );
+});
+
+test("shutdown detaches tray before stop-time snapshots", async () => {
+  const harness = createHarness({ publishStopSnapshots: true });
+  const host = await startDesktopHost(dualOptions(), harness.dependencies);
+  const updatesBeforeShutdown = harness.trays[0]?.updates.length;
+
+  await host.shutdown();
+
+  assert.equal(harness.trays[0]?.updates.length, updatesBeforeShutdown);
+  assert.ok(
+    harness.events.indexOf("tray:destroy") <
+      harness.events.indexOf("runtime:stop"),
+  );
+});
+
+test("tray menu setup failure destroys every created native resource", async () => {
+  const harness = createHarness({ trayMenuFailure: true });
+  await assert.rejects(
+    startDesktopHost(dualOptions(), harness.dependencies),
+    /tray menu failed/,
+  );
+  assert.equal(harness.events.includes("tray:destroy"), true);
+  assert.equal(harness.events.includes("webview:destroy"), true);
+  assert.equal(harness.events.includes("window:close"), true);
+  assert.equal(harness.events.includes("singleton:release"), true);
+});
+
 test("closing during startup stops a runtime that resolves late", async () => {
   let resolveRuntime: ((runtime: RunningDesktopRuntime) => void) | undefined;
   const harness = createHarness({
@@ -237,7 +315,13 @@ test("shutdown completes host cleanup after runtime stop fails", async () => {
   assert.equal(harness.events.includes("exit:1"), true);
 });
 
-for (const nativeFailure of ["window", "webview", "content", "load"] as const) {
+for (const nativeFailure of [
+  "window",
+  "webview",
+  "tray",
+  "content",
+  "load",
+] as const) {
   test(`desktop host releases every lock when native ${nativeFailure} setup fails`, async () => {
     const harness = createHarness({ nativeFailure });
 
@@ -246,11 +330,13 @@ for (const nativeFailure of ["window", "webview", "content", "load"] as const) {
       new RegExp(`${nativeFailure} failed`),
     );
     assert.equal(
-      harness.events.filter((event) => event === "publisher-lock:release").length,
+      harness.events.filter((event) => event === "publisher-lock:release")
+        .length,
       1,
     );
     assert.equal(
-      harness.events.filter((event) => event === "subscriber-lock:release").length,
+      harness.events.filter((event) => event === "subscriber-lock:release")
+        .length,
       1,
     );
     assert.equal(
@@ -284,18 +370,20 @@ interface HarnessOptions {
   publisherLockReleaseFailure?: string;
   subscriberLockFailure?: string;
   runtimeStopFailure?: string;
+  publishStopSnapshots?: boolean;
+  trayMenuFailure?: boolean;
   startRuntime?: DesktopHostDependencies["startRuntime"];
-  nativeFailure?: "window" | "webview" | "content" | "load";
+  nativeFailure?: "window" | "webview" | "tray" | "content" | "load";
 }
 
 function createHarness(options: HarnessOptions = {}) {
   const events: string[] = [];
   const windows: FakeWindow[] = [];
   const webViews: FakeWebView[] = [];
+  const trays: FakeTray[] = [];
   const schedules: Array<() => void> = [];
   let runtimeOptions:
-    | Parameters<DesktopHostDependencies["startRuntime"]>[0]
-    | undefined;
+    Parameters<DesktopHostDependencies["startRuntime"]>[0] | undefined;
 
   const runtime: RunningDesktopRuntime = {
     approvePairing: async () => undefined,
@@ -310,9 +398,14 @@ function createHarness(options: HarnessOptions = {}) {
     },
     stop: async () => {
       events.push("runtime:stop");
+      if (options.publishStopSnapshots) {
+        runtimeOptions?.onSnapshot({ type: "snapshot", appPhase: "stopping" });
+        runtimeOptions?.onSnapshot({ type: "snapshot", appPhase: "stopped" });
+      }
       if (runtimeOptions?.publisher) events.push("publisher-lock:release");
       if (runtimeOptions?.subscriber) events.push("subscriber-lock:release");
-      if (options.runtimeStopFailure) throw new Error(options.runtimeStopFailure);
+      if (options.runtimeStopFailure)
+        throw new Error(options.runtimeStopFailure);
     },
   };
   const dependencies: DesktopHostDependencies = {
@@ -327,7 +420,8 @@ function createHarness(options: HarnessOptions = {}) {
     },
     acquirePublisherLock: async (stateDir) => {
       events.push(`publisher-lock:acquire:${stateDir}`);
-      if (options.publisherLockFailure) throw new Error(options.publisherLockFailure);
+      if (options.publisherLockFailure)
+        throw new Error(options.publisherLockFailure);
       return {
         release: async () => {
           events.push("publisher-lock:release");
@@ -339,7 +433,8 @@ function createHarness(options: HarnessOptions = {}) {
     },
     acquireSubscriberLock: async (stateDir) => {
       events.push(`subscriber-lock:acquire:${stateDir}`);
-      if (options.subscriberLockFailure) throw new Error(options.subscriberLockFailure);
+      if (options.subscriberLockFailure)
+        throw new Error(options.subscriberLockFailure);
       return {
         release: async () => {
           events.push("subscriber-lock:release");
@@ -349,16 +444,27 @@ function createHarness(options: HarnessOptions = {}) {
     createWindow: (width, height) => {
       events.push(`window:create:${width}x${height}`);
       if (options.nativeFailure === "window") throw new Error("window failed");
-      const window = new FakeWindow(events, options.nativeFailure === "content");
+      const window = new FakeWindow(
+        events,
+        options.nativeFailure === "content",
+      );
       windows.push(window);
       return window;
     },
     createWebView: () => {
       events.push("webview:create");
-      if (options.nativeFailure === "webview") throw new Error("webview failed");
+      if (options.nativeFailure === "webview")
+        throw new Error("webview failed");
       const view = new FakeWebView(events, options.nativeFailure === "load");
       webViews.push(view);
       return view;
+    },
+    createTray: () => {
+      events.push("tray:create");
+      if (options.nativeFailure === "tray") throw new Error("tray failed");
+      const tray = new FakeTray(events, options.trayMenuFailure);
+      trays.push(tray);
+      return tray;
     },
     startRuntime:
       options.startRuntime ??
@@ -415,6 +521,7 @@ function createHarness(options: HarnessOptions = {}) {
     events,
     windows,
     webViews,
+    trays,
     schedules,
     runtime,
     get runtimeOptions() {
@@ -447,6 +554,52 @@ class FakeWindow extends EventEmitter implements DesktopNativeWindow {
     this.closed = true;
     this.events.push("window:close");
     this.emit("willClose");
+    return this;
+  }
+
+  show(): this {
+    this.events.push("window:show");
+    return this;
+  }
+}
+
+class FakeTray extends EventEmitter implements DesktopTray {
+  destroyed = false;
+  updates: Array<{ id: string; title?: string; enabled?: boolean }> = [];
+
+  constructor(
+    private readonly events: string[],
+    private readonly menuFailure = false,
+  ) {
+    super();
+  }
+
+  addItem(
+    id: string,
+    title: string,
+    options: { enabled?: boolean } = {},
+  ): this {
+    if (this.menuFailure) throw new Error("tray menu failed");
+    this.events.push(`tray:add:${id}`);
+    this.updates.push({ id, title, ...options });
+    return this;
+  }
+
+  addSeparator(): this {
+    this.events.push("tray:separator");
+    return this;
+  }
+
+  updateItem(id: string, options: { title?: string; enabled?: boolean }): this {
+    if (this.destroyed) throw new Error("update after tray destroy");
+    this.updates.push({ id, ...options });
+    return this;
+  }
+
+  destroy(): this {
+    if (this.destroyed) return this;
+    this.destroyed = true;
+    this.events.push("tray:destroy");
     return this;
   }
 }
