@@ -29,8 +29,10 @@ import {
   loadPublisherState,
   setPublisherAllowlist,
 } from "../state/publisher.js";
+import type { PublisherService } from "../config.js";
 
 const maximumPairingCandidates = 3;
+type PublisherRuntimeService = Omit<PublisherService, "kind">;
 
 type SchedulePairingExpiry = (
   delayMs: number,
@@ -40,7 +42,7 @@ type SchedulePairingExpiry = (
 export interface PublisherRuntimePolicy {
   displayName: string;
   allow: string[];
-  services: Array<{ id: string; name: string; targetPort: number }>;
+  services: PublisherRuntimeService[];
 }
 
 export interface StartPublisherOptions {
@@ -98,13 +100,28 @@ export async function startPublisher(
       kind: "tcp",
     })),
   });
-  const targets = new Map<string, number>([
-    ["home", home.port],
-    ...policy.services.map(
-      (service): [string, number] => [service.id, service.targetPort],
-    ),
-  ]);
+  const services = new Map(
+    policy.services.map((service) => [service.id, service]),
+  );
+  const subscriberHomes = new Map<string, Promise<RunningHomeServer>>();
   const allow = new Set(policy.allow);
+
+  const subscriberHome = (
+    subscriberKey: string,
+  ): Promise<RunningHomeServer> => {
+    const existing = subscriberHomes.get(subscriberKey);
+    if (existing) return existing;
+    const starting = startHomeServer({
+      publisherKey,
+      displayName: policy.displayName,
+      services: policy.services
+        .filter((service) => serviceAllows(service, subscriberKey))
+        .map(({ id, name }) => ({ id, name, kind: "tcp" })),
+    });
+    subscriberHomes.set(subscriberKey, starting);
+    void starting.catch(() => subscriberHomes.delete(subscriberKey));
+    return starting;
+  };
   const persistAllowlist =
     options.persistAllowlist ??
     (options.policy
@@ -312,11 +329,19 @@ export async function startPublisher(
           if (activeBySubscriberKey.get(subscriberKey)?.stream !== stream) {
             throw new Error("Subscriber connection is not current");
           }
-          const targetPort = targets.get(serviceId);
-          if (targetPort === undefined) {
+          if (serviceId === "home") {
+            return connectLoopback((await subscriberHome(subscriberKey)).port);
+          }
+          const service = services.get(serviceId);
+          if (!service) {
             throw new Error(`Service is not published: ${serviceId}`);
           }
-          return connectLoopback(targetPort);
+          if (!serviceAllows(service, subscriberKey)) {
+            throw new Error(
+              `Service is not allowed for this subscriber: ${serviceId}`,
+            );
+          }
+          return connectLoopback(service.targetPort);
         },
       });
       muxes.set(stream, mux);
@@ -423,10 +448,20 @@ export async function startPublisher(
       await Promise.allSettled([
         server.close(),
         home.close(),
+        ...[...subscriberHomes.values()].map(async (starting) =>
+          (await starting).close(),
+        ),
         dht.destroy({ force: true }),
       ]);
     },
   };
+}
+
+function serviceAllows(
+  service: PublisherRuntimeService,
+  subscriberKey: string,
+): boolean {
+  return service.allow === undefined || service.allow.includes(subscriberKey);
 }
 
 function schedulePairingExpiry(

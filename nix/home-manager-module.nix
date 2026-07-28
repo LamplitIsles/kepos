@@ -17,15 +17,23 @@
         type = lib.types.ints.between 1 65535;
         description = "Publisher loopback TCP port.";
       };
+      allow = lib.mkOption {
+        type = lib.types.nullOr (lib.types.listOf (lib.types.strMatching "[0-9a-f]{64}"));
+        default = null;
+        description = "Subscriber public keys allowed to open this service; null inherits the publisher allowlist.";
+      };
     };
   };
-  publisherServices =
-    lib.mapAttrsToList (id: service: {
+  publisherServices = lib.mapAttrsToList (id: service:
+    {
       inherit id;
       inherit (service) name;
       target_port = service.targetPort;
+    }
+    // lib.optionalAttrs (service.allow != null) {
+      inherit (service) allow;
     })
-    cfg.services;
+  cfg.services;
   configFile = toml.generate "kepos-config.toml" {
     network.bootstrap = cfg.bootstrap;
     publisher = {

@@ -150,11 +150,14 @@ export async function startDesktopRuntime(
         publisherOptions.policy ?? {
           displayName: manifest.displayName,
           allow: config.allow,
-          services: manifest.services.map(({ id, name, targetPort }) => ({
-            id,
-            name,
-            targetPort,
-          })),
+          services: manifest.services.map(
+            ({ id, name, targetPort, allow }) => ({
+              id,
+              name,
+              targetPort,
+              ...(allow === undefined ? {} : { allow }),
+            }),
+          ),
         };
       const publisherKey = derivePublisherHomeKey(config.seed);
       const configPath = publisherOptions.configPath;

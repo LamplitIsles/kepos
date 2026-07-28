@@ -24,6 +24,7 @@ export interface PublisherStateService {
   id: string;
   name: string;
   targetPort: number;
+  allow?: string[];
 }
 
 export interface SetupPublisherOptions {

@@ -14,6 +14,7 @@ export interface PublisherService {
   name: string;
   kind: "tcp";
   targetPort: number;
+  allow?: string[];
 }
 
 export interface PublisherManifest {
@@ -149,7 +150,7 @@ export function parsePublisherManifest(value: unknown): PublisherManifest {
     }
     rejectUnknownFields(
       entry,
-      ["id", "name", "kind", "targetPort"],
+      ["id", "name", "kind", "targetPort", "allow"],
       `services[${index}]`,
     );
 
@@ -173,10 +174,27 @@ export function parsePublisherManifest(value: unknown): PublisherManifest {
       name: parseNonEmptyString(entry.name, `services[${index}].name`),
       kind: entry.kind,
       targetPort: parseTargetPort(entry.targetPort),
+      ...(entry.allow === undefined
+        ? {}
+        : {
+            allow: parseServiceAllow(
+              entry.allow,
+              `services[${index}].allow`,
+            ),
+          }),
     };
   });
 
   return { displayName, publisherConfig, services };
+}
+
+function parseServiceAllow(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array`);
+  }
+  return value.map((entry, index) =>
+    parseKeyHex(entry, `${field}[${index}]`),
+  );
 }
 
 export function serializePublisherManifest(manifest: PublisherManifest): string {
