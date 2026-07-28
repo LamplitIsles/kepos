@@ -34,9 +34,15 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
       arguments: [
         "generate",
         "--source",
-        path.join(repository, "node_modules", "bare-app-kit"),
+        path.join(repository, "vendor", "holepunch", "bare-app-kit"),
         "--build",
-        path.join(repository, ".cache", "bare-app-kit", "build"),
+        path.join(
+          repository,
+          "vendor",
+          "holepunch",
+          "bare-app-kit",
+          "build",
+        ),
         "--platform",
         "darwin",
         "--arch",
@@ -52,7 +58,13 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
       arguments: [
         "build",
         "--build",
-        path.join(repository, ".cache", "bare-app-kit", "build"),
+        path.join(
+          repository,
+          "vendor",
+          "holepunch",
+          "bare-app-kit",
+          "build",
+        ),
       ],
     },
     {
@@ -60,9 +72,21 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
       arguments: [
         "install",
         "--build",
-        path.join(repository, ".cache", "bare-app-kit", "build"),
+        path.join(
+          repository,
+          "vendor",
+          "holepunch",
+          "bare-app-kit",
+          "build",
+        ),
         "--prefix",
-        path.join(repository, "node_modules", "bare-app-kit", "prebuilds"),
+        path.join(
+          repository,
+          "vendor",
+          "holepunch",
+          "bare-app-kit",
+          "prebuilds",
+        ),
       ],
     },
     {
@@ -164,7 +188,7 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
           "Contents",
           "Frameworks",
         ),
-        path.join(repository, "node_modules", "bare-app-kit"),
+        path.join(repository, "vendor", "holepunch", "bare-app-kit"),
       ],
     },
     {
@@ -203,6 +227,26 @@ test("desktop install has one canonical npm command", async () => {
     packageJson.scripts?.["desktop:install"],
     "npm run desktop:build && tsx scripts/install-desktop.ts",
   );
+});
+
+test("desktop native forks are submodules without install-time patches", async () => {
+  const gitmodules = await readFile(
+    path.join(repository, ".gitmodules"),
+    "utf8",
+  );
+  const packageJson = JSON.parse(
+    await readFile(path.join(repository, "package.json"), "utf8"),
+  ) as {
+    scripts?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+
+  assert.match(
+    gitmodules,
+    /path = vendor\/holepunch\/bare-app-kit\n\s+url = https:\/\/github\.com\/tta-lab\/bare-app-kit\.git/,
+  );
+  assert.equal(packageJson.scripts?.postinstall, undefined);
+  assert.equal(packageJson.devDependencies?.["patch-package"], undefined);
 });
 
 test("desktop installer replaces the app bundle without retaining stale files", async () => {

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "bare-app-kit": "file:../../vendor/holepunch/bare-app-kit",
     "bare-build": "^1.0.2",
     "bare-make": "^1.8.0",
     "bare-native": "file:../../vendor/holepunch/bare-native",

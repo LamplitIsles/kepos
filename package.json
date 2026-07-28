@@ -86,8 +86,7 @@
     "desktop:native-check": "npm run desktop:build && node --import tsx --test test/native/desktop-quit.native.ts",
     "desktop:run": "npm run desktop:build && dist/desktop/Kepos.app/Contents/MacOS/Kepos",
     "desktop:typecheck": "tsc -p tsconfig.desktop.json --noEmit",
-    "kepos": "tsx src/cli/main.ts",
-    "postinstall": "patch-package"
+    "kepos": "tsx src/cli/main.ts"
   },
   "dependencies": {
     "b4a": "^1.8.1",
@@ -120,7 +119,6 @@
     "extract-zip": "^2.0.1",
     "https-proxy-agent": "^9.1.0",
     "lefthook": "^2.1.10",
-    "patch-package": "^8.0.1",
     "typescript": "^7.0.2"
   }
 }

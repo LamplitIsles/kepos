@@ -7,3 +7,6 @@
 [submodule "vendor/holepunch/bare-win-ui"]
 	path = vendor/holepunch/bare-win-ui
 	url = https://github.com/tta-lab/bare-win-ui.git
+[submodule "vendor/holepunch/bare-app-kit"]
+	path = vendor/holepunch/bare-app-kit
+	url = https://github.com/tta-lab/bare-app-kit.git
