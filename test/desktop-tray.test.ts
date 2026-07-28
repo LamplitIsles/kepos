@@ -56,30 +56,87 @@ test("formats healthy role combinations", () => {
 });
 
 for (const phase of ["failed", "stopped"] as const) {
-  test(`marks a ${phase} role as needing attention`, () => {
-    assert.deepEqual(
-      formatTraySnapshot({
-        type: "snapshot",
-        appPhase: "running",
-        subscriber: { phase, connection: "stopped", services: [] },
-      }),
-      { status: "Kepos — Attention needed", detail: "Open Kepos for details" },
-    );
-  });
+  for (const role of ["publisher", "subscriber"] as const) {
+    test(`marks a ${phase} ${role} as needing attention`, () => {
+      assert.deepEqual(
+        formatTraySnapshot({
+          type: "snapshot",
+          appPhase: "running",
+          [role]:
+            role === "publisher"
+              ? {
+                  phase,
+                  activeSubscribers: 0,
+                  acceptedConnections: 0,
+                  services: [],
+                }
+              : { phase, connection: "stopped", services: [] },
+        }),
+        {
+          status: "Kepos — Attention needed",
+          detail: "Open Kepos for details",
+        },
+      );
+    });
+  }
 }
 
 for (const phase of ["starting", "stopping"] as const) {
-  test(`shows a ${phase} role as updating`, () => {
-    assert.deepEqual(
-      formatTraySnapshot({
-        type: "snapshot",
-        appPhase: "running",
-        subscriber: { phase, connection: "connecting", services: [] },
-      }),
-      { status: "Kepos — Online", detail: "Updating network roles…" },
-    );
-  });
+  for (const role of ["publisher", "subscriber"] as const) {
+    test(`shows a ${phase} ${role} as updating`, () => {
+      assert.deepEqual(
+        formatTraySnapshot({
+          type: "snapshot",
+          appPhase: "running",
+          [role]:
+            role === "publisher"
+              ? {
+                  phase,
+                  activeSubscribers: 0,
+                  acceptedConnections: 0,
+                  services: [],
+                }
+              : { phase, connection: "connecting", services: [] },
+        }),
+        { status: "Kepos — Online", detail: "Updating network roles…" },
+      );
+    });
+  }
 }
+
+test("dual-role attention takes precedence over a healthy peer", () => {
+  assert.deepEqual(
+    formatTraySnapshot({
+      type: "snapshot",
+      appPhase: "running",
+      publisher: {
+        phase: "running",
+        activeSubscribers: 1,
+        acceptedConnections: 1,
+        services: [],
+      },
+      subscriber: { phase: "failed", connection: "stopped", services: [] },
+    }),
+    { status: "Kepos — Attention needed", detail: "Open Kepos for details" },
+  );
+});
+
+test("dual-role attention takes precedence over a transitional peer", () => {
+  assert.deepEqual(
+    formatTraySnapshot({
+      type: "snapshot",
+      appPhase: "running",
+      publisher: {
+        phase: "stopping",
+        activeSubscribers: 0,
+        acceptedConnections: 0,
+        services: [],
+      },
+      subscriber: { phase: "stopped", connection: "stopped", services: [] },
+    }),
+    { status: "Kepos — Attention needed", detail: "Open Kepos for details" },
+  );
+});
 
 test("formats the defensive role-less running state", () => {
   assert.deepEqual(formatTraySnapshot(base("running")), {

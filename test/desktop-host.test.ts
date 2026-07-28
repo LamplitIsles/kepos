@@ -256,6 +256,27 @@ test("tray Open and Quit retain one window and one shutdown", async () => {
   );
 });
 
+test("native red close hides without tearing down host state", async () => {
+  const harness = createHarness();
+  const host = await startDesktopHost(dualOptions(), harness.dependencies);
+
+  harness.windows[0]?.redClose();
+
+  assert.equal(harness.windows[0]?.visible, false);
+  assert.equal(harness.windows[0]?.closed, false);
+  assert.equal(harness.webViews[0]?.destroyed, false);
+  assert.equal(harness.trays[0]?.destroyed, false);
+  assert.equal(harness.schedules.length, 1);
+  assert.equal(harness.events.includes("runtime:stop"), false);
+  assert.equal(harness.events.includes("publisher-lock:release"), false);
+  assert.equal(harness.events.includes("subscriber-lock:release"), false);
+  assert.equal(harness.events.includes("singleton:release"), false);
+
+  harness.trays[0]?.emit("select", "open");
+  assert.equal(harness.windows[0]?.visible, true);
+  await host.shutdown();
+});
+
 test("shutdown detaches tray before stop-time snapshots", async () => {
   const harness = createHarness({ publishStopSnapshots: true });
   const host = await startDesktopHost(dualOptions(), harness.dependencies);
@@ -535,6 +556,7 @@ function createHarness(options: HarnessOptions = {}) {
 
 class FakeWindow extends EventEmitter implements DesktopNativeWindow {
   closed = false;
+  visible = true;
 
   constructor(
     private readonly events: string[],
@@ -557,7 +579,12 @@ class FakeWindow extends EventEmitter implements DesktopNativeWindow {
     return this;
   }
 
+  redClose(): void {
+    this.visible = false;
+  }
+
   show(): this {
+    this.visible = true;
     this.events.push("window:show");
     return this;
   }
