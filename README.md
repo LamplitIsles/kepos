@@ -235,6 +235,10 @@ route = "auto"
 [[subscriber.services]]
 id = "ssh"
 local_port = 2222
+
+[[subscriber.services]]
+id = "dagger"
+local_port = 18080
 ```
 
 An absent role table, or one with `enabled = false`, is not started by desktop.
@@ -248,8 +252,11 @@ The build compiles the pinned Bare WebKit fork before packaging
 shows remote services from the subscriber Registry and a separate `Shared
 services` surface for the local publisher. HTTP `OPEN` actions use the macOS
 default browser, Navidrome copies its canonical `*.localhost` URL for Navic,
-and SSH copies its explicit loopback command. No Node or Electron child process
-is used. [ADR 0004](docs/adr/0004-two-level-subscriber-runtime-locking.md)
+SSH copies its explicit loopback command, and Dagger copies an environment
+variable that points its CLI at the remote engine. Paste the Dagger command in
+the terminal before running `dagger`, or set it in the shell profile. No Node
+or Electron child process is used. [ADR
+0004](docs/adr/0004-two-level-subscriber-runtime-locking.md)
 defines the desktop singleton and subscriber lock; [ADR
 0006](docs/adr/0006-desktop-dual-role-runtime-ownership.md) adds independent
 publisher ownership and dual-role shutdown.
