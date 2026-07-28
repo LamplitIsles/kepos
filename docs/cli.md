@@ -20,7 +20,7 @@ Create publisher state using only the subscriber's public key:
 npm run kepos -- setup publisher \
   --state ~/.local/state/kepos-neo/publisher \
   --display-name kosmos \
-  --allow <subscriber-public-key> \
+  --allow '<subscriber-public-key>' \
   --service ssh:SSH:22 \
   --service navidrome:Navidrome:4533
 ```
@@ -34,7 +34,7 @@ npm run kepos -- publisher run \
 npm run kepos -- subscriber set-publisher \
   --state ~/.local/state/kepos-neo/subscriber \
   --label kosmos \
-  --publisher-key <publisher-public-key>
+  --publisher-key '<publisher-public-key>'
 ```
 
 ## Shared TOML policy
@@ -83,6 +83,20 @@ When `[publisher]` exists, `display_name`, `allow`, and `services` form the
 complete runtime policy. `enabled` controls desktop auto-start only. Identities
 and the subscriber's pinned publisher contact always stay in the state
 directory.
+
+Create the publisher identity from that TOML without repeating its policy on
+the command line:
+
+```sh
+npm run kepos -- setup publisher \
+  --state ~/.local/state/kepos-neo/publisher
+```
+
+The headless publisher reads TOML policy when it starts. After editing the
+allowlist or services, restart `publisher run` before treating the change as
+active. Restarting closes existing service streams, so their clients must
+reconnect. Desktop's **Add device** approval is different: it updates both TOML
+and the running desktop publisher.
 
 Publisher-wide and service-specific allowlists fail closed:
 

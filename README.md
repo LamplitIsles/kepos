@@ -46,7 +46,8 @@ The implementation follows four rules:
 - **The local side stays boring.** Existing browsers, SSH clients, and CLIs use
   loopback URLs and ports.
 - **Failure is visible and bounded.** Local listeners survive reconnects, stale
-  peer paths are replaced, and private addresses are kept out of diagnostics.
+  peer paths are replaced, and hole-punch observations omit candidate IP
+  addresses.
 
 ## What works today
 

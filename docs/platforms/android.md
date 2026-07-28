@@ -14,6 +14,19 @@ QR code. Desktop shows the authenticated subscriber-key fingerprint before
 Allow or Deny. Approval promotes the existing connection; no publisher restart
 or second NAT traversal is needed.
 
+A headless CLI, Nix, or container publisher cannot approve that QR
+interactively. Use the manual key flow instead:
+
+1. On Android setup, copy **This phone's subscriber key**.
+2. Add that public key to the publisher allowlist. If editing TOML for a running
+   headless publisher, restart it so the new policy takes effect.
+3. Copy the publisher public key printed by `publisher run`.
+4. On Android, enter it under **Or enter publisher public key** and choose
+   **Connect**.
+
+Only public keys cross between devices. Each device keeps the secret identity
+it generated locally.
+
 The service home reads the publisher's real registry and shows its display name
 and allowed services. Known web services open through `*.localhost` URLs,
 Navidrome copies its URL for Navic, and unknown TCP services show a usage note.

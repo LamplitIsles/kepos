@@ -47,8 +47,9 @@ Import and configure the module:
 
 On first start, the user service creates publisher identity under
 `$XDG_STATE_HOME/kepos-neo/publisher`. Complete state is reused without
-rotation; partial state fails closed. Public TOML policy is generated outside
-the Nix store so private keys never enter it.
+rotation; partial state fails closed. The module generates public TOML policy
+in the Nix store. Private identity material is created later in the mutable
+state directory and never enters the store.
 
 The CLI is also available directly:
 
@@ -58,7 +59,8 @@ nix run github:tta-lab/kepos-neo -- --help
 
 ## Container image
 
-Build and load the non-root `linux/amd64` image:
+Build and load the non-root image for the current supported Linux system
+(`x86_64-linux` or `aarch64-linux`):
 
 ```sh
 nix build .#container-image
@@ -66,8 +68,9 @@ docker load < result
 docker run --rm ghcr.io/tta-lab/kepos-neo:local --help
 ```
 
-Every push to `main` publishes `main` and `sha-<git-commit>` tags to GHCR.
-Deployments should pin the digest printed in the Actions summary:
+The GitHub workflow currently runs on x86 and publishes a `linux/amd64` image
+from every push to `main`, using `main` and `sha-<git-commit>` tags. Deployments
+should pin the digest printed in the Actions summary:
 
 ```text
 ghcr.io/tta-lab/kepos-neo@sha256:<digest>

@@ -3,12 +3,16 @@
 The native Apple Silicon app runs the real publisher, subscriber, or both roles
 inside one Bare process. It starts no Node or Electron child process.
 
-The shared Kepos TOML decides which roles start. Their identities stay in:
+The shared Kepos TOML decides which roles start. Their identities stay under
+`$XDG_STATE_HOME` when it is set:
 
 ```text
-~/.local/state/kepos-neo/publisher
-~/.local/state/kepos-neo/subscriber
+$XDG_STATE_HOME/kepos-neo/publisher
+$XDG_STATE_HOME/kepos-neo/subscriber
 ```
+
+Without `XDG_STATE_HOME`, the paths fall back to
+`~/.local/state/kepos-neo/{publisher,subscriber}`.
 
 Desktop and CLI cannot own the same role state at the same time. Only one
 desktop instance may run on a Mac.
