@@ -3,6 +3,7 @@ import type { HomeRegistryService } from "../home/registry.js";
 export type ServiceAction = "open" | "copy-command" | "copy-url";
 export type ServiceIcon =
   | "build"
+  | "dagger"
   | "git"
   | "music"
   | "photos"
@@ -25,6 +26,10 @@ interface BuiltInServiceHandler {
   action: ServiceAction;
   httpUrl?: "open" | "origin";
   icon: ServiceIcon;
+  localCommand?: {
+    access: "ssh" | "tcp";
+    format(localPort: number): string;
+  };
   sortGroup: 0 | 1 | 2;
 }
 
@@ -41,6 +46,16 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
     icon: "storage",
     sortGroup: 2,
   },
+  dagger: {
+    action: "copy-command",
+    icon: "dagger",
+    localCommand: {
+      access: "tcp",
+      format: (localPort) =>
+        `export _EXPERIMENTAL_DAGGER_RUNNER_HOST=tcp://127.0.0.1:${localPort}`,
+    },
+    sortGroup: 1,
+  },
   forgejo: { action: "open", httpUrl: "open", icon: "git", sortGroup: 0 },
   navidrome: {
     action: "copy-url",
@@ -48,7 +63,15 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
     icon: "music",
     sortGroup: 2,
   },
-  ssh: { action: "copy-command", icon: "terminal", sortGroup: 1 },
+  ssh: {
+    action: "copy-command",
+    icon: "terminal",
+    localCommand: {
+      access: "ssh",
+      format: (localPort) => `ssh -p ${localPort} 127.0.0.1`,
+    },
+    sortGroup: 1,
+  },
   woodpecker: {
     action: "open",
     httpUrl: "open",
@@ -116,14 +139,14 @@ function createPresentation(
       ...(handler.action === "copy-url" ? { copyText: url } : {}),
     };
   }
-  if (handler.action !== "copy-command" || localPort === undefined) return;
+  if (handler.localCommand === undefined || localPort === undefined) return;
   return {
     id: service.id,
     name: service.name,
-    access: "ssh",
+    access: handler.localCommand.access,
     action: handler.action,
     icon: handler.icon,
-    copyText: `ssh -p ${localPort} 127.0.0.1`,
+    copyText: handler.localCommand.format(localPort),
   };
 }
 

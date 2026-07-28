@@ -30,6 +30,7 @@ const registry: HomeRegistry = {
     { id: "home", name: "Home", kind: "tcp" },
     { id: "navidrome", name: "Navidrome", kind: "tcp" },
     { id: "ssh", name: "SSH", kind: "tcp" },
+    { id: "dagger", name: "Dagger", kind: "tcp" },
   ],
 };
 
@@ -110,7 +111,10 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
         gatewayPort: 17_480,
         gatewayHost: "0.0.0.0",
         gatewayDomain: "kepos.internal",
-        services: [{ id: "ssh", localPort: 2222 }],
+        services: [
+          { id: "ssh", localPort: 2222 },
+          { id: "dagger", localPort: 18_080 },
+        ],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
     },
@@ -118,7 +122,11 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
       startSubscriber: async (options) => {
         startedOptions = options;
         return runningSubscriber(
-          () => subscriberStatus(connection, generation),
+          () =>
+            subscriberStatus(connection, generation, [
+              { id: "ssh", port: 2222 },
+              { id: "dagger", port: 18_080 },
+            ]),
           events,
         );
       },
@@ -151,6 +159,16 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
         copyText: "ssh -p 2222 127.0.0.1",
       },
       {
+        id: "dagger",
+        name: "Dagger",
+        access: "tcp",
+        action: "copy-command",
+        icon: "dagger",
+        available: true,
+        copyText:
+          "export _EXPERIMENTAL_DAGGER_RUNNER_HOST=tcp://127.0.0.1:18080",
+      },
+      {
         id: "navidrome",
         name: "Navidrome",
         access: "http",
@@ -167,7 +185,7 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
   await runtime.poll();
   assert.deepEqual(
     snapshots.at(-1)?.subscriber?.services.map(({ available }) => available),
-    [false, false],
+    [false, false, false],
   );
 
   connection = "connected";
@@ -176,7 +194,7 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
   assert.equal(registryReads, 2);
   assert.deepEqual(
     snapshots.at(-1)?.subscriber?.services.map(({ available }) => available),
-    [true, true],
+    [true, true, true],
   );
   await runtime.stop();
 });
@@ -1089,6 +1107,9 @@ function dependencies(
 function subscriberStatus(
   connection: SubscriberRuntimeStatus["connection"],
   connectionGeneration = connection === "connected" ? 1 : 0,
+  services: SubscriberRuntimeStatus["services"] = [
+    { id: "ssh", port: 2222 },
+  ],
 ): SubscriberRuntimeStatus {
   return {
     role: "subscriber",
@@ -1097,7 +1118,7 @@ function subscriberStatus(
     connectionGeneration,
     publisherKey: remotePublisherKey,
     homeUrl: "http://home.localhost:17480",
-    services: [{ id: "ssh", port: 2222 }],
+    services,
   };
 }
 

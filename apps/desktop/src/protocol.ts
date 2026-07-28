@@ -11,6 +11,7 @@ export interface DesktopService {
   action: "open" | "copy-command" | "copy-url";
   icon:
     | "build"
+    | "dagger"
     | "git"
     | "music"
     | "photos"

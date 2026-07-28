@@ -23,6 +23,7 @@ The current policy is:
 | --- | --- | --- |
 | Forgejo | Open | Git |
 | Woodpecker | Open | Build |
+| Dagger | Copy runner environment variable when a local port exists | Sword |
 | SSH | Copy command when a local port exists | Terminal |
 | Navidrome | Copy URL | Music |
 | Ente | Copy URL | Photos |
