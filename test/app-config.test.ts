@@ -42,6 +42,7 @@ allow = ["${subscriberKey}"]
 id = "navidrome"
 name = "Navidrome"
 target_port = 4533
+allow = ["${subscriberKey}"]
 
 [subscriber]
 gateway_port = 17480
@@ -59,7 +60,12 @@ local_port = 2222
         displayName: "kosmos",
         allow: [subscriberKey],
         services: [
-          { id: "navidrome", name: "Navidrome", targetPort: 4533 },
+          {
+            id: "navidrome",
+            name: "Navidrome",
+            targetPort: 4533,
+            allow: [subscriberKey],
+          },
         ],
       },
       subscriber: {
@@ -200,8 +206,15 @@ test("shared config atomically persists the validated desktop shape", async () =
     publisher: {
       enabled: false,
       displayName: "Neil",
-      allow: [],
-      services: [],
+      allow: ["11".repeat(32)],
+      services: [
+        {
+          id: "dagger",
+          name: "Dagger",
+          targetPort: 18_080,
+          allow: ["11".repeat(32)],
+        },
+      ],
     },
     subscriber: {
       enabled: true,

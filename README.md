@@ -56,6 +56,7 @@ Import and configure the module in a Home Manager configuration:
       navidrome = {
         name = "Navidrome";
         targetPort = 4533;
+        allow = ["<subscriber-public-key>"];
       };
     };
   };
@@ -69,6 +70,12 @@ fails closed. Bootstrap endpoints, allowlist, display name, and services are
 generated as public TOML policy; private keys never enter the Nix store. Empty
 `allow` denies all subscribers, empty `services` publishes Home only, and empty
 `bootstrap` uses HyperDHT defaults.
+
+Each service may set its own `allow` list. When omitted, the service inherits
+the publisher allowlist. An explicit empty service allowlist denies the service
+to every subscriber. Restricted services appear only in registries returned to
+subscribers that may open them, and pairing grants publisher access without
+granting any restricted service.
 
 The package and CLI app are also available directly:
 
@@ -318,6 +325,7 @@ target_port = 22
 id = "navidrome"
 name = "Navidrome"
 target_port = 4533
+allow = ["<subscriber-public-key>"]
 
 [subscriber]
 enabled = true

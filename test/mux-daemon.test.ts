@@ -637,6 +637,127 @@ test("publisher denies a non-current outer using the same subscriber key", async
   }
 });
 
+test("service allowlists restrict channels and subscriber registries", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-service-acl-"));
+  const publisherState = path.join(root, "publisher");
+  const allowedState = path.join(root, "allowed");
+  const deniedState = path.join(root, "denied");
+  let targetRequests = 0;
+  const target = createServer({ allowHalfOpen: true }, (socket) => {
+    socket.once("data", (payload) => {
+      targetRequests++;
+      socket.end(`dagger:${payload.toString()}`);
+    });
+  });
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let allowed: RunningSubscriber | undefined;
+  let denied: RunningSubscriber | undefined;
+
+  try {
+    const targetPort = await listen(target);
+    const [allowedSetup, deniedSetup] = await Promise.all([
+      setupSubscriber({ stateDir: allowedState }),
+      setupSubscriber({ stateDir: deniedState }),
+    ]);
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [allowedSetup.publicKey, deniedSetup.publicKey],
+      services: [],
+    });
+    await Promise.all([
+      setSubscriberPublisher({
+        stateDir: allowedState,
+        label: "kosmos",
+        publisherKey: publisherSetup.publisherKey,
+      }),
+      setSubscriberPublisher({
+        stateDir: deniedState,
+        label: "kosmos",
+        publisherKey: publisherSetup.publisherKey,
+      }),
+    ]);
+
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+      policy: {
+        displayName: "kosmos",
+        allow: [allowedSetup.publicKey, deniedSetup.publicKey],
+        services: [
+          {
+            id: "dagger",
+            name: "Dagger",
+            targetPort,
+            allow: [allowedSetup.publicKey],
+          },
+        ],
+      },
+    });
+    [allowed, denied] = await Promise.all([
+      startSubscriber({
+        stateDir: allowedState,
+        bootstrap: testnet.bootstrap,
+        gatewayPort: 0,
+        services: [{ id: "dagger", localPort: 0 }],
+        log: noLog,
+      }),
+      startSubscriber({
+        stateDir: deniedState,
+        bootstrap: testnet.bootstrap,
+        gatewayPort: 0,
+        services: [{ id: "dagger", localPort: 0 }],
+        log: noLog,
+      }),
+    ]);
+
+    const [allowedRegistry, deniedRegistry] = await Promise.all([
+      fetch(`${allowed.home.url}/.well-known/kepos/services.json`).then(
+        (response) =>
+          response.json() as Promise<{
+            services: Array<{ id: string }>;
+          }>,
+      ),
+      fetch(`${denied.home.url}/.well-known/kepos/services.json`).then(
+        (response) =>
+          response.json() as Promise<{
+            services: Array<{ id: string }>;
+          }>,
+      ),
+    ]);
+    assert.deepEqual(
+      allowedRegistry.services.map(({ id }) => id),
+      ["home", "dagger"],
+    );
+    assert.deepEqual(
+      deniedRegistry.services.map(({ id }) => id),
+      ["home"],
+    );
+
+    const dagger = allowed.services.find((service) => service.id === "dagger");
+    const deniedDagger = denied.services.find(
+      (service) => service.id === "dagger",
+    );
+    assert.ok(dagger);
+    assert.ok(deniedDagger);
+    assert.equal(await exchangeTcp(dagger.port, "version"), "dagger:version");
+    assert.equal(await exchangeTcp(deniedDagger.port, "version"), "");
+    assert.equal(targetRequests, 1);
+  } finally {
+    await Promise.allSettled([
+      allowed?.stop(),
+      denied?.stop(),
+      publisher?.stop(),
+      closeServer(target),
+      testnet?.destroy(),
+      rm(root, { recursive: true, force: true }),
+    ]);
+  }
+});
+
 test("publisher allowlist rejects an unknown subscriber", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-denied-"));
   const allowedState = path.join(root, "allowed");

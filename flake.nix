@@ -81,6 +81,7 @@
               services.ssh = {
                 name = "SSH";
                 targetPort = 22;
+                allow = ["1111111111111111111111111111111111111111111111111111111111111111"];
               };
             };
           }
@@ -96,6 +97,7 @@
           grep -F 'display_name = "test-publisher"' ${configFile}
           grep -F 'bootstrap.example:49737' ${configFile}
           grep -F 'target_port = 22' ${configFile}
+          test "$(grep -Fc 'allow = ["1111111111111111111111111111111111111111111111111111111111111111"]' ${configFile})" -eq 2
           grep -F -- '--observations ndjson' ${pkgs.writeText "kepos-exec-start" (toString service.ExecStart)}
           ${pkgs.lib.getExe package} --help | grep -F 'publisher run'
           touch "$out"
@@ -103,20 +105,21 @@
     in {
       inherit package;
       home-manager-module = moduleCheck;
-      container-image = pkgs.runCommand "kepos-container-image-check" {
-        nativeBuildInputs = [pkgs.gawk pkgs.jq pkgs.gnutar];
-      } ''
-        mkdir image
-        tar -xf ${containerImage} -C image
-        config="$(jq -r '.[0].Config' image/manifest.json)"
-        layer="$(jq -r '.[0].Layers[-1]' image/manifest.json)"
-        jq -e \
-          --arg entrypoint "${package}/bin/kepos" \
-          '.config.Entrypoint == [$entrypoint] and .config.User == "10000:10000"' \
-          "image/$config" >/dev/null
-        test "$(tar -tvf "image/$layer" ./tmp/ | awk 'NR == 1 { print $1 }')" = drwxrwxrwt
-        touch "$out"
-      '';
+      container-image =
+        pkgs.runCommand "kepos-container-image-check" {
+          nativeBuildInputs = [pkgs.gawk pkgs.jq pkgs.gnutar];
+        } ''
+          mkdir image
+          tar -xf ${containerImage} -C image
+          config="$(jq -r '.[0].Config' image/manifest.json)"
+          layer="$(jq -r '.[0].Layers[-1]' image/manifest.json)"
+          jq -e \
+            --arg entrypoint "${package}/bin/kepos" \
+            '.config.Entrypoint == [$entrypoint] and .config.User == "10000:10000"' \
+            "image/$config" >/dev/null
+          test "$(tar -tvf "image/$layer" ./tmp/ | awk 'NR == 1 { print $1 }')" = drwxrwxrwt
+          touch "$out"
+        '';
     });
 
     formatter = forAllSystems (system: (pkgsFor system).alejandra);
