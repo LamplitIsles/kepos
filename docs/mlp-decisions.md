@@ -187,9 +187,13 @@ applications without treating the whole machine as the shared resource:
 - the list may reserve space for several publishers, but the first subscriber
   runtime still connects to only one configured publisher.
 
-The tray surface stays small: current online state, number of shared services
-and connected subscribers, open Kepos, pause sharing, and quit. It is a
-lifecycle and status surface, not a second configuration UI.
+The macOS tray surface is native and stays small: phase-aware status and
+network detail rows, **Open Kepos**, and **Quit Kepos**. Closing the red window
+button hides the retained WebView window; the tray and Dock icon reopen that
+same window. Both tray Quit and WebView Quit use the same ordered shutdown.
+Pause sharing remains deferred until its persistence and restart semantics are
+designed. The tray is a lifecycle and status surface, not a second
+configuration UI.
 
 ### MLP identity boundary
 
@@ -217,10 +221,10 @@ checks the corresponding public key against the allowlist.
 The persistent multiplex model has two key roles and no separate key per
 service:
 
-| Key | Held or learned by | Purpose |
-| --- | --- | --- |
-| `subscriberKey` | Generated and held by the connecting subscriber | Proves the subscriber identity checked by a publisher allowlist |
-| `publisherKey` | Held by the publisher and pinned by each subscriber | Stable publisher identity, DHT entry point, and Registry trust anchor |
+| Key             | Held or learned by                                  | Purpose                                                               |
+| --------------- | --------------------------------------------------- | --------------------------------------------------------------------- |
+| `subscriberKey` | Generated and held by the connecting subscriber     | Proves the subscriber identity checked by a publisher allowlist       |
+| `publisherKey`  | Held by the publisher and pinned by each subscriber | Stable publisher identity, DHT entry point, and Registry trust anchor |
 
 Out-of-band pairing exchanges only two public values:
 
@@ -262,12 +266,12 @@ each subscriber connection.
 
 ## Network stages
 
-| Version | Purpose | Question it must answer | Not its purpose |
-| --- | --- | --- | --- |
-| MLP V0 | Existing-product and value gate | Does any existing controllerless tool already satisfy repeated one-to-many family service sharing, and do target users need the remaining difference? | Building a new network stack |
-| MLP V1 | Technical and product spike for the core proxy | Can static trusted keys, a publisher service registry, and the local HTTP gateway provide concurrent direct P2P services to multiple family members without an authorization controller? | Broad network coverage, relay operations, dynamic trust, mandatory multiplex, or a polished desktop product |
-| MLP V2 | Feasibility spike for a private UDP blind relay | Can the same trust and tunnel protocol work through hard NAT pairs with an operable, bounded, non-custodial relay? | Networks that block or badly shape UDP, public relay service, or commercial deployment |
-| Later, only if justified | Restricted-network compatibility | Do measured failures justify building and operating a non-custodial TCP/443 relay? | A committed MLP milestone |
+| Version                  | Purpose                                         | Question it must answer                                                                                                                                                                  | Not its purpose                                                                                             |
+| ------------------------ | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| MLP V0                   | Existing-product and value gate                 | Does any existing controllerless tool already satisfy repeated one-to-many family service sharing, and do target users need the remaining difference?                                    | Building a new network stack                                                                                |
+| MLP V1                   | Technical and product spike for the core proxy  | Can static trusted keys, a publisher service registry, and the local HTTP gateway provide concurrent direct P2P services to multiple family members without an authorization controller? | Broad network coverage, relay operations, dynamic trust, mandatory multiplex, or a polished desktop product |
+| MLP V2                   | Feasibility spike for a private UDP blind relay | Can the same trust and tunnel protocol work through hard NAT pairs with an operable, bounded, non-custodial relay?                                                                       | Networks that block or badly shape UDP, public relay service, or commercial deployment                      |
+| Later, only if justified | Restricted-network compatibility                | Do measured failures justify building and operating a non-custodial TCP/443 relay?                                                                                                       | A committed MLP milestone                                                                                   |
 
 ### MLP V1: direct UDX
 

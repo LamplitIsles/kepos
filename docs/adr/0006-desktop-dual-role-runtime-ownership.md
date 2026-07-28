@@ -42,8 +42,9 @@ one failed role does not stop the other or close the control window. Quit stops
 publisher first, then subscriber, and attempts every remaining cleanup step.
 
 The first desktop publisher slice reads existing publisher state. State setup,
-service editing, allowlist editing, live pairing, and tray residence remain
-separate work.
+service editing, allowlist editing, and live pairing remain separate work.
+On macOS, the same process owns a native menu-bar item and retains its single
+WebView control window when the red close button hides it.
 
 Desktop reads the same `~/.config/kepos/config.toml` policy as the CLI. The
 optional `enabled` field on each role table controls desktop auto-start; it does
@@ -77,8 +78,10 @@ controls or filesystem watching.
 - Role combinations are configuration results, not separate product modes.
 - The desktop snapshot and UI must distinguish the remote publisher from the
   publisher owned by this machine.
-- Closing the window still quits both roles until tray support changes close to
-  hide.
+- On macOS, red-button close hides the retained control window without stopping
+  either role. Tray Open and Dock reopen show the same window.
+- Tray Quit and WebView Quit share one idempotent shutdown that detaches native
+  callbacks before stopping the runtimes.
 
 ADR 0006 extends ADR 0004; it does not replace ADR 0004's locking algorithm or
 desktop-singleton rules.
