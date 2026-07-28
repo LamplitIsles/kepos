@@ -17,10 +17,44 @@ export function desktopBuildCommands(
 ): DesktopBuildCommand[] {
   const app = desktopAppBundle(repository);
   const frameworks = path.join(app, "Contents", "Frameworks");
+  const appKit = path.join(repository, "vendor", "holepunch", "bare-app-kit");
+  const appKitBuild = path.join(appKit, "build");
   const webKit = path.join(repository, "vendor", "holepunch", "bare-web-kit");
   const webKitBuild = path.join(webKit, "build");
   return [
     { command: "tsc", arguments: ["-p", "tsconfig.desktop.json"] },
+    {
+      command: "bare-make",
+      arguments: [
+        "generate",
+        "--source",
+        appKit,
+        "--build",
+        appKitBuild,
+        "--platform",
+        "darwin",
+        "--arch",
+        "arm64",
+        "--define",
+        `CMAKE_PREFIX_PATH:PATH=${path.join(repository, "node_modules")}`,
+        "--define",
+        "FETCHCONTENT_UPDATES_DISCONNECTED:BOOL=ON",
+      ],
+    },
+    {
+      command: "bare-make",
+      arguments: ["build", "--build", appKitBuild],
+    },
+    {
+      command: "bare-make",
+      arguments: [
+        "install",
+        "--build",
+        appKitBuild,
+        "--prefix",
+        path.join(appKit, "prebuilds"),
+      ],
+    },
     {
       command: "bare-make",
       arguments: [
@@ -96,7 +130,7 @@ export function desktopBuildCommands(
         "darwin-arm64",
         "--out",
         frameworks,
-        path.join(repository, "node_modules", "bare-app-kit"),
+        appKit,
       ],
     },
     {

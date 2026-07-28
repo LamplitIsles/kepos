@@ -83,6 +83,7 @@
     "desktop:build": "tsx scripts/build-desktop.ts",
     "desktop:check": "npm run desktop:typecheck && node --import tsx --test \"test/desktop-*.test.ts\"",
     "desktop:install": "npm run desktop:build && tsx scripts/install-desktop.ts",
+    "desktop:native-check": "npm run desktop:build && node --import tsx --test test/native/desktop-quit.native.ts",
     "desktop:run": "npm run desktop:build && dist/desktop/Kepos.app/Contents/MacOS/Kepos",
     "desktop:typecheck": "tsc -p tsconfig.desktop.json --noEmit",
     "kepos": "tsx src/cli/main.ts"
