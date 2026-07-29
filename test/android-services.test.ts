@@ -125,6 +125,28 @@ test("Android gives unknown registry services an HTTP fallback", () => {
   ]);
 });
 
+test("Android gives prototype-named registry services an HTTP fallback", () => {
+  const registry: HomeRegistry = {
+    schemaVersion: 2,
+    revision: 1,
+    publisher: { displayName: "studio", publisherKey },
+    services: [
+      { id: "constructor", name: "Constructor", kind: "tcp" },
+    ],
+  };
+
+  assert.deepEqual(createAndroidRegistrySnapshot(registry, 17_480).services, [
+    {
+      id: "constructor",
+      name: "Constructor",
+      access: "http",
+      action: "open",
+      icon: "web",
+      url: "http://constructor.localhost:17480/",
+    },
+  ]);
+});
+
 test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated actions", () => {
   const registry: HomeRegistry = {
     schemaVersion: 2,

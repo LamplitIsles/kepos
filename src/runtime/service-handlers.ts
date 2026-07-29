@@ -142,9 +142,12 @@ export function createServicePresentations(
 }
 
 function handlerFor(id: string): BuiltInServiceHandler {
+  if (!Object.prototype.hasOwnProperty.call(BUILT_IN_SERVICE_HANDLERS, id)) {
+    return DEFAULT_HTTP_SERVICE_HANDLER;
+  }
   return BUILT_IN_SERVICE_HANDLERS[
     id as keyof typeof BUILT_IN_SERVICE_HANDLERS
-  ] ?? DEFAULT_HTTP_SERVICE_HANDLER;
+  ];
 }
 
 function createPresentation(
