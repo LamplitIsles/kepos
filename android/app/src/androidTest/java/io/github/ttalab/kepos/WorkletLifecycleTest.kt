@@ -11,12 +11,16 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -80,13 +84,39 @@ class WorkletLifecycleTest {
 
   @Test
   fun deepLinkIsConsumedBeforeActivityRecreation() {
+    val instrumentation = InstrumentationRegistry.getInstrumentation()
     val launch = Intent(context, MainActivity::class.java).apply {
       data = Uri.parse("kepos://pair?v=1&publisher=${"ab".repeat(32)}")
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-    ActivityScenario.launch<MainActivity>(launch).use { activity ->
-      activity.onActivity { assertEquals(null, it.intent.data) }
-      activity.recreate()
-      activity.onActivity { assertEquals(null, it.intent.data) }
+    val first = instrumentation.startActivitySync(launch) as MainActivity
+    val recreated = AtomicReference<MainActivity>()
+    val resumed = CountDownLatch(1)
+    val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+    val callback = ActivityLifecycleCallback { activity, stage ->
+      if (stage != Stage.RESUMED || activity !is MainActivity || activity === first) return@ActivityLifecycleCallback
+      recreated.set(activity)
+      resumed.countDown()
+    }
+
+    try {
+      instrumentation.runOnMainSync {
+        assertEquals(null, first.intent.data)
+        monitor.addLifecycleCallback(callback)
+        first.recreate()
+      }
+      assertTrue(
+        "activity did not resume after recreation",
+        resumed.await(10, TimeUnit.SECONDS),
+      )
+      instrumentation.runOnMainSync {
+        assertEquals(null, checkNotNull(recreated.get()).intent.data)
+      }
+    } finally {
+      instrumentation.runOnMainSync {
+        monitor.removeLifecycleCallback(callback)
+        (recreated.get() ?: first).finish()
+      }
     }
   }
 
