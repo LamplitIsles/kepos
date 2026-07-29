@@ -181,6 +181,34 @@ Stage B1 merge gate.
 No private key, Navidrome credential, auth cookie, or raw state file belongs in
 this document.
 
+## Mihomo mixed-proxy acceptance (2026-07-29)
+
+The production debug package was updated in place with `adb install -r` on the
+same Pixel 7a. The app remained connected to `kosmos-wsl`, and its subscriber
+fingerprint stayed `e7cd23d4…547be77e`, confirming that the update preserved
+the existing app-private identity. The isolated `deviceTest` package did not
+reuse or replace that state.
+
+The production Registry showed the expected BookOrbit and Mihomo entries.
+Mihomo Dashboard was absent because the publisher Registry did not expose it
+to this subscriber; the client did not invent a local service entry.
+
+The fixed production listener at `127.0.0.1:17890` passed both TCP proxy modes:
+
+- an HTTP proxy request to `https://example.com` returned HTTP 200;
+- a SOCKS5h request to `https://example.com` returned HTTP 200.
+
+Those two host-side probes used a temporary ADB forward to the phone listener.
+The forward was removed after the checks. Telegram used the phone loopback
+directly, configured as SOCKS5 at `127.0.0.1:17890` with blank username and
+password. Telegram reported Connected. With Wi-Fi disabled and mobile data
+enabled, the operator sent a normal Telegram message successfully. Wi-Fi was
+then restored.
+
+The isolated `npm run android:device-check` gate passed 10/10 on the Pixel 7a,
+including lifecycle recreation and the raw Mihomo listener. This acceptance
+proves HTTP proxy and SOCKS5 TCP traffic only; it makes no UDP proxy claim.
+
 The first Wi-Fi/cellular sample ran with the device's existing Clash VPN
 enabled. Android logs showed Kepos UDP using its configured proxy, so that
 sample proves the foreground lifecycle, outer replacement, and loopback
