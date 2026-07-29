@@ -12,25 +12,30 @@ import {
   setupSubscriber,
 } from "../../state/subscriber.js";
 import { parseAndroidBootstrapAsset } from "../bootstrap.js";
+import { createAndroidSubscriberServices } from "./services.js";
 
 const runtimeId = Bare.argv[0] ?? "runtime-unknown";
 const stateDir = Bare.argv[1];
 if (!stateDir) throw new Error("Android subscriber state directory is required");
 
 const gatewayPort = Number(Bare.argv[2] ?? "17480");
-const navidromePort = Number(Bare.argv[3] ?? "17481");
+const mihomoPort = Number(Bare.argv[3] ?? "17890");
 const bootstrap = parseAndroidBootstrapAsset(Bare.argv[4] ?? "null");
 if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65_535) {
   throw new Error("Android gateway port is invalid");
 }
 if (
-  !Number.isInteger(navidromePort) ||
-  navidromePort < 1 ||
-  navidromePort > 65_535
+  !Number.isInteger(mihomoPort) ||
+  mihomoPort < 1 ||
+  mihomoPort > 65_535
 ) {
-  throw new Error("Android Navidrome port is invalid");
+  throw new Error("Android Mihomo port is invalid");
 }
 const navidromeUrl = `http://navidrome.localhost:${gatewayPort}/`;
+const subscriberServices = createAndroidSubscriberServices(mihomoPort);
+const localPorts = new Map(
+  subscriberServices.map(({ id, localPort }) => [id, localPort]),
+);
 const setup = await setupSubscriber({ stateDir });
 const initialConnectionState = setup.configured
   ? await loadSubscriberConnectionState(stateDir)
@@ -76,7 +81,7 @@ const refreshRegistry = (): void => {
     .then((loaded) => {
       if (generation !== registryGeneration) return;
       registry.accept(
-        createAndroidRegistrySnapshot(loaded, gatewayPort),
+        createAndroidRegistrySnapshot(loaded, gatewayPort, localPorts),
       );
       controller.publishStatus();
     })
@@ -93,7 +98,7 @@ const connect = (): void => {
     stateDir,
     gatewayPort,
     bootstrap,
-    services: [{ id: "navidrome", localPort: navidromePort }],
+    services: subscriberServices,
     waitForPublisher: false,
   })
     .then((started) => {
@@ -153,7 +158,7 @@ const controller = new WorkletController({
         stateDir,
         gatewayPort,
         bootstrap,
-        services: [{ id: "navidrome", localPort: navidromePort }],
+        services: subscriberServices,
         pairing: {
           invitation,
           deviceLabel,

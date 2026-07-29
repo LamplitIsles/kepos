@@ -46,9 +46,14 @@ export class AndroidRegistryState {
 export function createAndroidRegistrySnapshot(
   registry: HomeRegistry,
   gatewayPort: number,
+  localPorts: ReadonlyMap<string, number> = new Map(),
 ): AndroidRegistrySnapshot {
   return {
     publisher: { ...registry.publisher },
-    services: createServicePresentations(registry.services, gatewayPort),
+    services: createServicePresentations(
+      registry.services,
+      gatewayPort,
+      localPorts,
+    ),
   };
 }

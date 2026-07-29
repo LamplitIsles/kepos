@@ -10,12 +10,15 @@ export interface DesktopService {
   access: "http" | "ssh" | "tcp";
   action: "open" | "copy-command" | "copy-url";
   icon:
+    | "book"
     | "build"
+    | "dashboard"
     | "dagger"
     | "git"
     | "music"
     | "photos"
     | "port"
+    | "proxy"
     | "storage"
     | "terminal"
     | "web";

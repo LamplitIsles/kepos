@@ -89,7 +89,8 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.match(notificationIcon!, /M15,9H4V31H15M25,9H36V31H25M10,20H30/);
   assert.match(foregroundService!, /filesDir\.resolve\("subscriber"\)/);
   assert.match(foregroundService!, /BuildConfig\.GATEWAY_PORT/);
-  assert.match(foregroundService!, /BuildConfig\.NAVIDROME_PORT/);
+  assert.match(foregroundService!, /BuildConfig\.MIHOMO_PORT/);
+  assert.doesNotMatch(foregroundService!, /BuildConfig\.NAVIDROME_PORT/);
   assert.doesNotMatch(`${subscriberRuntime}\n${gateway}`, /\bAbortController\b/);
   assert.doesNotMatch(workflow!, /uses: actions\/(?:checkout|setup-node)@v\d/);
   assert.ok(
@@ -123,11 +124,11 @@ test("Android device commands isolate tests and preserve installed state", async
   assert.match(appBuild!, /create\("deviceTest"\)/);
   assert.match(appBuild!, /applicationIdSuffix\s*=\s*"\.devicetest"/);
   assert.match(appBuild!, /GATEWAY_PORT.*18480/);
-  assert.match(appBuild!, /NAVIDROME_PORT.*18481/);
+  assert.match(appBuild!, /MIHOMO_PORT.*18490/);
   assert.match(foregroundService!, /BuildConfig\.GATEWAY_PORT/);
-  assert.match(foregroundService!, /BuildConfig\.NAVIDROME_PORT/);
+  assert.match(foregroundService!, /BuildConfig\.MIHOMO_PORT/);
   assert.match(lifecycleTest!, /BuildConfig\.GATEWAY_PORT/);
-  assert.match(lifecycleTest!, /BuildConfig\.NAVIDROME_PORT/);
+  assert.match(lifecycleTest!, /BuildConfig\.MIHOMO_PORT/);
   assert.match(worklet!, /Bare\.argv\[2\]/);
   assert.match(worklet!, /Bare\.argv\[3\]/);
   assert.match(worklet!, /Bare\.argv\[4\]/);

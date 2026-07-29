@@ -53,14 +53,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.AudioLines
+import com.composables.icons.lucide.BookOpen
 import com.composables.icons.lucide.Box as BoxIcon
 import com.composables.icons.lucide.Copy
 import com.composables.icons.lucide.ExternalLink
 import com.composables.icons.lucide.GitBranch
+import com.composables.icons.lucide.Gauge
 import com.composables.icons.lucide.Hammer
 import com.composables.icons.lucide.Images
 import com.composables.icons.lucide.DatabaseBackup
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Network
 import com.composables.icons.lucide.RefreshCw
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.SquareTerminal
@@ -724,12 +727,15 @@ private fun SettingsAction(
 }
 
 private fun serviceIcon(icon: ServiceIcon): ImageVector = when (icon) {
+  ServiceIcon.BOOK -> Lucide.BookOpen
   ServiceIcon.MUSIC -> Lucide.AudioLines
   ServiceIcon.TERMINAL -> Lucide.SquareTerminal
   ServiceIcon.GIT -> Lucide.GitBranch
   ServiceIcon.BUILD -> Lucide.Hammer
   ServiceIcon.PHOTOS -> Lucide.Images
   ServiceIcon.STORAGE -> Lucide.DatabaseBackup
+  ServiceIcon.PROXY -> Lucide.Network
+  ServiceIcon.DASHBOARD -> Lucide.Gauge
   ServiceIcon.WEB -> Lucide.ExternalLink
   ServiceIcon.PORT -> Lucide.BoxIcon
 }

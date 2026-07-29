@@ -64,6 +64,12 @@ The container and Pod-facing gateway have also been exercised in a private
 Kubernetes deployment. That proves the path, not a supported cluster product:
 operators still own DNS, same-node routing, firewall rules, and rollout.
 
+On Android, HTTP services use `http://<service-id>.localhost:17480/`. Registry
+entries without a built-in action use that HTTP fallback instead of being
+hidden. The one fixed raw listener, `127.0.0.1:17890`, maps to Mihomo's mixed
+port for HTTP proxy and SOCKS5 TCP clients; Kepos does not carry Mihomo's UDP
+listener.
+
 ## The path through Kepos
 
 ```text

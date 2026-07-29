@@ -19,12 +19,15 @@ enum class ServiceAction {
 }
 
 enum class ServiceIcon {
+  BOOK,
   MUSIC,
   TERMINAL,
   GIT,
   BUILD,
   PHOTOS,
   STORAGE,
+  PROXY,
+  DASHBOARD,
   WEB,
   PORT,
 }
@@ -86,12 +89,15 @@ data class KeposUiModel(
         else -> return null
       }
       val icon = when (service.icon) {
+        "book" -> ServiceIcon.BOOK
         "music" -> ServiceIcon.MUSIC
         "terminal" -> ServiceIcon.TERMINAL
         "git" -> ServiceIcon.GIT
         "build" -> ServiceIcon.BUILD
         "photos" -> ServiceIcon.PHOTOS
         "storage" -> ServiceIcon.STORAGE
+        "proxy" -> ServiceIcon.PROXY
+        "dashboard" -> ServiceIcon.DASHBOARD
         "web" -> ServiceIcon.WEB
         else -> ServiceIcon.PORT
       }
