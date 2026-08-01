@@ -189,6 +189,7 @@ or remove the installed Kepos app.
 - [Nix, container, and Kubernetes deployment](docs/deployment.md)
 - [Network transport and compatibility](docs/network-transport-and-compatibility.md)
 - [How Kepos grew from Hypertele](docs/hypertele-provenance.md)
+- [Proposed Capacitor Bare Kit Android bounty](docs/capacitor-bare-kit-android-bounty.md)
 - [Architecture decisions](docs/adr/)
 - [Physical and field evidence](docs/evidence/)
 
