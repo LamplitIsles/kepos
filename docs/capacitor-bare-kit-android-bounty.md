@@ -11,11 +11,13 @@ Worklet in an Android application. The plugin will load an application-owned
 Bare bundle, expose bounded binary IPC to the WebView, and keep Worklet
 ownership stable across Android Activity recreation.
 
-Applications can choose process-scoped ownership for foreground-only work or
-enable foreground-service ownership for a user-visible, long-running Worklet.
-The service mode includes notification management, Activity reattachment, and
-an explicit process-restart policy. It does not bypass Android background-work
-or Google Play rules.
+One process-scoped host is the sole Worklet owner. By default it follows the
+application lifecycle and suspends the Worklet while the application is in the
+background. Applications can optionally acquire a foreground-service lease to
+keep that same Worklet active for user-visible, long-running work. The service
+never creates or owns a second Worklet. It adds notification management and an
+explicit process-restart policy, but does not bypass Android background-work or
+Google Play rules.
 
 ## Problem
 
@@ -25,10 +27,16 @@ code, but there is no public, maintained Capacitor-to-Bare Kit integration.
 Each application must currently rebuild the same Worklet loading, IPC,
 lifecycle, error, and TypeScript bridge code.
 
+The public Bare Android example and React Native Bare Kit already account for
+mobile lifecycle: they suspend and resume Worklets as the application moves
+between foreground and background. Expo Bare Kit also supports an FCM-triggered
+notification Worklet. None provides a public long-running Android foreground
+service for an application Worklet.
+
 Existing Capacitor foreground-service plugins solve notification and Android
-process-priority concerns. They do not own a Bare Worklet or provide Bare IPC,
-so this task does not duplicate a generic foreground-service plugin. Its
-optional service is specifically the owner and supervisor of a Bare Worklet.
+process-priority concerns. They do not coordinate Bare lifecycle or IPC. This
+task connects the two through a single Worklet host; it does not rebuild a
+generic notification plugin or make the Service a second owner.
 
 ## Proposed API
 
@@ -42,20 +50,18 @@ interface BareKitPlugin {
     bundle: string;
     arguments?: string[];
     memoryLimitBytes?: number;
-    ownership?:
-      | { mode: "process" }
-      | {
-          mode: "foreground-service";
-          restartAfterProcessDeath?: boolean;
-          notification: {
-            channelId: string;
-            id: number;
-            title: string;
-            body: string;
-            smallIcon: string;
-          };
-        };
   }): Promise<void>;
+  enableForeground(options: {
+    restartAfterProcessDeath?: boolean;
+    notification: {
+      channelId: string;
+      id: number;
+      title: string;
+      body: string;
+      smallIcon: string;
+    };
+  }): Promise<void>;
+  disableForeground(): Promise<void>;
   send(options: { data: string }): Promise<void>;
   stop(): Promise<void>;
   addListener(
@@ -73,20 +79,22 @@ schema.
 
 1. An npm-installable Capacitor 8 plugin with Android native sources and
    TypeScript types.
-2. An Android host that owns at most one active Bare Worklet and is independent
-   of any Activity or WebView instance. It supports process-scoped ownership
-   and optional foreground-service ownership through the same client API.
+2. A process-scoped Android host that is the sole owner of at most one active
+   Bare Worklet and is independent of any Activity, WebView, or Service
+   instance. It follows application suspend/resume lifecycle by default.
 3. Safe loading of a packaged `.bundle` from application assets, with bounded
    `arguments` and memory-limit configuration. Web content cannot supply an
    arbitrary filesystem path or remote URL.
 4. Bidirectional binary IPC with explicit handling for partial reads, EOF,
    write failure, Worklet failure, duplicate start, and idempotent stop.
-5. Foreground-service mode with a required user-visible notification, explicit
-   desired-running state, Activity reattachment, optional restart after process
-   death, and explicit stop that clears restart intent.
-6. A minimal Capacitor example that starts an echo Worklet in both ownership
-   modes, exchanges binary fixtures, survives Activity recreation, reports
-   failure, and stops cleanly.
+5. An optional foreground-service lease on the existing host, with a required
+   user-visible notification, explicit desired-running state, Activity
+   reattachment, optional reconstruction after process death, and explicit
+   stop that clears restart intent. Enabling it must not replace or duplicate a
+   running Worklet; disabling it returns the host to application lifecycle.
+6. A minimal Capacitor example that starts an echo Worklet, enables and disables
+   its foreground lease, exchanges binary fixtures, survives Activity
+   recreation, reports failure, and stops cleanly.
 7. Automated TypeScript, JVM, and Android instrumentation tests, plus one
    documented physical-device acceptance run.
 8. Setup, API, lifecycle, foreground-service policy, security, compatibility,
@@ -107,21 +115,26 @@ The task is accepted when all of the following are observable:
 - Recreating the Android Activity and Capacitor Bridge does not create a second
   Worklet. A new WebView listener can attach to the existing process-scoped
   host and continue IPC.
-- With default process ownership, the plugin starts no foreground service and
-  requests no foreground-service capability.
-- With foreground-service ownership enabled, the service displays the supplied
-  notification, owns the Worklet independently of the Activity, and accepts a
-  newly created Capacitor Bridge as a client without restarting the Worklet.
+- By default, moving the application to the background suspends the Worklet and
+  returning it to the foreground resumes it. The plugin starts no foreground
+  service and requests no foreground-service capability.
+- Enabling the foreground lease displays the supplied notification and keeps
+  the existing Worklet active independently of the Activity. A newly created
+  Capacitor Bridge can attach without restarting the Worklet.
+- Enabling or disabling the foreground lease repeatedly is idempotent and never
+  creates a duplicate Worklet. Disabling it stops the Service and notification,
+  then returns the host to normal application suspend/resume behavior.
 - Worklet startup failure, IPC EOF, malformed base64, oversized input, and
   native write failure produce bounded, documented errors rather than a hang
   or uncaught exception.
 - `stop()` closes IPC and the Worklet, rejects pending work, reaches `stopped`,
   and remains safe when called again.
-- After Android kills the application process, process ownership reports
-  `stopped` on the next launch. Foreground-service ownership restarts the
-  packaged Worklet only when `restartAfterProcessDeath` was enabled and the
-  desired-running state was not cleared by an explicit stop.
-- In foreground-service mode, `stop()` closes the Worklet, removes the
+- After Android kills the application process, the default host reports
+  `stopped` on the next launch. The Service reconstructs the packaged Worklet
+  only when `restartAfterProcessDeath` was enabled and the desired-running
+  state was not cleared by an explicit stop. It must not claim that the old
+  Worklet survived process death.
+- With a foreground lease, `stop()` closes the Worklet, removes the
   notification, stops the Service, and prevents sticky resurrection.
 - Unit and instrumentation test suites pass in CI, and the same start, echo,
   Activity-recreation, process-restart, and stop flows pass on a physical arm64
@@ -150,8 +163,8 @@ are supported, the suggested split is:
 
 1. Plugin scaffold, asset loading, process-scoped host, and start/stop tests:
    30%.
-2. Binary IPC, both ownership modes, lifecycle behavior, process restart, and
-   failure-path tests: 40%.
+2. Binary IPC, suspend/resume lifecycle, optional foreground lease, process
+   restart, and failure-path tests: 40%.
 3. Example application, physical-device evidence, documentation, and release:
    30%.
 
@@ -193,5 +206,6 @@ These points must be settled before implementation:
 - [React Native Bare Kit](https://github.com/holepunchto/react-native-bare-kit)
 - [Expo Bare Kit](https://github.com/holepunchto/expo-bare-kit)
 - [Bare on Android example](https://github.com/holepunchto/bare-android)
+- [Bare mobile lifecycle](https://docs.pears.com/explanation/bare-runtime/)
 - [Capacitor Android foreground service](https://capawesome.io/docs/sdks/capacitor/android-foreground-service/)
 - [Tether developer grants](https://tether.dev/grants/apply-for-a-grant/)
