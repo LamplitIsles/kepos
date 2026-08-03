@@ -53,7 +53,7 @@ The implementation follows four rules:
 
 | Surface | Roles | Current boundary |
 | --- | --- | --- |
-| Headless CLI | Publisher and subscriber | Node.js 22; persistent local HTTP gateway and raw TCP listeners |
+| Headless CLI | Publisher and subscriber | Node.js 24; persistent local HTTP gateway and raw TCP listeners |
 | Nix / Home Manager | Publisher and CLI | Declarative public policy; private keys never enter the Nix store |
 | Container | Publisher and subscriber | Non-root `linux/amd64` image published to GHCR from `main` |
 | Kubernetes path | Subscriber gateway | Pod-facing hostname routing exists; reusable manifests are not yet shipped here |
@@ -149,8 +149,8 @@ copied freely; private state must not be committed or placed in logs.
 
 Requirements:
 
-- Node.js 22
-- npm 10
+- Node.js 24
+- npm 11
 - Git submodules for desktop development
 
 ```sh

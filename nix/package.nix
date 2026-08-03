@@ -2,7 +2,7 @@
   importNpmLock,
   lib,
   makeWrapper,
-  nodejs_22,
+  nodejs_24,
   stdenvNoCC,
 }: let
   rootPackage = builtins.fromJSON (builtins.readFile ../package.json);
@@ -30,7 +30,7 @@
     };
   nodeModules = importNpmLock.buildNodeModules {
     inherit package packageLock;
-    nodejs = nodejs_22;
+    nodejs = nodejs_24;
     derivationArgs.npmFlags = ["--omit=dev"];
   };
 in
@@ -58,7 +58,7 @@ in
       app="$out/lib/kepos-neo"
       mkdir -p "$app" "$out/bin"
       cp -r node_modules package.json src "$app/"
-      makeWrapper ${lib.getExe nodejs_22} "$out/bin/kepos" \
+      makeWrapper ${lib.getExe nodejs_24} "$out/bin/kepos" \
         --add-flags "--import=$app/node_modules/tsx/dist/loader.mjs" \
         --add-flags "$app/src/cli/main.ts"
 
