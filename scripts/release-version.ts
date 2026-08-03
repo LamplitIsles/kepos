@@ -98,3 +98,5 @@ export async function assertReleaseGitState(options: {
     throw new Error(`release HEAD must have exact tag ${options.tag}`);
   }
 }
+import { lstat, mkdir } from "node:fs/promises";
+import path from "node:path";

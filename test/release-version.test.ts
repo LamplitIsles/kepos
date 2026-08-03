@@ -128,3 +128,20 @@ test("release git gate rejects dirty and mismatched states", async () => {
     /exact tag v1\.2\.3/i,
   );
 });
+
+test("shares a version directory without overwriting an existing target", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "kepos-release-path-"));
+  try {
+    const androidArtifact = path.join(directory, "kepos.apk");
+    const macosArtifact = path.join(directory, "kepos.zip");
+    await writeFile(androidArtifact, "apk");
+
+    await prepareReleaseArtifactDirectory(directory, [macosArtifact]);
+    await assert.rejects(
+      prepareReleaseArtifactDirectory(directory, [androidArtifact]),
+      /already exists/i,
+    );
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
