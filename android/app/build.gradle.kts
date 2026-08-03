@@ -3,6 +3,9 @@ plugins {
   id("org.jetbrains.kotlin.android")
 }
 
+val keposVersionName = providers.gradleProperty("keposVersionName")
+val keposVersionCode = providers.gradleProperty("keposVersionCode").map(String::toInt)
+
 android {
   namespace = "io.github.ttalab.kepos"
   compileSdk = 35
@@ -11,8 +14,8 @@ android {
     applicationId = "io.github.ttalab.kepos"
     minSdk = 31
     targetSdk = 35
-    versionCode = 1
-    versionName = "0.1.0"
+    versionCode = keposVersionCode.getOrElse(1)
+    versionName = keposVersionName.getOrElse("0.1.0")
     buildConfigField("int", "GATEWAY_PORT", "17480")
     buildConfigField("int", "MIHOMO_PORT", "17890")
 

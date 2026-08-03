@@ -139,7 +139,7 @@ test("Android device commands isolate tests and preserve installed state", async
   assert.match(readme!, /preserving app-private state/);
 });
 
-test("Android release build is optimized and reports its size", async () => {
+test("Android release build is optimized and signed only on the release Mac", async () => {
   const rootPackage = JSON.parse(
     (await readProjectFile("package.json"))!,
   ) as { scripts?: Record<string, string> };
@@ -150,35 +150,30 @@ test("Android release build is optimized and reports its size", async () => {
   );
   const checkWorkflow = await readProjectFile(".github/workflows/check.yml");
   const releaseWorkflow = await readProjectFile(".github/workflows/release.yml");
+  const certificateFingerprint = await readProjectFile(
+    "release/android-certificate.sha256",
+  );
   const reporterPath = "../scripts/report-android-size.js";
   const reporter = await import(reporterPath).catch(() => null) as null | {
     formatApkSizeComparison(debugBytes: number, releaseBytes: number): string;
   };
 
-  assert.equal(
-    rootPackage.scripts?.["android:release"],
-    "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug assembleRelease && tsx scripts/report-android-size.ts",
-  );
+  assert.equal(rootPackage.scripts?.["release:android"], "tsx scripts/release-android.ts");
   assert.equal(
     rootPackage.scripts?.["android:check"],
     "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug",
   );
   assert.match(appBuild!, /getByName\("release"\)/);
+  assert.match(appBuild!, /providers\.gradleProperty\("keposVersionName"\)/);
+  assert.match(appBuild!, /providers\.gradleProperty\("keposVersionCode"\)/);
   assert.match(appBuild!, /isMinifyEnabled\s*=\s*true/);
   assert.match(appBuild!, /isShrinkResources\s*=\s*true/);
   assert.match(appBuild!, /getDefaultProguardFile\("proguard-android-optimize\.txt"\)/);
   assert.match(hostBuild!, /consumerProguardFiles\("consumer-rules\.pro"\)/);
   assert.match(consumerRules!, /-keep class to\.holepunch\.bare\.kit\.\*\*/);
   assert.doesNotMatch(checkWorkflow!, /assemble(?:Debug|Release)|android:release/);
-  assert.notEqual(releaseWorkflow, null, "missing tag release workflow");
-  assert.match(releaseWorkflow!, /tags:\s*\n\s*- "v\*"/);
-  assert.match(releaseWorkflow!, /run: npm run android:release/);
-  assert.match(
-    releaseWorkflow!,
-    /path: android\/app\/build\/outputs\/apk\/release\/app-release-unsigned\.apk/,
-  );
-  assert.doesNotMatch(releaseWorkflow!, /desktop:/i);
-  assert.doesNotMatch(releaseWorkflow!, /uses: actions\/(?:checkout|setup-node|setup-java|upload-artifact)@v\d/);
+  assert.equal(releaseWorkflow, null, "tag workflow must not publish unsigned APKs");
+  assert.match(certificateFingerprint!, /^[0-9a-f]{64}\n$/);
   assert.notEqual(reporter, null, "missing Android APK size reporter");
   assert.equal(
     reporter!.formatApkSizeComparison(100 * 1024 * 1024, 70 * 1024 * 1024),
