@@ -14,8 +14,9 @@ There is no Kepos account and no Kepos-operated control plane. Device keys stay
 on the devices that created them. The publisher decides who may connect and can
 apply a narrower allowlist to each service.
 
-> Kepos Neo is a developer preview. Its real transport and native clients work,
-> but Android and macOS distribution is not yet ready for ordinary users.
+> Kepos Neo is a developer preview. Android APKs and Apple Silicon macOS ZIPs
+> are published for direct download with minisign verification. They are not
+> app-store releases; the macOS app is ad-hoc signed and not notarized.
 
 ## Why Kepos exists
 
@@ -186,6 +187,7 @@ or remove the installed Kepos app.
 - [CLI, identity, and configuration](docs/cli.md)
 - [Android subscriber](docs/platforms/android.md)
 - [macOS desktop](docs/platforms/macos.md)
+- [Release and artifact verification](docs/releasing.md)
 - [Nix, container, and Kubernetes deployment](docs/deployment.md)
 - [Network transport and compatibility](docs/network-transport-and-compatibility.md)
 - [How Kepos grew from Hypertele](docs/hypertele-provenance.md)

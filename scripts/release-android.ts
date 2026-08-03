@@ -9,6 +9,7 @@ import {
   assertReleaseGitState,
   parseReleaseTag,
   prepareReleaseArtifactDirectory,
+  releaseSubprocessEnvironment,
   type ReleaseMode,
 } from "./release-version.js";
 
@@ -47,11 +48,10 @@ export function androidReleaseEnvironment(
   kind: AndroidReleaseCommandKind,
   baseEnvironment: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
-  const environment = { ...baseEnvironment };
-  delete environment.KEPOS_ANDROID_KEYSTORE;
-  delete environment.KEPOS_ANDROID_KEY_ALIAS;
-  if (kind !== "sign") delete environment.KEPOS_ANDROID_KEY_PASSWORD;
-  return environment;
+  return releaseSubprocessEnvironment(
+    baseEnvironment,
+    kind === "sign" ? ["KEPOS_ANDROID_KEY_PASSWORD"] : [],
+  );
 }
 
 export function createAndroidReleasePlan(options: {
