@@ -90,17 +90,18 @@ but it cannot replace or remove the installed `io.github.ttalab.kepos` app.
 ## Release boundary
 
 ```sh
-npm run android:release
+npm run release:android -- v0.1.0
 ```
 
-This builds a debug variant and an optimized release variant, enables R8 and
-resource shrinking for release, and reports their sizes. The release APK is
-unsigned. A `v*` tag currently stores it as a 14-day Actions artifact; it is not
-an installable or Play Store release.
+This release-Mac command derives the app version from an exact
+`vMAJOR.MINOR.PATCH` tag, builds the optimized arm64 variant, zipaligns it,
+signs it with the long-lived Kepos JKS, and checks the resulting certificate
+fingerprint against the public value in the repository. It writes the final
+versioned APK under `dist/release/` and reports its size against the debug APK.
 
-Only `arm64-v8a` is packaged. Signing, durable release assets, other ABIs, store
-policy, and the remaining foreground-service battery gate are distribution
-work.
+Only `arm64-v8a` is packaged. Kepos does not use Google Play or Play App
+Signing; users sideload the signed APK and verify it with the release manifest.
+See [Release and artifact verification](../releasing.md).
 
 Physical results and known gaps are recorded in
 [Android Navic subscriber evidence](../evidence/android-navic-subscriber-spike.md)
