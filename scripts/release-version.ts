@@ -1,3 +1,6 @@
+import { lstat, mkdir } from "node:fs/promises";
+import path from "node:path";
+
 export type ReleaseMode = "release" | "rehearsal";
 
 export interface ReleaseVersion {
@@ -16,6 +19,25 @@ export type GitRunner = (arguments_: string[]) => Promise<string>;
 
 const releaseTagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const maxAndroidVersionCode = 2_100_000_000n;
+
+export async function prepareReleaseArtifactDirectory(
+  directory: string,
+  expectedOutputs: string[],
+): Promise<void> {
+  await mkdir(directory, { recursive: true });
+  for (const output of expectedOutputs) {
+    if (path.dirname(output) !== directory) {
+      throw new Error("release output must be a direct child of its artifact directory");
+    }
+    try {
+      await lstat(output);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    throw new Error(`release output already exists: ${path.basename(output)}`);
+  }
+}
 
 export function parseReleaseTag(
   tag: string,

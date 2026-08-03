@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
   assertReleaseGitState,
   parseReleaseTag,
+  prepareReleaseArtifactDirectory,
 } from "../scripts/release-version.js";
 
 test("maps a release tag to the shared version and artifact contract", () => {
@@ -28,6 +32,22 @@ test("isolates rehearsal artifacts from formal release artifacts", () => {
   assert.equal(rehearsal.artifactDirectory, "dist/release/rehearsal-v0.1.0");
   assert.equal(rehearsal.mode, "rehearsal");
   assert.notEqual(rehearsal.artifactDirectory, release.artifactDirectory);
+});
+
+test("reuses an empty artifact directory without overwriting an output", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-release-version-"));
+  context.after(() => rm(root, { force: true, recursive: true }));
+  const directory = path.join(root, "v0.1.0");
+  const apk = path.join(directory, "kepos-android-arm64-v0.1.0.apk");
+
+  await prepareReleaseArtifactDirectory(directory, [apk]);
+  await prepareReleaseArtifactDirectory(directory, [apk]);
+  await writeFile(apk, "signed apk");
+
+  await assert.rejects(
+    prepareReleaseArtifactDirectory(directory, [apk]),
+    /output already exists: kepos-android-arm64-v0\.1\.0\.apk/i,
+  );
 });
 
 test("accepts the Android versionCode ceiling", () => {

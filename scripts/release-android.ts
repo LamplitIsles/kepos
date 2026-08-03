@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { access, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +8,7 @@ import { reportAndroidApkSizes } from "./report-android-size.js";
 import {
   assertReleaseGitState,
   parseReleaseTag,
+  prepareReleaseArtifactDirectory,
   type ReleaseMode,
 } from "./release-version.js";
 
@@ -276,8 +277,10 @@ async function main(): Promise<void> {
     mode,
   });
   await verifyAndroidInputs(plan, keystore);
-  await mkdir(path.dirname(plan.artifactDirectory), { recursive: true });
-  await mkdir(plan.artifactDirectory);
+  await prepareReleaseArtifactDirectory(plan.artifactDirectory, [
+    plan.finalApk,
+    plan.alignedApk,
+  ]);
 
   const report = await executeAndroidRelease(plan, {
     run: (command) => runCommand(repository, command),
