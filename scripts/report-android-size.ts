@@ -21,16 +21,21 @@ export function formatApkSizeComparison(
   ].join("\n");
 }
 
-export async function reportAndroidApkSizes(repository: string): Promise<string> {
+export async function reportAndroidApkSizes(
+  repository: string,
+  releaseApk: string,
+): Promise<string> {
   const outputs = path.join(repository, "android", "app", "build", "outputs", "apk");
   const [debug, release] = await Promise.all([
     stat(path.join(outputs, "debug", "app-debug.apk")),
-    stat(path.join(outputs, "release", "app-release-unsigned.apk")),
+    stat(releaseApk),
   ]);
   return formatApkSizeComparison(debug.size, release.size);
 }
 
 const repository = fileURLToPath(new URL("..", import.meta.url));
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.stdout.write(`${await reportAndroidApkSizes(repository)}\n`);
+  const releaseApk = process.argv[2];
+  if (!releaseApk) throw new Error("signed release APK path is required");
+  process.stdout.write(`${await reportAndroidApkSizes(repository, releaseApk)}\n`);
 }

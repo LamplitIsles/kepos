@@ -71,7 +71,7 @@
     "android:fetch-bare-kit": "tsx scripts/fetch-bare-kit.ts",
     "android:bundle": "npm run build:packages && tsc -p tsconfig.bare.json && tsx scripts/build-android-worklet.ts",
     "android:assemble": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug",
-    "android:release": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug assembleRelease && tsx scripts/report-android-size.ts",
+    "release:android": "tsx scripts/release-android.ts",
     "android:install": "npm run android:assemble && adb install -r android/app/build/outputs/apk/debug/app-debug.apk",
     "android:check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug",
     "android:device-check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDeviceTestAndroidTest",

@@ -18,3 +18,4 @@ lcov.info
 *.local.json
 .build/
 dist/desktop/
+dist/release/
