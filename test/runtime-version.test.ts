@@ -6,26 +6,34 @@ test("package metadata owns the supported runtime and canonical checks", async (
   const packageJson = JSON.parse(
     await readFile("package.json", "utf8"),
   ) as {
+    allowScripts?: unknown;
     devEngines?: unknown;
     devDependencies?: Record<string, string>;
     engines?: unknown;
+    packageManager?: unknown;
     scripts?: Record<string, string>;
   };
   assert.deepEqual(packageJson.engines, {
-    node: ">=22 <23",
-    npm: ">=10 <11",
+    node: ">=24 <25",
+    npm: ">=11 <12",
   });
   assert.deepEqual(packageJson.devEngines, {
     runtime: {
       name: "node",
-      version: ">=22 <23",
+      version: ">=24 <25",
       onFail: "error",
     },
     packageManager: {
       name: "npm",
-      version: ">=10 <11",
+      version: ">=11 <12",
       onFail: "error",
     },
+  });
+  assert.equal(packageJson.packageManager, "npm@11.16.0");
+  assert.equal(await readFile(".node-version", "utf8"), "24.18.1\n");
+  assert.deepEqual(packageJson.allowScripts, {
+    "esbuild@0.28.1": true,
+    "lefthook@2.1.10": true,
   });
   assert.equal(
     packageJson.scripts?.check,

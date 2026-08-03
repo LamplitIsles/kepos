@@ -50,20 +50,20 @@
       "default": "node:url"
     }
   },
-  "packageManager": "npm@10.9.8",
+  "packageManager": "npm@11.16.0",
   "engines": {
-    "node": ">=22 <23",
-    "npm": ">=10 <11"
+    "node": ">=24 <25",
+    "npm": ">=11 <12"
   },
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": ">=22 <23",
+      "version": ">=24 <25",
       "onFail": "error"
     },
     "packageManager": {
       "name": "npm",
-      "version": ">=10 <11",
+      "version": ">=11 <12",
       "onFail": "error"
     }
   },
@@ -120,5 +120,9 @@
     "https-proxy-agent": "^9.1.0",
     "lefthook": "^2.1.10",
     "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "lefthook@2.1.10": true
   }
 }
