@@ -20,11 +20,16 @@ import {
 const repository = process.cwd();
 
 test("desktop build targets an unsigned Apple Silicon Bare app", () => {
+  const tools = {
+    node: "/runtime/bin/node",
+    npm: "/runtime/bin/npm",
+  };
+
   assert.equal(
     desktopAppBundle(repository),
     path.join(repository, "dist", "desktop", "Kepos.app"),
   );
-  assert.deepEqual(desktopBuildCommands(repository), [
+  assert.deepEqual(desktopBuildCommands(repository, tools), [
     {
       command: "tsc",
       arguments: ["-p", "tsconfig.desktop.json"],
@@ -51,6 +56,10 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
         `CMAKE_PREFIX_PATH:PATH=${path.join(repository, "node_modules")}`,
         "--define",
         "FETCHCONTENT_UPDATES_DISCONNECTED:BOOL=ON",
+        "--define",
+        `node:FILEPATH=${tools.node}`,
+        "--define",
+        `npm:FILEPATH=${tools.npm}`,
       ],
     },
     {
@@ -103,6 +112,8 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
         "arm64",
         "--define",
         `CMAKE_PREFIX_PATH:PATH=${path.join(repository, "node_modules")}`,
+        "--define",
+        `npm:FILEPATH=${tools.npm}`,
       ],
     },
     {
