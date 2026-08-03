@@ -8,12 +8,22 @@ export interface DesktopBuildCommand {
   arguments: string[];
 }
 
+export interface DesktopBuildTools {
+  node: string;
+  npm: string;
+}
+
 export function desktopAppBundle(repository: string): string {
   return path.join(repository, "dist", "desktop", "Kepos.app");
 }
 
 export function desktopBuildCommands(
   repository: string,
+  tools: DesktopBuildTools = {
+    node: process.execPath,
+    npm:
+      process.env.npm_execpath ?? path.join(path.dirname(process.execPath), "npm"),
+  },
 ): DesktopBuildCommand[] {
   const app = desktopAppBundle(repository);
   const frameworks = path.join(app, "Contents", "Frameworks");
@@ -39,6 +49,10 @@ export function desktopBuildCommands(
         `CMAKE_PREFIX_PATH:PATH=${path.join(repository, "node_modules")}`,
         "--define",
         "FETCHCONTENT_UPDATES_DISCONNECTED:BOOL=ON",
+        "--define",
+        `node:FILEPATH=${tools.node}`,
+        "--define",
+        `npm:FILEPATH=${tools.npm}`,
       ],
     },
     {
@@ -69,6 +83,8 @@ export function desktopBuildCommands(
         "arm64",
         "--define",
         `CMAKE_PREFIX_PATH:PATH=${path.join(repository, "node_modules")}`,
+        "--define",
+        `npm:FILEPATH=${tools.npm}`,
       ],
     },
     {
