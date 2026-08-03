@@ -150,6 +150,8 @@ export function createAndroidReleasePlan(options: {
           "env:KEPOS_ANDROID_KEY_PASSWORD",
           "--key-pass",
           "env:KEPOS_ANDROID_KEY_PASSWORD",
+          "--v4-signing-enabled",
+          "false",
           "--out",
           finalApk,
           alignedApk,

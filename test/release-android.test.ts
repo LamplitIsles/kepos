@@ -110,6 +110,13 @@ test("builds, aligns, signs, and verifies a versioned APK without exposing the p
     "env:KEPOS_ANDROID_KEY_PASSWORD",
     "--key-pass",
   ]);
+  assert.deepEqual(
+    plan.commands[4].arguments.slice(
+      plan.commands[4].arguments.indexOf("--v4-signing-enabled"),
+      plan.commands[4].arguments.indexOf("--v4-signing-enabled") + 2,
+    ),
+    ["--v4-signing-enabled", "false"],
+  );
   assert.doesNotMatch(JSON.stringify(plan), new RegExp(password));
   assert.equal(
     plan.finalApk,
