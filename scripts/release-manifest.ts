@@ -9,6 +9,7 @@ import {
   assertReleaseGitState,
   parseReleaseTag,
   prepareReleaseArtifactDirectory,
+  releaseSubprocessEnvironment,
   type ReleaseMode,
   type ReleaseVersion,
 } from "./release-version.js";
@@ -199,7 +200,10 @@ function isInside(repository: string, candidate: string): boolean {
 
 async function runCommand(command: ManifestCommand): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command.command, command.arguments, { stdio: "inherit" });
+    const child = spawn(command.command, command.arguments, {
+      env: releaseSubprocessEnvironment(process.env),
+      stdio: "inherit",
+    });
     child.once("error", reject);
     child.once("exit", (code, signal) => {
       if (code === 0) return resolve();
@@ -221,7 +225,11 @@ async function main(): Promise<void> {
   }
   const secretMetadata = await stat(secretKey);
   if (!secretMetadata.isFile()) throw new Error("minisign secret key is not a file");
-  const minisignVersion = spawnSync("minisign", ["-v"], { encoding: "utf8" });
+  const subprocessEnvironment = releaseSubprocessEnvironment(process.env);
+  const minisignVersion = spawnSync("minisign", ["-v"], {
+    encoding: "utf8",
+    env: subprocessEnvironment,
+  });
   if (minisignVersion.status !== 0) {
     throw new Error("minisign is required on the release Mac");
   }
@@ -229,7 +237,11 @@ async function main(): Promise<void> {
     tag,
     mode,
     runGit: async (arguments_) => {
-      const result = spawnSync("git", arguments_, { cwd: repository, encoding: "utf8" });
+      const result = spawnSync("git", arguments_, {
+        cwd: repository,
+        encoding: "utf8",
+        env: subprocessEnvironment,
+      });
       if (result.status !== 0) throw new Error(result.stderr || "git failed");
       return result.stdout;
     },

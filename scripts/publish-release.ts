@@ -9,6 +9,7 @@ import {
 } from "./release-manifest.js";
 import {
   assertReleaseGitState,
+  releaseSubprocessEnvironment,
   type ReleaseMode,
 } from "./release-version.js";
 
@@ -141,6 +142,7 @@ async function runCommand(
   return new Promise<PublishCommandResult>((resolve, reject) => {
     const child = spawn(command.command, command.arguments, {
       cwd: repository,
+      env: releaseSubprocessEnvironment(process.env),
       stdio: ["inherit", "pipe", "pipe"],
     });
     let stdout = "";

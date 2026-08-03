@@ -19,6 +19,25 @@ export type GitRunner = (arguments_: string[]) => Promise<string>;
 
 const releaseTagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const maxAndroidVersionCode = 2_100_000_000n;
+const releaseSecretVariables = [
+  "KEPOS_ANDROID_KEYSTORE",
+  "KEPOS_ANDROID_KEY_ALIAS",
+  "KEPOS_ANDROID_KEY_PASSWORD",
+  "KEPOS_MINISIGN_SECRET_KEY",
+] as const;
+
+type ReleaseSecretVariable = (typeof releaseSecretVariables)[number];
+
+export function releaseSubprocessEnvironment(
+  baseEnvironment: NodeJS.ProcessEnv,
+  allowedVariables: readonly ReleaseSecretVariable[] = [],
+): NodeJS.ProcessEnv {
+  const environment = { ...baseEnvironment };
+  for (const variable of releaseSecretVariables) {
+    if (!allowedVariables.includes(variable)) delete environment[variable];
+  }
+  return environment;
+}
 
 export async function prepareReleaseArtifactDirectory(
   directory: string,

@@ -22,6 +22,7 @@ test("exposes the Android key password only to the signing process", () => {
     KEPOS_ANDROID_KEYSTORE: keystore,
     KEPOS_ANDROID_KEY_ALIAS: "kepos-release",
     KEPOS_ANDROID_KEY_PASSWORD: password,
+    KEPOS_MINISIGN_SECRET_KEY: "/tmp/kepos-secrets/minisign.key",
   };
 
   assert.equal(
@@ -42,6 +43,10 @@ test("exposes the Android key password only to the signing process", () => {
   );
   assert.equal(
     androidReleaseEnvironment("sign", environment).KEPOS_ANDROID_KEY_ALIAS,
+    undefined,
+  );
+  assert.equal(
+    androidReleaseEnvironment("sign", environment).KEPOS_MINISIGN_SECRET_KEY,
     undefined,
   );
 });
