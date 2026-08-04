@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { findActiveSectionId } from "../src/navigation";
+import { createNavigationRootMargin, findActiveSectionId } from "../src/navigation";
 
 describe("section navigation", () => {
+  it("aligns the observer boundary with the live header height", () => {
+    expect(createNavigationRootMargin(80)).toBe("-80px 0px -75%");
+    expect(createNavigationRootMargin(70)).toBe("-70px 0px -75%");
+  });
+
   it("keeps an upward scroll target active when it aligns below the header", () => {
     const sections = [
       { id: "top", top: -2_900 },

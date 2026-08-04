@@ -17,7 +17,7 @@ import {
   Waypoints,
 } from "lucide";
 
-import { findActiveSectionId } from "./navigation";
+import { createNavigationRootMargin, findActiveSectionId } from "./navigation";
 
 createIcons({
   icons: {
@@ -64,10 +64,19 @@ if ("IntersectionObserver" in window && sectionLinks.length > 0 && pageSections.
     }
   };
 
-  const observer = new IntersectionObserver(updateCurrentSection, {
-    rootMargin: "-72px 0px -75%",
-    threshold: 0,
-  });
+  let observer: IntersectionObserver | undefined;
 
-  for (const section of pageSections) observer.observe(section);
+  const observeSections = () => {
+    observer?.disconnect();
+    observer = new IntersectionObserver(updateCurrentSection, {
+      rootMargin: createNavigationRootMargin(siteHeader?.offsetHeight ?? 80),
+      threshold: 0,
+    });
+
+    for (const section of pageSections) observer.observe(section);
+    updateCurrentSection();
+  };
+
+  observeSections();
+  window.addEventListener("resize", observeSections);
 }

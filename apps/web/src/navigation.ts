@@ -3,6 +3,10 @@ export interface SectionPosition {
   top: number;
 }
 
+export function createNavigationRootMargin(headerHeight: number): string {
+  return `-${headerHeight}px 0px -75%`;
+}
+
 export function findActiveSectionId(sections: SectionPosition[], activationLine: number): string | undefined {
   let activeSectionId: string | undefined;
 
