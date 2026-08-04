@@ -343,26 +343,10 @@ svg.lucide {
   box-shadow: 0 0 14px currentColor;
 }
 
-.proof-service {
-  display: flex;
-  padding: clamp(34px, 5vw, 62px) 28px 18px;
-  align-items: center;
-  gap: 12px;
-  color: var(--pear-muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-}
-
-.proof-service svg {
-  color: var(--pear-green);
-  font-size: 22px;
-}
-
 .hero-proof code {
   display: block;
   overflow: hidden;
-  padding: 0 28px 44px;
+  padding: clamp(62px, 7vw, 94px) 28px;
   font-family: var(--mono);
   font-size: clamp(17px, 2vw, 25px);
   line-height: 1.45;
@@ -413,32 +397,8 @@ svg.lucide {
 }
 
 .hero-lower {
-  display: grid;
   padding-top: 14px;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.6fr);
-  align-items: end;
-  gap: clamp(30px, 5vw, 74px);
-}
-
-.hero-manifesto {
-  margin-bottom: 0;
-  color: var(--pear-muted);
-  font-family: var(--display);
-  font-size: clamp(22px, 2.15vw, 31px);
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-
-.hero-manifesto span,
-.hero-manifesto strong {
-  display: block;
-}
-
-.hero-manifesto strong {
-  color: var(--pear-cream);
-  font-style: italic;
-  font-weight: 400;
 }
 
 .boundary-list {
@@ -680,25 +640,6 @@ svg.lucide {
   height: auto;
 }
 
-.topology-figure figcaption,
-.tunnel-diagram figcaption {
-  display: flex;
-  min-height: 58px;
-  padding: 14px 18px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  border-top: 1px solid var(--pear-line);
-  color: var(--pear-muted);
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.09em;
-}
-
-.topology-figure figcaption span {
-  color: var(--pear-green);
-}
-
 .map-bg {
   fill: transparent;
 }
@@ -773,9 +714,7 @@ svg.lucide {
 }
 
 .principle-grid article > span,
-.process-grid article > span,
-.repository-card > span,
-.quickstart-card > span {
+.process-grid article > span {
   color: var(--pear-muted);
   font-family: var(--mono);
   font-size: 11px;
@@ -833,10 +772,6 @@ svg.lucide {
 .tunnel-diagram {
   margin-bottom: 54px;
   padding-top: clamp(8px, 2vw, 24px);
-}
-
-.tunnel-diagram figcaption {
-  margin-top: 0;
 }
 
 .mountain-shape {
@@ -946,32 +881,18 @@ svg.lucide {
   line-height: 1.65;
 }
 
-.primitive-rail p strong {
-  color: var(--pear-green-soft);
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
 .lineage-note {
-  display: grid;
+  display: flex;
   padding-top: 28px;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
-  gap: 40px;
+  justify-content: flex-end;
   color: var(--pear-muted);
 }
 
-.lineage-note p,
 .lineage-note small {
+  max-width: 58ch;
   margin: 0;
   font-size: 13px;
   line-height: 1.65;
-}
-
-.lineage-note p {
-  color: var(--pear-cream);
 }
 
 .source-grid {
@@ -1002,7 +923,6 @@ svg.lucide {
   color: var(--pear-black);
 }
 
-.repository-card:hover > span,
 .repository-card:hover > small,
 .repository-card:hover > svg {
   color: var(--pear-black);
@@ -1046,14 +966,6 @@ svg.lucide {
     repeating-linear-gradient(135deg, transparent 0 12px, rgba(183, 238, 69, 0.025) 12px 13px), var(--pear-panel);
 }
 
-.quickstart-card > p {
-  align-self: end;
-  max-width: 46ch;
-  margin: 18px 0 0;
-  color: var(--pear-muted);
-  font-size: 16px;
-}
-
 .release-links {
   display: flex;
   align-self: end;
@@ -1074,7 +986,7 @@ svg.lucide {
   display: flex;
   min-height: 150px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   border-top: 1px solid var(--pear-line);
   color: var(--pear-muted);
   font-family: var(--mono);
@@ -1166,10 +1078,6 @@ svg.lucide {
 
   .hero-proof {
     max-width: 720px;
-  }
-
-  .hero-lower {
-    grid-template-columns: 1fr;
   }
 
   .chapter-lead,
@@ -1296,12 +1204,8 @@ svg.lucide {
     font-size: 9px;
   }
 
-  .proof-service {
-    padding: 28px 18px 14px;
-  }
-
   .hero-proof code {
-    padding: 0 18px 30px;
+    padding: 48px 18px;
     font-size: clamp(15px, 4.2vw, 19px);
   }
 
@@ -1312,10 +1216,6 @@ svg.lucide {
 
   .hero-lower {
     padding-top: 18px;
-  }
-
-  .hero-manifesto {
-    font-size: 25px;
   }
 
   .boundary-list {
@@ -1394,13 +1294,6 @@ svg.lucide {
     padding: 4px;
   }
 
-  .topology-figure figcaption,
-  .tunnel-diagram figcaption {
-    align-items: flex-start;
-    flex-direction: column;
-    font-size: 9px;
-  }
-
   .principle-grid article,
   .process-grid article,
   .primitive-rail article {
@@ -1429,11 +1322,6 @@ svg.lucide {
 
   .primitive-rail h3 {
     font-size: 48px;
-  }
-
-  .lineage-note {
-    grid-template-columns: 1fr;
-    gap: 12px;
   }
 
   .tunnel-diagram {

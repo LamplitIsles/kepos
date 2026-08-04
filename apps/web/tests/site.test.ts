@@ -55,6 +55,15 @@ describe("Kepos landing page", () => {
     for (const reference of labelReferences) expect(ids).toContain(reference);
   });
 
+  it("keeps the hero focused on one product position", () => {
+    const html = readProjectFile("index.html");
+
+    expect(html).not.toBeNull();
+    if (!html) return;
+
+    expect(html).not.toContain('class="hero-manifesto"');
+  });
+
   it("protects external links opened in new tabs", () => {
     const html = readProjectFile("index.html");
 
