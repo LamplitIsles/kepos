@@ -57,6 +57,23 @@ The CLI is also available directly:
 nix run github:LamplitIsles/kepos -- --help
 ```
 
+The Home Manager module remains publisher-only. A host that owns both role
+states can instead supervise one foreground device process:
+
+```sh
+kepos device run \
+  --publisher-state /var/lib/kepos/publisher \
+  --subscriber-state /var/lib/kepos/subscriber \
+  --subscriber-service ssh:2222 \
+  --config /etc/kepos/config.toml
+```
+
+This uses one device-owned HyperDHT node while retaining the two identities and
+state locks. Kepos does not install the systemd unit or choose host paths; the
+host configuration still owns setup, restart policy, firewall rules, and
+deployment timing. Keep the standalone role commands when the roles need
+different transport policy or failure boundaries.
+
 ## Container image
 
 Build and load the non-root image for the current supported Linux system

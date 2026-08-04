@@ -2,6 +2,11 @@ import type { HomeRegistry } from "../../../src/home/registry.js";
 import { renderSVG } from "uqr";
 import { derivePublisherHomeKey } from "../../../src/keys.js";
 import {
+  createDht,
+  type DhtAddress,
+  type DhtNode,
+} from "../../../src/mux/hyperdht.js";
+import {
   HomeRegistryTimeoutError,
   readHomeRegistry,
 } from "../../../src/runtime/registry-client.js";
@@ -36,7 +41,6 @@ export interface StartDesktopPublisherOptions {
   stateDir: string;
   configPath?: string;
   lock?: RuntimeLock;
-  bootstrap?: StartPublisherOptions["bootstrap"];
   policy?: PublisherRuntimePolicy;
 }
 
@@ -47,22 +51,24 @@ export interface StartDesktopSubscriberOptions {
   gatewayDomain?: StartSubscriberOptions["gatewayDomain"];
   services: StartSubscriberOptions["services"];
   lock?: RuntimeLock;
-  bootstrap?: StartSubscriberOptions["bootstrap"];
   route?: StartSubscriberOptions["route"];
 }
 
 export interface StartDesktopRuntimeOptions {
+  bootstrap?: DhtAddress[];
   publisher?: StartDesktopPublisherOptions;
   subscriber?: StartDesktopSubscriberOptions;
   onSnapshot(snapshot: DesktopSnapshot): void;
 }
 
 export interface DesktopRuntimeConfiguration {
+  bootstrap?: DhtAddress[];
   publisher?: StartDesktopPublisherOptions;
   subscriber?: StartDesktopSubscriberOptions;
 }
 
 export interface DesktopRuntimeDependencies {
+  createDht: typeof createDht;
   acquirePublisherLock(stateDir: string): Promise<RuntimeLock>;
   acquireSubscriberLock(stateDir: string): Promise<RuntimeLock>;
   loadPublisherState: typeof loadPublisherState;
@@ -90,6 +96,7 @@ type RoleStartResult =
   | { ok: false; error: unknown };
 
 const defaultDependencies: DesktopRuntimeDependencies = {
+  createDht,
   acquirePublisherLock: acquirePublisherRuntimeLock,
   acquireSubscriberLock: acquireSubscriberRuntimeLock,
   loadPublisherState,
@@ -118,6 +125,8 @@ export async function startDesktopRuntime(
 
   let publisherOptions = options.publisher;
   let subscriberOptions = options.subscriber;
+  let bootstrap = options.bootstrap;
+  let dht: DhtNode | undefined;
   let appPhase: DesktopSnapshot["appPhase"] = "starting";
   let publisherRole = publisherOptions ? initialPublisherRole() : undefined;
   let subscriberRole = subscriberOptions ? initialSubscriberRole() : undefined;
@@ -190,7 +199,7 @@ export async function startDesktopRuntime(
       };
       runningPublisher = await dependencies.startPublisher({
         stateDir: publisherOptions.stateDir,
-        bootstrap: publisherOptions.bootstrap,
+        dht: requireDht(dht),
         ...(publisherOptions.policy ? { policy } : {}),
         ...(configPath
           ? {
@@ -229,7 +238,7 @@ export async function startDesktopRuntime(
         gatewayHost: subscriberOptions.gatewayHost,
         gatewayDomain: subscriberOptions.gatewayDomain,
         services: subscriberOptions.services,
-        bootstrap: subscriberOptions.bootstrap,
+        dht: requireDht(dht),
         route: subscriberOptions.route,
         waitForPublisher: false,
       });
@@ -433,15 +442,54 @@ export async function startDesktopRuntime(
     return failure;
   }
 
+  async function cleanupDht(): Promise<unknown> {
+    const current = dht;
+    dht = undefined;
+    try {
+      await current?.destroy({ force: true });
+      return undefined;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  function markTransportFailure(
+    configuration: DesktopRuntimeConfiguration,
+    error: unknown,
+  ): void {
+    const message = errorMessage(error);
+    publisherRole = configuration.publisher
+      ? {
+          ...(publisherRole ?? initialPublisherRole()),
+          phase: "failed",
+          activeSubscribers: 0,
+          acceptedConnections: 0,
+          error: message,
+        }
+      : undefined;
+    subscriberRole = configuration.subscriber
+      ? {
+          ...(subscriberRole ?? initialSubscriberRole()),
+          phase: "failed",
+          connection: "stopped",
+          error: message,
+        }
+      : undefined;
+  }
+
   async function applyConfiguration(
     configuration: DesktopRuntimeConfiguration,
   ): Promise<void> {
     if (stopped) throw new Error("desktop runtime is stopped");
-    const publisherChanged = !sameRoleConfiguration(
+    const transportChanged = !sameTransportConfiguration(
+      bootstrap,
+      configuration.bootstrap,
+    );
+    const publisherChanged = transportChanged || !sameRoleConfiguration(
       publisherOptions,
       configuration.publisher,
     );
-    const subscriberChanged = !sameRoleConfiguration(
+    const subscriberChanged = transportChanged || !sameRoleConfiguration(
       subscriberOptions,
       configuration.subscriber,
     );
@@ -485,6 +533,25 @@ export async function startDesktopRuntime(
       throw failure;
     }
 
+    if (transportChanged) {
+      const dhtFailure = await cleanupDht();
+      if (dhtFailure !== undefined) {
+        markTransportFailure(configuration, dhtFailure);
+        publish();
+        throw dhtFailure;
+      }
+      try {
+        dht = dependencies.createDht({
+          bootstrap: configuration.bootstrap,
+        });
+        bootstrap = configuration.bootstrap;
+      } catch (error) {
+        markTransportFailure(configuration, error);
+        publish();
+        throw error;
+      }
+    }
+
     if (publisherChanged) {
       publisherOptions = configuration.publisher;
       publisherLock = configuration.publisher?.lock;
@@ -519,12 +586,30 @@ export async function startDesktopRuntime(
   }
 
   try {
+    dht = dependencies.createDht({ bootstrap });
+  } catch (error) {
+    appPhase = "running";
+    markTransportFailure(
+      { bootstrap, publisher: publisherOptions, subscriber: subscriberOptions },
+      error,
+    );
+    try {
+      publish();
+    } catch {
+      // Preserve the transport failure after attempting the visible snapshot.
+    }
+    await cleanupRoles();
+    throw error;
+  }
+
+  try {
     publish();
     await Promise.allSettled([startPublisherRole(), startSubscriberRole()]);
     appPhase = "running";
     publish();
   } catch (error) {
     await cleanupRoles();
+    await cleanupDht();
     throw error;
   }
 
@@ -618,6 +703,8 @@ export async function startDesktopRuntime(
         }
         const cleanupFailure = await cleanupRoles();
         failure ??= cleanupFailure;
+        const dhtFailure = await cleanupDht();
+        failure ??= dhtFailure;
         appPhase = "stopped";
         if (publisherRole) publisherRole = { ...publisherRole, phase: "stopped" };
         if (subscriberRole) {
@@ -651,6 +738,18 @@ function sameRoleConfiguration(
   const { lock: _leftLock, ...leftConfiguration } = left;
   const { lock: _rightLock, ...rightConfiguration } = right;
   return JSON.stringify(leftConfiguration) === JSON.stringify(rightConfiguration);
+}
+
+function sameTransportConfiguration(
+  left: DhtAddress[] | undefined,
+  right: DhtAddress[] | undefined,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function requireDht(dht: DhtNode | undefined): DhtNode {
+  if (!dht) throw new Error("desktop HyperDHT node is unavailable");
+  return dht;
 }
 
 function initialPublisherRole(): DesktopPublisherRole {

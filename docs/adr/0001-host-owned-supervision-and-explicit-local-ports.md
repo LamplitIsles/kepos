@@ -28,7 +28,15 @@ Kepos provides the stable CLI contracts:
 ```sh
 npm run kepos -- publisher run --state <publisher-state>
 npm run kepos -- subscriber run --state <subscriber-state> --service ssh:<local-port>
+npm run kepos -- device run \
+  --publisher-state <publisher-state> \
+  --subscriber-state <subscriber-state> \
+  --subscriber-service ssh:<local-port>
 ```
+
+The device command is the preferred dual-role host shape. It shares one
+HyperDHT transport while keeping role state, identity, and locking separate.
+The standalone commands remain stable isolation and rollback boundaries.
 
 The WSL or server configuration owns its systemd unit, paths, state setup, and
 deployment. A future desktop application owns its own foreground and
@@ -47,6 +55,8 @@ services and must not guess a subscriber-local port.
 ## Consequences
 
 - WSL and other headless hosts maintain their own service-manager config.
+- A dual-role host may supervise one device process instead of two role
+  processes.
 - Kepos state setup remains separate from process supervision.
 - SSH remains predictable and scriptable through an explicit port.
 - Publisher Home can show that SSH is available, but cannot provide its local

@@ -15,7 +15,6 @@ export interface DesktopSubscriberOptions {
   gatewayPort: number;
   gatewayHost?: string;
   gatewayDomain?: string;
-  bootstrap?: DhtAddress[];
   route?: Route;
   services: SubscriberService[];
 }
@@ -23,11 +22,11 @@ export interface DesktopSubscriberOptions {
 export interface DesktopPublisherOptions {
   stateDir: string;
   configPath?: string;
-  bootstrap?: DhtAddress[];
   policy?: PublisherRuntimePolicy;
 }
 
 export interface DesktopOptions {
+  bootstrap?: DhtAddress[];
   subscriber?: DesktopSubscriberOptions;
   publisher?: DesktopPublisherOptions;
 }
@@ -150,12 +149,12 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
   const publisherConfig = context.config?.publisher;
   const subscriberConfig = context.config?.subscriber;
   const options: DesktopOptions = {
+    ...(bootstrap ? { bootstrap } : {}),
     ...(publisherConfig?.enabled === true
       ? {
           publisher: {
             stateDir: path.join(stateRoot, "publisher"),
             ...(context.configPath ? { configPath: context.configPath } : {}),
-            ...(bootstrap ? { bootstrap } : {}),
             policy: {
               displayName: publisherConfig.displayName,
               allow: publisherConfig.allow,
@@ -175,7 +174,6 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
             ...(subscriberConfig.gatewayDomain
               ? { gatewayDomain: subscriberConfig.gatewayDomain }
               : {}),
-            ...(bootstrap ? { bootstrap } : {}),
             ...(subscriberConfig.route
               ? { route: subscriberConfig.route }
               : {}),

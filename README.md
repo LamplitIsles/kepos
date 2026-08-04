@@ -54,7 +54,7 @@ The implementation follows four rules:
 
 | Surface | Roles | Current boundary |
 | --- | --- | --- |
-| Headless CLI | Publisher and subscriber | Node.js 24; persistent local HTTP gateway and raw TCP listeners |
+| Headless CLI | Publisher and subscriber | Node.js 24; one shared device process or standalone role processes; persistent local HTTP gateway and raw TCP listeners |
 | Nix / Home Manager | Publisher and CLI | Declarative public policy; private keys never enter the Nix store |
 | Container | Publisher and subscriber | Non-root `linux/amd64` image published to GHCR from `main` |
 | Kubernetes path | Subscriber gateway | Pod-facing hostname routing exists; reusable manifests are not yet shipped here |
@@ -104,6 +104,8 @@ VPN interface.
 
 - **HyperDHT + UDX** provide authenticated peer connections, NAT traversal,
   path migration, reliable ordered streams, and transport counters over UDP.
+- A dual-role device shares one HyperDHT node and UDP transport while listen and
+  connect operations keep separate publisher and subscriber key pairs.
 - **Protomux** carries the registry, heartbeat control, pairing, and independent
   service channels on one persistent outer connection.
 - The tunnel is a **split TCP byte-stream proxy over UDX**. Local TCP ends at

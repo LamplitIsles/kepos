@@ -19,12 +19,14 @@ interface Calls {
   setSubscriberPublisher: unknown[];
   setPublisherAllowlist: unknown[];
   setPublisherServices: unknown[];
+  startDevice: unknown[];
   startPublisher: unknown[];
   startSubscriber: unknown[];
   publisherLocks: string[];
   subscriberLocks: string[];
   stopped: string[];
   configPaths: Array<string | undefined>;
+  runtime: string[];
 }
 
 function fakeCli(): {
@@ -39,12 +41,14 @@ function fakeCli(): {
     setSubscriberPublisher: [],
     setPublisherAllowlist: [],
     setPublisherServices: [],
+    startDevice: [],
     startPublisher: [],
     startSubscriber: [],
     publisherLocks: [],
     subscriberLocks: [],
     stopped: [],
     configPaths: [],
+    runtime: [],
   };
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -143,19 +147,41 @@ function fakeCli(): {
         },
       };
     },
+    startDevice: async (options) => {
+      calls.startDevice.push(options);
+      calls.runtime.push("device.start");
+      const publisher = options.publisher
+        ? await dependencies.startPublisher(options.publisher)
+        : undefined;
+      const subscriber = options.subscriber
+        ? await dependencies.startSubscriber(options.subscriber)
+        : undefined;
+      return {
+        publisher,
+        subscriber,
+        stop: async () => {
+          calls.runtime.push("device.stop");
+          calls.stopped.push("device");
+        },
+      };
+    },
     acquireSubscriberRuntimeLock: async (stateDir) => {
       calls.subscriberLocks.push(`acquire:${stateDir}`);
+      calls.runtime.push(`subscriber.acquire:${stateDir}`);
       return {
         release: async () => {
           calls.subscriberLocks.push(`release:${stateDir}`);
+          calls.runtime.push(`subscriber.release:${stateDir}`);
         },
       };
     },
     acquirePublisherRuntimeLock: async (stateDir) => {
       calls.publisherLocks.push(`acquire:${stateDir}`);
+      calls.runtime.push(`publisher.acquire:${stateDir}`);
       return {
         release: async () => {
           calls.publisherLocks.push(`release:${stateDir}`);
+          calls.runtime.push(`publisher.release:${stateDir}`);
         },
       };
     },
@@ -165,6 +191,232 @@ function fakeCli(): {
   };
   return { calls, dependencies, stderr, stdout };
 }
+
+test("device run selects explicit roles and owns their shared lifecycle", async () => {
+  const cli = fakeCli();
+  cli.dependencies.loadConfig = async (configPath) => {
+    cli.calls.configPaths.push(configPath);
+    return {
+      network: {
+        bootstrap: [{ host: "config.example", port: 49_737 }],
+      },
+      publisher: {
+        enabled: true,
+        displayName: "neilmac",
+        allow: ["33".repeat(32)],
+        services: [],
+      },
+      subscriber: {
+        enabled: true,
+        gatewayPort: 17_480,
+        gatewayHost: "0.0.0.0",
+        gatewayDomain: "kepos.internal",
+        route: "auto" as const,
+        services: [{ id: "ignored", localPort: 9_999 }],
+      },
+    };
+  };
+
+  await runCli(
+    [
+      "device",
+      "run",
+      "--publisher-state",
+      "./publisher",
+      "--subscriber-state",
+      "./subscriber",
+      "--config",
+      "./kepos.toml",
+      "--bootstrap",
+      "cli.example:49738",
+      "--subscriber-service",
+      "ssh:2222",
+      "--gateway-port",
+      "18080",
+      "--route",
+      "public",
+    ],
+    cli.dependencies,
+  );
+
+  assert.equal(cli.calls.startDevice.length, 1);
+  const [options] = cli.calls.startDevice as Array<{
+    bootstrap: Array<{ host: string; port: number }>;
+    publisher?: { stateDir: string; policy?: unknown };
+    subscriber?: {
+      stateDir: string;
+      gatewayPort?: number;
+      gatewayHost?: string;
+      gatewayDomain?: string;
+      route?: string;
+      services: Array<{ id: string; localPort: number }>;
+      waitForPublisher?: boolean;
+    };
+  }>;
+  assert.deepEqual(options.bootstrap, [
+    { host: "cli.example", port: 49_738 },
+  ]);
+  assert.equal(options.publisher?.stateDir, path.resolve("./publisher"));
+  assert.deepEqual(options.publisher?.policy, {
+    enabled: true,
+    displayName: "neilmac",
+    allow: ["33".repeat(32)],
+    services: [],
+  });
+  assert.deepEqual(
+    {
+      ...options.subscriber,
+      observe: undefined,
+    },
+    {
+      stateDir: path.resolve("./subscriber"),
+      gatewayPort: 18_080,
+      gatewayHost: "0.0.0.0",
+      gatewayDomain: "kepos.internal",
+      route: "public",
+      services: [{ id: "ssh", localPort: 2_222 }],
+      waitForPublisher: false,
+      observe: undefined,
+    },
+  );
+  assert.deepEqual(cli.calls.runtime, [
+    `publisher.acquire:${path.resolve("./publisher")}`,
+    `subscriber.acquire:${path.resolve("./subscriber")}`,
+    "device.start",
+    "device.stop",
+    `subscriber.release:${path.resolve("./subscriber")}`,
+    `publisher.release:${path.resolve("./publisher")}`,
+  ]);
+  assert.deepEqual(cli.calls.stopped, ["device"]);
+  assert.match(cli.stdout.join("\n"), /Publisher running:/);
+  assert.match(cli.stdout.join("\n"), /Subscriber running:/);
+  assert.match(cli.stdout.join("\n"), /Local service: ssh=127\.0\.0\.1:2222/);
+});
+
+test("device run does not add roles from enabled config", async () => {
+  const cli = fakeCli();
+  cli.dependencies.loadConfig = async () => ({
+    publisher: {
+      enabled: true,
+      displayName: "neilmac",
+      allow: [],
+      services: [],
+    },
+    subscriber: {
+      enabled: true,
+      services: [],
+    },
+  });
+
+  await runCli(
+    ["device", "run", "--publisher-state", "./publisher"],
+    cli.dependencies,
+  );
+
+  const [options] = cli.calls.startDevice as Array<{
+    publisher?: unknown;
+    subscriber?: unknown;
+  }>;
+  assert.ok(options.publisher);
+  assert.equal(options.subscriber, undefined);
+  assert.deepEqual(cli.calls.subscriberLocks, []);
+});
+
+test("device run rolls back the publisher lock when subscriber lock fails", async () => {
+  const cli = fakeCli();
+  cli.dependencies.acquireSubscriberRuntimeLock = async (stateDir) => {
+    cli.calls.subscriberLocks.push(`acquire:${stateDir}`);
+    cli.calls.runtime.push(`subscriber.acquire:${stateDir}`);
+    throw new Error("subscriber already running");
+  };
+
+  await assert.rejects(
+    runCli(
+      [
+        "device",
+        "run",
+        "--publisher-state",
+        "./publisher",
+        "--subscriber-state",
+        "./subscriber",
+      ],
+      cli.dependencies,
+    ),
+    /subscriber already running/,
+  );
+  assert.deepEqual(cli.calls.runtime, [
+    `publisher.acquire:${path.resolve("./publisher")}`,
+    `subscriber.acquire:${path.resolve("./subscriber")}`,
+    `publisher.release:${path.resolve("./publisher")}`,
+  ]);
+  assert.deepEqual(cli.calls.startDevice, []);
+});
+
+test("device run releases both locks when shared startup fails", async () => {
+  const cli = fakeCli();
+  cli.dependencies.startDevice = async () => {
+    cli.calls.runtime.push("device.start");
+    throw new Error("device startup failed");
+  };
+
+  await assert.rejects(
+    runCli(
+      [
+        "device",
+        "run",
+        "--publisher-state",
+        "./publisher",
+        "--subscriber-state",
+        "./subscriber",
+      ],
+      cli.dependencies,
+    ),
+    /device startup failed/,
+  );
+  assert.deepEqual(cli.calls.runtime, [
+    `publisher.acquire:${path.resolve("./publisher")}`,
+    `subscriber.acquire:${path.resolve("./subscriber")}`,
+    "device.start",
+    `subscriber.release:${path.resolve("./subscriber")}`,
+    `publisher.release:${path.resolve("./publisher")}`,
+  ]);
+});
+
+test("device run requires an explicit role state", async () => {
+  const cli = fakeCli();
+
+  await assert.rejects(
+    runCli(["device", "run"], cli.dependencies),
+    /device run requires --publisher-state or --subscriber-state/,
+  );
+  assert.deepEqual(cli.calls.startDevice, []);
+});
+
+test("device run rejects subscriber overrides without subscriber state", async () => {
+  for (const override of [
+    ["--subscriber-service", "ssh:2222"],
+    ["--gateway-port", "18080"],
+    ["--gateway-host", "0.0.0.0"],
+    ["--gateway-domain", "kepos.internal"],
+    ["--route", "public"],
+  ]) {
+    const cli = fakeCli();
+    await assert.rejects(
+      runCli(
+        [
+          "device",
+          "run",
+          "--publisher-state",
+          "./publisher",
+          ...override,
+        ],
+        cli.dependencies,
+      ),
+      /subscriber options require --subscriber-state/,
+    );
+    assert.deepEqual(cli.calls.startDevice, []);
+  }
+});
 
 test("setup publisher parses deny-all state and service targets", async () => {
   const cli = fakeCli();

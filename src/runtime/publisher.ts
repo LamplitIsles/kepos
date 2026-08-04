@@ -7,6 +7,7 @@ import {
   dhtStreamSnapshot,
   keyPairFromSeed,
   type DhtAddress,
+  type DhtNode,
   type DhtStream,
 } from "../mux/hyperdht.js";
 import {
@@ -48,6 +49,7 @@ export interface PublisherRuntimePolicy {
 export interface StartPublisherOptions {
   stateDir: string;
   bootstrap?: DhtAddress[];
+  dht?: DhtNode;
   policy?: PublisherRuntimePolicy;
   log?: (line: string) => void;
   now?: () => number;
@@ -83,6 +85,9 @@ export interface RunningPublisher {
 export async function startPublisher(
   options: StartPublisherOptions,
 ): Promise<RunningPublisher> {
+  if (options.dht && options.bootstrap) {
+    throw new Error("publisher dht and bootstrap are mutually exclusive");
+  }
   const { config, manifest } = await loadPublisherState(options.stateDir);
   const policy = options.policy ?? {
     displayName: manifest.displayName,
@@ -144,7 +149,9 @@ export async function startPublisher(
       await persistAllowlist([...allow, subscriberKey]);
     },
   });
-  const dht = createDht({ bootstrap: options.bootstrap, keyPair });
+  const ownsDht = options.dht === undefined;
+  const dht =
+    options.dht ?? createDht({ bootstrap: options.bootstrap, keyPair });
   const now = options.now ?? Date.now;
   const observePairing = createObservationEmitter({
     observe: options.observe,
@@ -370,7 +377,11 @@ export async function startPublisher(
   try {
     await server.listen(keyPair);
   } catch (error) {
-    await Promise.allSettled([home.close(), dht.destroy({ force: true })]);
+    await Promise.allSettled([
+      server.close(),
+      home.close(),
+      ...(ownsDht ? [dht.destroy({ force: true })] : []),
+    ]);
     throw error;
   }
 
@@ -451,7 +462,7 @@ export async function startPublisher(
         ...[...subscriberHomes.values()].map(async (starting) =>
           (await starting).close(),
         ),
-        dht.destroy({ force: true }),
+        ...(ownsDht ? [dht.destroy({ force: true })] : []),
       ]);
     },
   };
