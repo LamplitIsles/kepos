@@ -9,6 +9,10 @@
 ## Content and tests
 
 - Treat website copy as data, not code.
+- Every visible line must add information that is not already clear from its heading, screenshot, control, or nearby copy.
+- Let product screenshots speak for themselves. Do not label visible platform or device types, and do not repeat service counts, connection state, or other facts already shown inside the screenshot.
+- Before keeping microcopy, ask what choice or action it helps the reader make. If it enables neither, remove it and keep the space.
+- Keep useful accessible names and image alt text even when the same detail would be redundant as visible copy.
 - Do not test exact wording, punctuation, capitalization, or editorial order.
 - Do not add a test merely because a static section or sentence was added.
 - Test behavior and stable contracts: working anchors, redirects, navigation state, accessibility semantics, critical URLs, build output, and deployment config.

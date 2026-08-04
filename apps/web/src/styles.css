@@ -230,6 +230,70 @@ svg.lucide {
   line-height: 1.55;
 }
 
+.hero-downloads {
+  display: grid;
+  max-width: 650px;
+  margin-top: 34px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.download-cta {
+  display: grid;
+  min-height: 84px;
+  padding: 15px 16px;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 13px;
+  border: 1px solid var(--pear-line);
+  background: rgba(23, 32, 16, 0.74);
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.download-cta:hover {
+  border-color: var(--pear-green);
+  background: var(--pear-panel-high);
+  color: var(--pear-green-soft);
+  transform: translateY(-2px);
+}
+
+.download-cta-primary {
+  border-color: var(--pear-green);
+  background: var(--pear-green);
+  color: var(--pear-black);
+}
+
+.download-cta-primary:hover {
+  background: var(--pear-green-soft);
+  color: var(--pear-black);
+}
+
+.download-cta > svg {
+  font-size: 22px;
+}
+
+.download-cta span,
+.download-cta strong {
+  display: block;
+}
+
+.download-cta strong {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.07em;
+  line-height: 1.3;
+}
+
+.download-cta b {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 400;
+}
+
 .hero-proof {
   position: relative;
   overflow: hidden;
@@ -279,26 +343,10 @@ svg.lucide {
   box-shadow: 0 0 14px currentColor;
 }
 
-.proof-service {
-  display: flex;
-  padding: clamp(34px, 5vw, 62px) 28px 18px;
-  align-items: center;
-  gap: 12px;
-  color: var(--pear-muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-}
-
-.proof-service svg {
-  color: var(--pear-green);
-  font-size: 22px;
-}
-
 .hero-proof code {
   display: block;
   overflow: hidden;
-  padding: 0 28px 44px;
+  padding: clamp(62px, 7vw, 94px) 28px;
   font-family: var(--mono);
   font-size: clamp(17px, 2vw, 25px);
   line-height: 1.45;
@@ -349,32 +397,8 @@ svg.lucide {
 }
 
 .hero-lower {
-  display: grid;
   padding-top: 14px;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.6fr);
-  align-items: end;
-  gap: clamp(30px, 5vw, 74px);
-}
-
-.hero-manifesto {
-  margin-bottom: 0;
-  color: var(--pear-muted);
-  font-family: var(--display);
-  font-size: clamp(22px, 2.15vw, 31px);
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-
-.hero-manifesto span,
-.hero-manifesto strong {
-  display: block;
-}
-
-.hero-manifesto strong {
-  color: var(--pear-cream);
-  font-style: italic;
-  font-weight: 400;
 }
 
 .boundary-list {
@@ -429,6 +453,30 @@ svg.lucide {
   border-top: 1px solid var(--pear-line);
 }
 
+.access-product-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.56fr) minmax(610px, 1.18fr);
+  align-items: center;
+  gap: clamp(46px, 6vw, 92px);
+}
+
+.access-product-layout .chapter-lead {
+  display: block;
+  margin-bottom: 0;
+}
+
+.access-product-layout .chapter-lead .eyebrow {
+  margin-bottom: 32px;
+}
+
+.access-product-layout .chapter-lead h2 {
+  font-size: clamp(58px, 5vw, 78px);
+}
+
+.access-product-layout .chapter-lead > p:last-child {
+  margin-top: 34px;
+}
+
 .chapter-lead {
   display: grid;
   margin-bottom: clamp(58px, 7vw, 90px);
@@ -466,78 +514,84 @@ svg.lucide {
   line-height: 1.65;
 }
 
-.endpoint-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-top: 1px solid var(--pear-line);
-  border-left: 1px solid var(--pear-line);
-}
-
-.local-endpoint {
+.product-showcase {
   position: relative;
+}
+
+.product-frame {
   min-width: 0;
-  min-height: 280px;
-  padding: clamp(28px, 4vw, 50px);
-  border-right: 1px solid var(--pear-line);
-  border-bottom: 1px solid var(--pear-line);
-  background: rgba(23, 32, 16, 0.45);
-}
-
-.local-endpoint:nth-child(2) {
+  margin: 0;
+  border: 1px solid var(--pear-line);
   background: var(--pear-panel);
+  box-shadow: 14px 14px 0 rgba(183, 238, 69, 0.045);
 }
 
-.local-endpoint > header {
-  display: flex;
-  margin-bottom: 58px;
-  align-items: center;
-  gap: 10px;
-  color: var(--pear-muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.11em;
+.product-screen {
+  overflow: hidden;
+  background: var(--pear-black);
 }
 
-.local-endpoint > header svg {
-  color: var(--pear-green);
-  font-size: 19px;
-}
-
-.local-endpoint code {
+.product-screen img {
   display: block;
-  overflow-wrap: anywhere;
-  font-family: var(--mono);
-  font-size: clamp(19px, 2.15vw, 29px);
-  line-height: 1.35;
+  width: 100%;
+  height: auto;
 }
 
-.local-endpoint code strong,
-.terminal-prompt {
-  color: var(--pear-green-soft);
-  font-weight: 600;
+.product-frame-desktop .product-screen {
+  aspect-ratio: 1.18;
 }
 
-.local-endpoint .scheme,
-.local-endpoint .http-port {
-  color: var(--pear-muted);
+.product-frame-desktop img {
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
 }
 
-.local-endpoint p {
-  max-width: 48ch;
-  margin: 26px 0 0;
-  color: var(--pear-muted);
-  font-size: 16px;
-  line-height: 1.6;
+.product-frame-android {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  width: clamp(230px, 24%, 290px);
 }
 
-.command-endpoint {
-  min-height: 230px;
-  grid-column: 1 / -1;
-  background: rgba(183, 238, 69, 0.035);
+.product-frame-desktop {
+  width: 92%;
 }
 
-.command-endpoint > header {
-  margin-bottom: 38px;
+.product-frame.product-frame-android {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.product-device-shell {
+  position: relative;
+  padding: 9px;
+  border: 2px solid rgba(240, 241, 231, 0.28);
+  border-radius: 38px;
+  background: #030503;
+  box-shadow:
+    inset 0 0 0 2px #1d2814,
+    14px 14px 0 rgba(183, 238, 69, 0.055);
+}
+
+.product-device-shell::before {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #1b2118;
+  border-radius: 50%;
+  background: #020302;
+  content: "";
+  transform: translateX(-50%);
+}
+
+.product-device-shell img {
+  border-radius: 29px;
 }
 
 .topology-chapter {
@@ -584,25 +638,6 @@ svg.lucide {
   display: block;
   width: 100%;
   height: auto;
-}
-
-.topology-figure figcaption,
-.tunnel-diagram figcaption {
-  display: flex;
-  min-height: 58px;
-  padding: 14px 18px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  border-top: 1px solid var(--pear-line);
-  color: var(--pear-muted);
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.09em;
-}
-
-.topology-figure figcaption span {
-  color: var(--pear-green);
 }
 
 .map-bg {
@@ -679,9 +714,7 @@ svg.lucide {
 }
 
 .principle-grid article > span,
-.process-grid article > span,
-.repository-card > span,
-.quickstart-card > span {
+.process-grid article > span {
   color: var(--pear-muted);
   font-family: var(--mono);
   font-size: 11px;
@@ -739,10 +772,6 @@ svg.lucide {
 .tunnel-diagram {
   margin-bottom: 54px;
   padding-top: clamp(8px, 2vw, 24px);
-}
-
-.tunnel-diagram figcaption {
-  margin-top: 0;
 }
 
 .mountain-shape {
@@ -852,32 +881,18 @@ svg.lucide {
   line-height: 1.65;
 }
 
-.primitive-rail p strong {
-  color: var(--pear-green-soft);
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
 .lineage-note {
-  display: grid;
+  display: flex;
   padding-top: 28px;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
-  gap: 40px;
+  justify-content: flex-end;
   color: var(--pear-muted);
 }
 
-.lineage-note p,
 .lineage-note small {
+  max-width: 58ch;
   margin: 0;
   font-size: 13px;
   line-height: 1.65;
-}
-
-.lineage-note p {
-  color: var(--pear-cream);
 }
 
 .source-grid {
@@ -908,7 +923,6 @@ svg.lucide {
   color: var(--pear-black);
 }
 
-.repository-card:hover > span,
 .repository-card:hover > small,
 .repository-card:hover > svg {
   color: var(--pear-black);
@@ -952,31 +966,6 @@ svg.lucide {
     repeating-linear-gradient(135deg, transparent 0 12px, rgba(183, 238, 69, 0.025) 12px 13px), var(--pear-panel);
 }
 
-.quickstart-card::after {
-  position: absolute;
-  top: 72px;
-  right: -52px;
-  width: 240px;
-  padding: 8px;
-  border-top: 1px solid var(--pear-green);
-  border-bottom: 1px solid var(--pear-green);
-  color: var(--pear-green);
-  content: "SIGNED RELEASE";
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  text-align: center;
-  transform: rotate(42deg);
-}
-
-.quickstart-card > p {
-  align-self: end;
-  max-width: 46ch;
-  margin: 18px 0 0;
-  color: var(--pear-muted);
-  font-size: 16px;
-}
-
 .release-links {
   display: flex;
   align-self: end;
@@ -997,7 +986,7 @@ svg.lucide {
   display: flex;
   min-height: 150px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   border-top: 1px solid var(--pear-line);
   color: var(--pear-muted);
   font-family: var(--mono);
@@ -1074,6 +1063,21 @@ svg.lucide {
   }
 }
 
+@media (max-width: 1020px) {
+  .access-product-layout {
+    display: block;
+  }
+
+  .access-product-layout .chapter-lead {
+    display: grid;
+    margin-bottom: clamp(58px, 7vw, 90px);
+  }
+
+  .access-product-layout .chapter-lead h2 {
+    font-size: clamp(64px, 9vw, 84px);
+  }
+}
+
 @media (max-width: 980px) {
   :root {
     --page: min(calc(100% - 40px), 820px);
@@ -1089,10 +1093,6 @@ svg.lucide {
 
   .hero-proof {
     max-width: 720px;
-  }
-
-  .hero-lower {
-    grid-template-columns: 1fr;
   }
 
   .chapter-lead,
@@ -1187,6 +1187,15 @@ svg.lucide {
     font-size: 17px;
   }
 
+  .hero-downloads {
+    margin-top: 28px;
+    grid-template-columns: 1fr;
+  }
+
+  .download-cta {
+    min-height: 74px;
+  }
+
   .hero-proof {
     box-shadow: 8px 8px 0 rgba(183, 238, 69, 0.06);
   }
@@ -1197,12 +1206,8 @@ svg.lucide {
     font-size: 9px;
   }
 
-  .proof-service {
-    padding: 28px 18px 14px;
-  }
-
   .hero-proof code {
-    padding: 0 18px 30px;
+    padding: 48px 18px;
     font-size: clamp(15px, 4.2vw, 19px);
   }
 
@@ -1213,10 +1218,6 @@ svg.lucide {
 
   .hero-lower {
     padding-top: 18px;
-  }
-
-  .hero-manifesto {
-    font-size: 25px;
   }
 
   .boundary-list {
@@ -1263,25 +1264,28 @@ svg.lucide {
     font-size: 17px;
   }
 
-  .endpoint-grid,
   .source-grid {
     grid-template-columns: 1fr;
   }
 
-  .local-endpoint,
-  .command-endpoint {
-    min-height: 250px;
-    grid-column: auto;
-    padding: 28px 24px;
+  .product-showcase {
+    padding-top: 54px;
   }
 
-  .local-endpoint > header {
-    margin-bottom: 42px;
-    font-size: 10px;
+  .product-frame {
+    box-shadow: 8px 8px 0 rgba(183, 238, 69, 0.045);
   }
 
-  .local-endpoint code {
-    font-size: clamp(17px, 5vw, 22px);
+  .product-frame-android {
+    width: min(46%, 176px);
+  }
+
+  .product-frame-desktop {
+    width: 100%;
+  }
+
+  .product-frame-desktop .product-screen {
+    aspect-ratio: 1.12;
   }
 
   .topology-chapter {
@@ -1290,13 +1294,6 @@ svg.lucide {
 
   .topology-canvas {
     padding: 4px;
-  }
-
-  .topology-figure figcaption,
-  .tunnel-diagram figcaption {
-    align-items: flex-start;
-    flex-direction: column;
-    font-size: 9px;
   }
 
   .principle-grid article,
@@ -1327,11 +1324,6 @@ svg.lucide {
 
   .primitive-rail h3 {
     font-size: 48px;
-  }
-
-  .lineage-note {
-    grid-template-columns: 1fr;
-    gap: 12px;
   }
 
   .tunnel-diagram {

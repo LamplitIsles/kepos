@@ -43,14 +43,18 @@ test("website keeps its Cloudflare deployment contract", () => {
   assert.equal(existsSync(path.join(root, "apps/web/wrangler.toml")), false);
 });
 
-test("website points visitors to the current release and verification guide", () => {
+test("website offers direct Android and macOS release downloads", () => {
   const html = read("apps/web/index.html");
 
-  assert.match(html, /https:\/\/github\.com\/tta-lab\/kepos-neo\/releases\/latest/);
   assert.match(
     html,
-    /https:\/\/github\.com\/tta-lab\/kepos-neo\/blob\/main\/docs\/releasing\.md#verify-a-downloaded-release/,
+    /https:\/\/github\.com\/tta-lab\/kepos-neo\/releases\/download\/v0\.1\.0\/kepos-android-arm64-v0\.1\.0\.apk/,
   );
+  assert.match(
+    html,
+    /https:\/\/github\.com\/tta-lab\/kepos-neo\/releases\/download\/v0\.1\.0\/kepos-macos-arm64-v0\.1\.0\.zip/,
+  );
+  assert.doesNotMatch(html, /#verify-a-downloaded-release/);
   assert.doesNotMatch(html, /FORTHCOMING/);
 });
 

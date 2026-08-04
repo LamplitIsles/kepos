@@ -55,6 +55,15 @@ describe("Kepos landing page", () => {
     for (const reference of labelReferences) expect(ids).toContain(reference);
   });
 
+  it("keeps the hero focused on one product position", () => {
+    const html = readProjectFile("index.html");
+
+    expect(html).not.toBeNull();
+    if (!html) return;
+
+    expect(html).not.toContain('class="hero-manifesto"');
+  });
+
   it("protects external links opened in new tabs", () => {
     const html = readProjectFile("index.html");
 
@@ -66,6 +75,68 @@ describe("Kepos landing page", () => {
     expect(externalLinks.length).toBeGreaterThan(0);
     for (const link of externalLinks) expect(link).toMatch(/\srel="[^"]*noreferrer[^"]*"/);
     expect(html).toMatch(/<a\b[^>]*href="https:\/\/github\.com\/tta-lab\/kepos-neo"/);
+  });
+
+  it("puts direct Android and macOS downloads in the hero", () => {
+    const html = readProjectFile("index.html");
+    const css = readProjectFile("src/styles.css");
+
+    expect(html).not.toBeNull();
+    expect(css).not.toBeNull();
+    if (!html || !css) return;
+
+    const heroDownloads = html.indexOf('class="hero-downloads"');
+    const heroProof = html.indexOf('class="hero-proof"');
+
+    expect(heroDownloads).toBeGreaterThan(-1);
+    expect(heroDownloads).toBeLessThan(heroProof);
+    expect(html).toContain(
+      'href="https://github.com/tta-lab/kepos-neo/releases/download/v0.1.0/kepos-android-arm64-v0.1.0.apk"',
+    );
+    expect(html).toContain(
+      'href="https://github.com/tta-lab/kepos-neo/releases/download/v0.1.0/kepos-macos-arm64-v0.1.0.zip"',
+    );
+    expect(html).toContain("<strong>DOWNLOAD FOR ANDROID</strong>");
+    expect(html).toContain("<strong>DOWNLOAD FOR MAC</strong>");
+    expect(html).not.toContain("ANDROID / ARM64");
+    expect(html).not.toContain("APPLE SILICON");
+    expect(css).not.toContain('content: "SIGNED RELEASE"');
+    expect(html).not.toContain("#verify-a-downloaded-release");
+  });
+
+  it("shows the real desktop and Android product instead of endpoint mockups", () => {
+    const html = readProjectFile("index.html");
+    const desktopScreenshot = readProjectBuffer("public/kepos-desktop.png");
+    const androidScreenshot = readProjectBuffer("public/kepos-android.png");
+
+    expect(html).not.toBeNull();
+    expect(desktopScreenshot).not.toBeNull();
+    expect(androidScreenshot).not.toBeNull();
+    if (!html || !desktopScreenshot || !androidScreenshot) return;
+
+    expect(html).toContain('class="product-showcase product-showcase-overlap"');
+    expect(html).toContain('class="access-chapter page-chapter access-product-layout"');
+    expect(html).toContain('class="product-screen product-device-shell"');
+    expect(html).toContain('src="/kepos-desktop.png"');
+    expect(html).toContain('src="/kepos-android.png"');
+    const productShowcase = html.match(/<div class="product-showcase[\s\S]*?<\/section>/)?.[0];
+    expect(productShowcase).not.toMatch(/<figcaption\b/);
+    expect(html).not.toContain('class="endpoint-grid"');
+    expect(desktopScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");
+    expect(androidScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");
+  });
+
+  it("stacks the product composition before its columns can overflow", () => {
+    const css = readProjectFile("src/styles.css");
+
+    expect(css).not.toBeNull();
+    if (!css) return;
+
+    const breakpoint = css.match(
+      /@media \(max-width: (\d+)px\) \{[\s\S]*?\.access-product-layout \{\s*display: block;/,
+    )?.[1];
+
+    expect(Number(breakpoint)).toBeGreaterThanOrEqual(1020);
   });
 
   it("redirects legacy pages to live homepage fragments", () => {
