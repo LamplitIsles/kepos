@@ -1,7 +1,7 @@
-# Kepos Neo
+# Kepos
 
-[![CI](https://github.com/tta-lab/kepos-neo/actions/workflows/check.yml/badge.svg?branch=main&event=push)](https://github.com/tta-lab/kepos-neo/actions/workflows/check.yml)
-[![codecov](https://codecov.io/github/tta-lab/kepos-neo/graph/badge.svg?branch=main)](https://app.codecov.io/github/tta-lab/kepos-neo)
+[![CI](https://github.com/LamplitIsles/kepos/actions/workflows/check.yml/badge.svg?branch=main&event=push)](https://github.com/LamplitIsles/kepos/actions/workflows/check.yml)
+[![codecov](https://codecov.io/github/LamplitIsles/kepos/graph/badge.svg?branch=main)](https://app.codecov.io/github/LamplitIsles/kepos)
 
 **Share a service, not a network.**
 
@@ -14,7 +14,7 @@ There is no Kepos account and no Kepos-operated control plane. Device keys stay
 on the devices that created them. The publisher decides who may connect and can
 apply a narrower allowlist to each service.
 
-> Kepos Neo is a developer preview. Android APKs and Apple Silicon macOS ZIPs
+> Kepos is a developer preview. Android APKs and Apple Silicon macOS ZIPs
 > are published for direct download with minisign verification. They are not
 > app-store releases; the macOS app is ad-hoc signed and not notarized.
 
@@ -155,8 +155,8 @@ Requirements:
 - Git submodules for desktop development
 
 ```sh
-git clone --recurse-submodules https://github.com/tta-lab/kepos-neo.git
-cd kepos-neo
+git clone --recurse-submodules https://github.com/LamplitIsles/kepos.git
+cd kepos
 npm ci
 npm run kepos -- --help
 ```
@@ -177,7 +177,7 @@ npm run desktop:check
 npm run desktop:native-check
 ```
 
-The public website is the `@tta-lab/kepos-web` npm workspace:
+The public website is the `@lamplitisles/kepos-web` npm workspace:
 
 ```sh
 npm run web:dev

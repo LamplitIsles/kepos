@@ -1,5 +1,5 @@
 {
-  "name": "@tta-lab/kepos-android-worklet",
+  "name": "@lamplitisles/kepos-android-worklet",
   "version": "0.0.0",
   "private": true,
   "description": "Kepos subscriber entry point for an Android Bare Worklet",
@@ -11,7 +11,7 @@
     "./controller": "./dist/controller.js"
   },
   "dependencies": {
-    "@tta-lab/bare-host-protocol": "0.0.0",
+    "@lamplitisles/bare-host-protocol": "0.0.0",
     "b4a": "^1.8.1",
     "bare-net": "^2.3.2"
   }

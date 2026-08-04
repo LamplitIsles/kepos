@@ -137,7 +137,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          image=ghcr.io/tta-lab/kepos-neo
+          image=ghcr.io/lamplitisles/kepos
           sha_tag="sha-${GITHUB_SHA}"
 
           docker load --input kepos-container-image.tar.gz

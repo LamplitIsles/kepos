@@ -190,7 +190,7 @@ copy state files into logs.
 
 HyperDHT crawling, regional bootstrap measurements, and candidate validation
 live in
-[`tta-lab/hyperdht-observatory`](https://github.com/tta-lab/hyperdht-observatory).
+[`LamplitIsles/hyperdht-observatory`](https://github.com/LamplitIsles/hyperdht-observatory).
 Kepos never fetches or trusts Observatory output at runtime. Operators choose
 and configure endpoints themselves.
 

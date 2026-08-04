@@ -1,5 +1,5 @@
 {
-  description = "Kepos Neo P2P service publisher and subscriber";
+  description = "Kepos P2P service publisher and subscriber";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
@@ -24,7 +24,7 @@
     in rec {
       kepos = pkgs.callPackage ./nix/package.nix {};
       container-image = pkgs.dockerTools.buildImage {
-        name = "ghcr.io/tta-lab/kepos-neo";
+        name = "ghcr.io/lamplitisles/kepos";
         tag = "local";
         copyToRoot = pkgs.buildEnv {
           name = "kepos-container-root";
@@ -37,7 +37,7 @@
           Entrypoint = ["${kepos}/bin/kepos"];
           User = "10000:10000";
           Labels = {
-            "org.opencontainers.image.source" = "https://github.com/tta-lab/kepos-neo";
+            "org.opencontainers.image.source" = "https://github.com/LamplitIsles/kepos";
             "org.opencontainers.image.licenses" = "Apache-2.0";
           };
         };
@@ -49,7 +49,7 @@
       kepos = {
         type = "app";
         program = "${self.packages.${system}.kepos}/bin/kepos";
-        meta.description = "Run the Kepos Neo CLI";
+        meta.description = "Run the Kepos CLI";
       };
       default = self.apps.${system}.kepos;
     });

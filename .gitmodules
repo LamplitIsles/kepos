@@ -1,12 +1,12 @@
 [submodule "vendor/holepunch/bare-native"]
 	path = vendor/holepunch/bare-native
-	url = https://github.com/tta-lab/bare-native.git
+	url = https://github.com/LamplitIsles/bare-native.git
 [submodule "vendor/holepunch/bare-web-kit"]
 	path = vendor/holepunch/bare-web-kit
-	url = https://github.com/tta-lab/bare-web-kit.git
+	url = https://github.com/LamplitIsles/bare-web-kit.git
 [submodule "vendor/holepunch/bare-win-ui"]
 	path = vendor/holepunch/bare-win-ui
-	url = https://github.com/tta-lab/bare-win-ui.git
+	url = https://github.com/LamplitIsles/bare-win-ui.git
 [submodule "vendor/holepunch/bare-app-kit"]
 	path = vendor/holepunch/bare-app-kit
-	url = https://github.com/tta-lab/bare-app-kit.git
+	url = https://github.com/LamplitIsles/bare-app-kit.git
