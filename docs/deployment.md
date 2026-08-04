@@ -10,8 +10,8 @@ a Helm chart.
 A consumer flake can follow its existing Nixpkgs and Home Manager inputs:
 
 ```nix
-inputs.kepos-neo = {
-  url = "github:tta-lab/kepos-neo";
+inputs.kepos = {
+  url = "github:LamplitIsles/kepos";
   inputs.nixpkgs.follows = "nixpkgs";
   inputs.home-manager.follows = "home-manager";
 };
@@ -24,7 +24,7 @@ Import and configure the module:
   inputs,
   ...
 }: {
-  imports = [inputs.kepos-neo.homeManagerModules.default];
+  imports = [inputs.kepos.homeManagerModules.default];
 
   services.kepos.publisher = {
     enable = true;
@@ -54,7 +54,7 @@ state directory and never enters the store.
 The CLI is also available directly:
 
 ```sh
-nix run github:tta-lab/kepos-neo -- --help
+nix run github:LamplitIsles/kepos -- --help
 ```
 
 ## Container image
@@ -65,7 +65,7 @@ Build and load the non-root image for the current supported Linux system
 ```sh
 nix build .#container-image
 docker load < result
-docker run --rm ghcr.io/tta-lab/kepos-neo:local --help
+docker run --rm ghcr.io/lamplitisles/kepos:local --help
 ```
 
 The GitHub workflow currently runs on x86 and publishes a `linux/amd64` image
@@ -73,7 +73,7 @@ from every push to `main`, using `main` and `sha-<git-commit>` tags. Deployments
 should pin the digest printed in the Actions summary:
 
 ```text
-ghcr.io/tta-lab/kepos-neo@sha256:<digest>
+ghcr.io/lamplitisles/kepos@sha256:<digest>
 ```
 
 GHCR creates a new package as private. An organization owner must make the

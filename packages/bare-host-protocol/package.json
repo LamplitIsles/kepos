@@ -1,5 +1,5 @@
 {
-  "name": "@tta-lab/bare-host-protocol",
+  "name": "@lamplitisles/bare-host-protocol",
   "version": "0.0.0",
   "private": true,
   "description": "Runtime-neutral protocol between a native host and a Bare Worklet",

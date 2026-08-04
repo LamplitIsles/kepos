@@ -1,4 +1,4 @@
-import { WorkletController } from "@tta-lab/kepos-android-worklet/controller";
+import { WorkletController } from "@lamplitisles/kepos-android-worklet/controller";
 import { readHomeRegistry } from "../../runtime/registry-client.js";
 import {
   AndroidRegistryState,

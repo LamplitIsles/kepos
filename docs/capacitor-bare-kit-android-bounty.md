@@ -173,7 +173,7 @@ criteria, not package download counts or adoption by third parties.
 
 ## Existing proof
 
-[Kepos Neo](https://github.com/tta-lab/kepos-neo) is an Apache-2.0 application
+[Kepos](https://github.com/LamplitIsles/kepos) is an Apache-2.0 application
 that already runs a Bare Kit Worklet behind a native Kotlin/Compose Android UI.
 Its reusable host covers Worklet ownership, framed IPC, state transitions,
 failure handling, and physical-device lifecycle tests.

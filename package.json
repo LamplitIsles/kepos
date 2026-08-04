@@ -1,5 +1,5 @@
 {
-  "name": "kepos-neo",
+  "name": "kepos",
   "version": "0.0.0",
   "private": true,
   "workspaces": [
@@ -89,13 +89,13 @@
     "desktop:native-check": "npm run desktop:build && node --import tsx --test test/native/desktop-quit.native.ts",
     "desktop:run": "npm run desktop:build && dist/desktop/Kepos.app/Contents/MacOS/Kepos",
     "desktop:typecheck": "tsc -p tsconfig.desktop.json --noEmit",
-    "web:dev": "npm run dev --workspace @tta-lab/kepos-web",
-    "web:build": "npm run build --workspace @tta-lab/kepos-web",
-    "web:test": "npm run test --workspace @tta-lab/kepos-web",
-    "web:check": "npm run check --workspace @tta-lab/kepos-web",
-    "web:verify": "npm run verify --workspace @tta-lab/kepos-web",
-    "web:deploy:dry-run": "npm run deploy:dry-run --workspace @tta-lab/kepos-web",
-    "web:deploy": "npm run deploy --workspace @tta-lab/kepos-web",
+    "web:dev": "npm run dev --workspace @lamplitisles/kepos-web",
+    "web:build": "npm run build --workspace @lamplitisles/kepos-web",
+    "web:test": "npm run test --workspace @lamplitisles/kepos-web",
+    "web:check": "npm run check --workspace @lamplitisles/kepos-web",
+    "web:verify": "npm run verify --workspace @lamplitisles/kepos-web",
+    "web:deploy:dry-run": "npm run deploy:dry-run --workspace @lamplitisles/kepos-web",
+    "web:deploy": "npm run deploy --workspace @lamplitisles/kepos-web",
     "kepos": "tsx src/cli/main.ts"
   },
   "dependencies": {

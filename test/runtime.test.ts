@@ -40,10 +40,13 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
   const publisherState = path.join(root, "publisher");
   const subscriberState = path.join(root, "subscriber");
   const output: string[] = [];
-  const cli = createDefaultCliDependencies({
-    stdout: (line) => output.push(line),
-    stderr: (line) => output.push(line),
-  });
+  const cli = {
+    ...createDefaultCliDependencies({
+      stdout: (line) => output.push(line),
+      stderr: (line) => output.push(line),
+    }),
+    loadConfig: async () => undefined,
+  };
   await runCli(
     ["setup", "subscriber", "--state", subscriberState],
     cli,

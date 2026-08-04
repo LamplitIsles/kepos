@@ -64,13 +64,13 @@
   };
 in {
   options.services.kepos.publisher = {
-    enable = lib.mkEnableOption "Kepos Neo publisher";
+    enable = lib.mkEnableOption "Kepos publisher";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = pkgs.callPackage ./package.nix {};
       defaultText = lib.literalExpression "pkgs.callPackage ./nix/package.nix {}";
-      description = "Kepos Neo package used by the publisher service.";
+      description = "Kepos package used by the publisher service.";
     };
 
     stateDir = lib.mkOption {
@@ -123,7 +123,7 @@ in {
 
     systemd.user.services.kepos-publisher = {
       Unit = {
-        Description = "Kepos Neo publisher";
+        Description = "Kepos publisher";
         After = ["network-online.target"];
       };
       Install.WantedBy = ["default.target"];

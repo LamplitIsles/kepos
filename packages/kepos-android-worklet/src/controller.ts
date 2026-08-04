@@ -194,9 +194,9 @@ export class WorkletController {
 import {
   encodeFrame,
   FrameDecoder,
-} from "@tta-lab/bare-host-protocol/framing";
+} from "@lamplitisles/bare-host-protocol/framing";
 import type {
   HostEnvelope,
   RequestEnvelope,
-} from "@tta-lab/bare-host-protocol/messages";
+} from "@lamplitisles/bare-host-protocol/messages";
 import b4a from "b4a";

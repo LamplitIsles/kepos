@@ -13,7 +13,8 @@ test("website is an npm workspace on Node 24", () => {
   const rootPackage = JSON.parse(read("package.json"));
   const webPackage = JSON.parse(read("apps/web/package.json"));
 
-  assert.equal(webPackage.name, "@tta-lab/kepos-web");
+  assert.equal(rootPackage.name, "kepos");
+  assert.equal(webPackage.name, "@lamplitisles/kepos-web");
   assert.equal(webPackage.engines.node, ">=24 <25");
   assert.equal(webPackage.packageManager, undefined);
   assert.equal(webPackage.engines.bun, undefined);
@@ -21,11 +22,11 @@ test("website is an npm workspace on Node 24", () => {
   assert.match(rootPackage.devDependencies.wrangler, /^\^4\./);
   assert.equal(rootPackage.overrides.undici, "7.29.0");
   assert.equal(existsSync(path.join(root, "apps/web/bun.lock")), false);
-  assert.equal(rootPackage.scripts["web:dev"], "npm run dev --workspace @tta-lab/kepos-web");
-  assert.equal(rootPackage.scripts["web:verify"], "npm run verify --workspace @tta-lab/kepos-web");
+  assert.equal(rootPackage.scripts["web:dev"], "npm run dev --workspace @lamplitisles/kepos-web");
+  assert.equal(rootPackage.scripts["web:verify"], "npm run verify --workspace @lamplitisles/kepos-web");
   assert.equal(
     rootPackage.scripts["web:deploy:dry-run"],
-    "npm run deploy:dry-run --workspace @tta-lab/kepos-web",
+    "npm run deploy:dry-run --workspace @lamplitisles/kepos-web",
   );
   assert.match(rootPackage.scripts.check, /npm run web:verify/);
 });
@@ -48,11 +49,11 @@ test("website offers direct Android and macOS release downloads", () => {
 
   assert.match(
     html,
-    /https:\/\/github\.com\/tta-lab\/kepos-neo\/releases\/download\/v0\.1\.0\/kepos-android-arm64-v0\.1\.0\.apk/,
+    /https:\/\/github\.com\/LamplitIsles\/kepos\/releases\/download\/v0\.1\.0\/kepos-android-arm64-v0\.1\.0\.apk/,
   );
   assert.match(
     html,
-    /https:\/\/github\.com\/tta-lab\/kepos-neo\/releases\/download\/v0\.1\.0\/kepos-macos-arm64-v0\.1\.0\.zip/,
+    /https:\/\/github\.com\/LamplitIsles\/kepos\/releases\/download\/v0\.1\.0\/kepos-macos-arm64-v0\.1\.0\.zip/,
   );
   assert.doesNotMatch(html, /#verify-a-downloaded-release/);
   assert.doesNotMatch(html, /FORTHCOMING/);

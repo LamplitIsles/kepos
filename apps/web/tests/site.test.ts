@@ -74,7 +74,7 @@ describe("Kepos landing page", () => {
 
     expect(externalLinks.length).toBeGreaterThan(0);
     for (const link of externalLinks) expect(link).toMatch(/\srel="[^"]*noreferrer[^"]*"/);
-    expect(html).toMatch(/<a\b[^>]*href="https:\/\/github\.com\/tta-lab\/kepos-neo"/);
+    expect(html).toMatch(/<a\b[^>]*href="https:\/\/github\.com\/LamplitIsles\/kepos"/);
   });
 
   it("puts direct Android and macOS downloads in the hero", () => {
@@ -91,10 +91,10 @@ describe("Kepos landing page", () => {
     expect(heroDownloads).toBeGreaterThan(-1);
     expect(heroDownloads).toBeLessThan(heroProof);
     expect(html).toContain(
-      'href="https://github.com/tta-lab/kepos-neo/releases/download/v0.1.0/kepos-android-arm64-v0.1.0.apk"',
+      'href="https://github.com/LamplitIsles/kepos/releases/download/v0.1.0/kepos-android-arm64-v0.1.0.apk"',
     );
     expect(html).toContain(
-      'href="https://github.com/tta-lab/kepos-neo/releases/download/v0.1.0/kepos-macos-arm64-v0.1.0.zip"',
+      'href="https://github.com/LamplitIsles/kepos/releases/download/v0.1.0/kepos-macos-arm64-v0.1.0.zip"',
     );
     expect(html).toContain("<strong>DOWNLOAD FOR ANDROID</strong>");
     expect(html).toContain("<strong>DOWNLOAD FOR MAC</strong>");

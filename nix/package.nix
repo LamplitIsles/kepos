@@ -35,7 +35,7 @@
   };
 in
   stdenvNoCC.mkDerivation {
-    pname = "kepos-neo";
+    pname = "kepos";
     version = "0.0.0";
 
     src = lib.fileset.toSource {
@@ -55,7 +55,7 @@ in
     installPhase = ''
       runHook preInstall
 
-      app="$out/lib/kepos-neo"
+      app="$out/lib/kepos"
       mkdir -p "$app" "$out/bin"
       cp -r node_modules package.json src "$app/"
       makeWrapper ${lib.getExe nodejs_24} "$out/bin/kepos" \
@@ -67,7 +67,7 @@ in
 
     meta = {
       description = "Persistent P2P access to a publisher's local TCP services";
-      homepage = "https://github.com/tta-lab/kepos-neo";
+      homepage = "https://github.com/LamplitIsles/kepos";
       license = lib.licenses.asl20;
       mainProgram = "kepos";
       platforms = lib.platforms.linux;
