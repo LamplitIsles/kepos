@@ -161,7 +161,7 @@ export async function startDesktopHost(
         try {
           runtimeToStop = await runtimeStartTask;
         } catch {
-          // The runtime owns release of its subscriber lock on startup failure.
+          // The runtime owns release of every role lock on startup failure.
         }
       }
       await cleanup(() => runtimeToStop?.stop());
