@@ -532,10 +532,6 @@ svg.lucide {
 
 .product-showcase {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.34fr);
-  align-items: start;
-  gap: clamp(18px, 2.5vw, 34px);
 }
 
 .product-frame {
@@ -580,7 +576,7 @@ svg.lucide {
 }
 
 .product-frame-desktop .product-screen {
-  aspect-ratio: 1.42;
+  aspect-ratio: 1.18;
 }
 
 .product-frame-desktop img {
@@ -590,7 +586,15 @@ svg.lucide {
 }
 
 .product-frame-android {
-  margin-top: clamp(46px, 7vw, 92px);
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  width: clamp(230px, 24%, 290px);
+}
+
+.product-frame-desktop {
+  width: 92%;
 }
 
 .product-frame.product-frame-android {
@@ -1354,8 +1358,7 @@ svg.lucide {
   }
 
   .product-showcase {
-    grid-template-columns: 1fr;
-    gap: 28px;
+    padding-top: 54px;
   }
 
   .product-frame {
@@ -1363,9 +1366,25 @@ svg.lucide {
   }
 
   .product-frame-android {
-    width: min(78%, 330px);
-    margin-top: 0;
-    justify-self: end;
+    width: min(46%, 176px);
+  }
+
+  .product-frame-android figcaption {
+    min-height: 40px;
+    margin-bottom: 8px;
+    padding: 0 10px;
+  }
+
+  .product-frame-android figcaption strong {
+    display: none;
+  }
+
+  .product-frame-desktop {
+    width: 100%;
+  }
+
+  .product-frame-desktop .product-screen {
+    aspect-ratio: 1.12;
   }
 
   .topology-chapter {

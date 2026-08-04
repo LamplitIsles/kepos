@@ -105,7 +105,7 @@ describe("Kepos landing page", () => {
     expect(androidScreenshot).not.toBeNull();
     if (!html || !desktopScreenshot || !androidScreenshot) return;
 
-    expect(html).toContain('class="product-showcase"');
+    expect(html).toContain('class="product-showcase product-showcase-overlap"');
     expect(html).toContain('class="product-screen product-device-shell"');
     expect(html).toContain('src="/kepos-desktop.png"');
     expect(html).toContain('src="/kepos-android.png"');
