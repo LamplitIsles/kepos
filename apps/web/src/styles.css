@@ -493,6 +493,30 @@ svg.lucide {
   border-top: 1px solid var(--pear-line);
 }
 
+.access-product-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.56fr) minmax(610px, 1.18fr);
+  align-items: center;
+  gap: clamp(46px, 6vw, 92px);
+}
+
+.access-product-layout .chapter-lead {
+  display: block;
+  margin-bottom: 0;
+}
+
+.access-product-layout .chapter-lead .eyebrow {
+  margin-bottom: 32px;
+}
+
+.access-product-layout .chapter-lead h2 {
+  font-size: clamp(58px, 5vw, 78px);
+}
+
+.access-product-layout .chapter-lead > p:last-child {
+  margin-top: 34px;
+}
+
 .chapter-lead {
   display: grid;
   margin-bottom: clamp(58px, 7vw, 90px);
@@ -1179,6 +1203,19 @@ svg.lucide {
   .chapter-lead,
   .topology-chapter {
     grid-template-columns: 1fr;
+  }
+
+  .access-product-layout {
+    display: block;
+  }
+
+  .access-product-layout .chapter-lead {
+    display: grid;
+    margin-bottom: clamp(58px, 7vw, 90px);
+  }
+
+  .access-product-layout .chapter-lead h2 {
+    font-size: clamp(64px, 9vw, 84px);
   }
 
   .chapter-lead > p:last-child {
