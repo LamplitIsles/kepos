@@ -68,6 +68,26 @@ describe("Kepos landing page", () => {
     expect(html).toMatch(/<a\b[^>]*href="https:\/\/github\.com\/tta-lab\/kepos-neo"/);
   });
 
+  it("puts direct Android and macOS downloads in the hero", () => {
+    const html = readProjectFile("index.html");
+
+    expect(html).not.toBeNull();
+    if (!html) return;
+
+    const heroDownloads = html.indexOf('class="hero-downloads"');
+    const heroProof = html.indexOf('class="hero-proof"');
+
+    expect(heroDownloads).toBeGreaterThan(-1);
+    expect(heroDownloads).toBeLessThan(heroProof);
+    expect(html).toContain(
+      'href="https://github.com/tta-lab/kepos-neo/releases/download/v0.1.0/kepos-android-arm64-v0.1.0.apk"',
+    );
+    expect(html).toContain(
+      'href="https://github.com/tta-lab/kepos-neo/releases/download/v0.1.0/kepos-macos-arm64-v0.1.0.zip"',
+    );
+    expect(html).not.toContain("#verify-a-downloaded-release");
+  });
+
   it("redirects legacy pages to live homepage fragments", () => {
     const redirects = readProjectFile("public/_redirects");
     const sitemap = readProjectFile("public/sitemap.xml");
