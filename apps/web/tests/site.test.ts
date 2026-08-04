@@ -70,9 +70,11 @@ describe("Kepos landing page", () => {
 
   it("puts direct Android and macOS downloads in the hero", () => {
     const html = readProjectFile("index.html");
+    const css = readProjectFile("src/styles.css");
 
     expect(html).not.toBeNull();
-    if (!html) return;
+    expect(css).not.toBeNull();
+    if (!html || !css) return;
 
     const heroDownloads = html.indexOf('class="hero-downloads"');
     const heroProof = html.indexOf('class="hero-proof"');
@@ -85,6 +87,11 @@ describe("Kepos landing page", () => {
     expect(html).toContain(
       'href="https://github.com/tta-lab/kepos-neo/releases/download/v0.1.0/kepos-macos-arm64-v0.1.0.zip"',
     );
+    expect(html).toContain("<strong>DOWNLOAD FOR ANDROID</strong>");
+    expect(html).toContain("<strong>DOWNLOAD FOR MAC</strong>");
+    expect(html).not.toContain("ANDROID / ARM64");
+    expect(html).not.toContain("APPLE SILICON");
+    expect(css).not.toContain('content: "SIGNED RELEASE"');
     expect(html).not.toContain("#verify-a-downloaded-release");
   });
 

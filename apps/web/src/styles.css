@@ -277,19 +277,8 @@ svg.lucide {
 }
 
 .download-cta span,
-.download-cta small,
 .download-cta strong {
   display: block;
-}
-
-.download-cta small {
-  margin-bottom: 3px;
-  font-family: var(--mono);
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 0.11em;
-  line-height: 1.3;
-  opacity: 0.68;
 }
 
 .download-cta strong {
@@ -1025,23 +1014,6 @@ svg.lucide {
   overflow: hidden;
   background:
     repeating-linear-gradient(135deg, transparent 0 12px, rgba(183, 238, 69, 0.025) 12px 13px), var(--pear-panel);
-}
-
-.quickstart-card::after {
-  position: absolute;
-  top: 72px;
-  right: -52px;
-  width: 240px;
-  padding: 8px;
-  border-top: 1px solid var(--pear-green);
-  border-bottom: 1px solid var(--pear-green);
-  color: var(--pear-green);
-  content: "SIGNED RELEASE";
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  text-align: center;
-  transform: rotate(42deg);
 }
 
 .quickstart-card > p {
