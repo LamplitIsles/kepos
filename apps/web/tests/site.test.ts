@@ -110,6 +110,8 @@ describe("Kepos landing page", () => {
     expect(html).toContain('class="product-screen product-device-shell"');
     expect(html).toContain('src="/kepos-desktop.png"');
     expect(html).toContain('src="/kepos-android.png"');
+    const productShowcase = html.match(/<div class="product-showcase[\s\S]*?<\/section>/)?.[0];
+    expect(productShowcase).not.toMatch(/<figcaption\b/);
     expect(html).not.toContain('class="endpoint-grid"');
     expect(desktopScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");
     expect(androidScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");

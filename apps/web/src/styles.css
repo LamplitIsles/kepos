@@ -566,28 +566,6 @@ svg.lucide {
   box-shadow: 14px 14px 0 rgba(183, 238, 69, 0.045);
 }
 
-.product-frame figcaption {
-  display: flex;
-  min-height: 48px;
-  padding: 0 16px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border-bottom: 1px solid var(--pear-line);
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-}
-
-.product-frame figcaption span {
-  color: var(--pear-green);
-}
-
-.product-frame figcaption strong {
-  color: var(--pear-muted);
-  font-weight: 400;
-}
-
 .product-screen {
   overflow: hidden;
   background: var(--pear-black);
@@ -625,12 +603,6 @@ svg.lucide {
   border: 0;
   background: transparent;
   box-shadow: none;
-}
-
-.product-frame-android figcaption {
-  margin-bottom: 12px;
-  border: 1px solid var(--pear-line);
-  background: var(--pear-panel);
 }
 
 .product-device-shell {
@@ -1404,16 +1376,6 @@ svg.lucide {
 
   .product-frame-android {
     width: min(46%, 176px);
-  }
-
-  .product-frame-android figcaption {
-    min-height: 40px;
-    margin-bottom: 8px;
-    padding: 0 10px;
-  }
-
-  .product-frame-android figcaption strong {
-    display: none;
   }
 
   .product-frame-desktop {
