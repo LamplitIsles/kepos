@@ -95,6 +95,25 @@ describe("Kepos landing page", () => {
     expect(html).not.toContain("#verify-a-downloaded-release");
   });
 
+  it("shows the real desktop and Android product instead of endpoint mockups", () => {
+    const html = readProjectFile("index.html");
+    const desktopScreenshot = readProjectBuffer("public/kepos-desktop.png");
+    const androidScreenshot = readProjectBuffer("public/kepos-android.png");
+
+    expect(html).not.toBeNull();
+    expect(desktopScreenshot).not.toBeNull();
+    expect(androidScreenshot).not.toBeNull();
+    if (!html || !desktopScreenshot || !androidScreenshot) return;
+
+    expect(html).toContain('class="product-showcase"');
+    expect(html).toContain('class="product-screen product-device-shell"');
+    expect(html).toContain('src="/kepos-desktop.png"');
+    expect(html).toContain('src="/kepos-android.png"');
+    expect(html).not.toContain('class="endpoint-grid"');
+    expect(desktopScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");
+    expect(androidScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");
+  });
+
   it("redirects legacy pages to live homepage fragments", () => {
     const redirects = readProjectFile("public/_redirects");
     const sitemap = readProjectFile("public/sitemap.xml");

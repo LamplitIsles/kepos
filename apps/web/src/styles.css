@@ -530,78 +530,108 @@ svg.lucide {
   line-height: 1.65;
 }
 
-.endpoint-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-top: 1px solid var(--pear-line);
-  border-left: 1px solid var(--pear-line);
-}
-
-.local-endpoint {
+.product-showcase {
   position: relative;
-  min-width: 0;
-  min-height: 280px;
-  padding: clamp(28px, 4vw, 50px);
-  border-right: 1px solid var(--pear-line);
-  border-bottom: 1px solid var(--pear-line);
-  background: rgba(23, 32, 16, 0.45);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.34fr);
+  align-items: start;
+  gap: clamp(18px, 2.5vw, 34px);
 }
 
-.local-endpoint:nth-child(2) {
+.product-frame {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--pear-line);
+  background: var(--pear-panel);
+  box-shadow: 14px 14px 0 rgba(183, 238, 69, 0.045);
+}
+
+.product-frame figcaption {
+  display: flex;
+  min-height: 48px;
+  padding: 0 16px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--pear-line);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+.product-frame figcaption span {
+  color: var(--pear-green);
+}
+
+.product-frame figcaption strong {
+  color: var(--pear-muted);
+  font-weight: 400;
+}
+
+.product-screen {
+  overflow: hidden;
+  background: var(--pear-black);
+}
+
+.product-screen img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.product-frame-desktop .product-screen {
+  aspect-ratio: 1.42;
+}
+
+.product-frame-desktop img {
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+
+.product-frame-android {
+  margin-top: clamp(46px, 7vw, 92px);
+}
+
+.product-frame.product-frame-android {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.product-frame-android figcaption {
+  margin-bottom: 12px;
+  border: 1px solid var(--pear-line);
   background: var(--pear-panel);
 }
 
-.local-endpoint > header {
-  display: flex;
-  margin-bottom: 58px;
-  align-items: center;
-  gap: 10px;
-  color: var(--pear-muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.11em;
+.product-device-shell {
+  position: relative;
+  padding: 9px;
+  border: 2px solid rgba(240, 241, 231, 0.28);
+  border-radius: 38px;
+  background: #030503;
+  box-shadow:
+    inset 0 0 0 2px #1d2814,
+    14px 14px 0 rgba(183, 238, 69, 0.055);
 }
 
-.local-endpoint > header svg {
-  color: var(--pear-green);
-  font-size: 19px;
+.product-device-shell::before {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #1b2118;
+  border-radius: 50%;
+  background: #020302;
+  content: "";
+  transform: translateX(-50%);
 }
 
-.local-endpoint code {
-  display: block;
-  overflow-wrap: anywhere;
-  font-family: var(--mono);
-  font-size: clamp(19px, 2.15vw, 29px);
-  line-height: 1.35;
-}
-
-.local-endpoint code strong,
-.terminal-prompt {
-  color: var(--pear-green-soft);
-  font-weight: 600;
-}
-
-.local-endpoint .scheme,
-.local-endpoint .http-port {
-  color: var(--pear-muted);
-}
-
-.local-endpoint p {
-  max-width: 48ch;
-  margin: 26px 0 0;
-  color: var(--pear-muted);
-  font-size: 16px;
-  line-height: 1.6;
-}
-
-.command-endpoint {
-  min-height: 230px;
-  grid-column: 1 / -1;
-  background: rgba(183, 238, 69, 0.035);
-}
-
-.command-endpoint > header {
-  margin-bottom: 38px;
+.product-device-shell img {
+  border-radius: 29px;
 }
 
 .topology-chapter {
@@ -1319,25 +1349,23 @@ svg.lucide {
     font-size: 17px;
   }
 
-  .endpoint-grid,
   .source-grid {
     grid-template-columns: 1fr;
   }
 
-  .local-endpoint,
-  .command-endpoint {
-    min-height: 250px;
-    grid-column: auto;
-    padding: 28px 24px;
+  .product-showcase {
+    grid-template-columns: 1fr;
+    gap: 28px;
   }
 
-  .local-endpoint > header {
-    margin-bottom: 42px;
-    font-size: 10px;
+  .product-frame {
+    box-shadow: 8px 8px 0 rgba(183, 238, 69, 0.045);
   }
 
-  .local-endpoint code {
-    font-size: clamp(17px, 5vw, 22px);
+  .product-frame-android {
+    width: min(78%, 330px);
+    margin-top: 0;
+    justify-self: end;
   }
 
   .topology-chapter {

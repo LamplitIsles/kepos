@@ -110,33 +110,35 @@
 
       <section class="access-chapter page-chapter" id="access" aria-labelledby="access-title" data-section="access">
         <header class="chapter-lead">
-          <p class="eyebrow">01 / LOCAL SURFACE</p>
-          <h2 id="access-title">The machine stays there.<br /><strong>The address arrives here.</strong></h2>
-          <p>The service stays where it is. Kepos brings its address to the loopback interface in front of you.</p>
+          <p class="eyebrow">01 / THE PRODUCT</p>
+          <h2 id="access-title">Your private services.<br /><strong>Ready where you are.</strong></h2>
+          <p>Open web apps or copy local addresses from one clear list, on Android and Mac.</p>
         </header>
 
-        <div class="endpoint-grid">
-          <article class="local-endpoint">
-            <header><i data-lucide="app-window" aria-hidden="true"></i><span>PRIVATE INDEX / HTTP</span></header>
-            <code
-              ><span class="scheme">http://</span><strong>home.localhost</strong
-              ><span class="http-port">:17480</span><span>/</span></code
-            >
-            <p>A private start page, delivered through the local gateway.</p>
-          </article>
-          <article class="local-endpoint">
-            <header><i data-lucide="music" aria-hidden="true"></i><span>NAVIDROME / HTTP</span></header>
-            <code
-              ><span class="scheme">http://</span><strong>navidrome.localhost</strong
-              ><span class="http-port">:17480</span><span>/</span></code
-            >
-            <p>The music library is remote. Its address is local.</p>
-          </article>
-          <article class="local-endpoint command-endpoint">
-            <header><i data-lucide="square-terminal" aria-hidden="true"></i><span>SSH / RAW TCP</span></header>
-            <code><span class="terminal-prompt">$</span> ssh -p 2222 user@127.0.0.1</code>
-            <p>Raw TCP services bind to an explicit loopback port instead of a hostname.</p>
-          </article>
+        <div class="product-showcase">
+          <figure class="product-frame product-frame-desktop">
+            <figcaption><span>MAC / DESKTOP</span><strong>12 SERVICES / CONNECTED</strong></figcaption>
+            <div class="product-screen">
+              <img
+                src="/kepos-desktop.png"
+                alt="Kepos for Mac showing a connected publisher and its remote services"
+                width="1440"
+                height="1880"
+              />
+            </div>
+          </figure>
+          <figure class="product-frame product-frame-android">
+            <figcaption><span>ANDROID / MOBILE</span><strong>7 SERVICES / CONNECTED</strong></figcaption>
+            <div class="product-screen product-device-shell">
+              <img
+                src="/kepos-android.png"
+                alt="Kepos for Android showing seven available remote services"
+                width="706"
+                height="1568"
+                loading="lazy"
+              />
+            </div>
+          </figure>
         </div>
       </section>
 
