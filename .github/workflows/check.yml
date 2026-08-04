@@ -38,6 +38,9 @@ jobs:
       - name: Check
         run: npm run check
 
+      - name: Check website deployment bundle
+        run: npm run web:deploy:dry-run
+
       - name: Store coverage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

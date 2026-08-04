@@ -79,7 +79,7 @@
     "android:check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug",
     "android:device-check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDeviceTestAndroidTest",
     "build:packages": "tsc -b --clean packages/bare-host-protocol packages/kepos-android-worklet && tsc -b packages/bare-host-protocol packages/kepos-android-worklet",
-    "check": "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage",
+    "check": "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage && npm run web:verify",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:packages && node --import tsx --test \"test/**/*.test.ts\"",
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-include=\"packages/*/src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info \"test/**/*.test.ts\"",
@@ -89,6 +89,13 @@
     "desktop:native-check": "npm run desktop:build && node --import tsx --test test/native/desktop-quit.native.ts",
     "desktop:run": "npm run desktop:build && dist/desktop/Kepos.app/Contents/MacOS/Kepos",
     "desktop:typecheck": "tsc -p tsconfig.desktop.json --noEmit",
+    "web:dev": "npm run dev --workspace @tta-lab/kepos-web",
+    "web:build": "npm run build --workspace @tta-lab/kepos-web",
+    "web:test": "npm run test --workspace @tta-lab/kepos-web",
+    "web:check": "npm run check --workspace @tta-lab/kepos-web",
+    "web:verify": "npm run verify --workspace @tta-lab/kepos-web",
+    "web:deploy:dry-run": "npm run deploy:dry-run --workspace @tta-lab/kepos-web",
+    "web:deploy": "npm run deploy --workspace @tta-lab/kepos-web",
     "kepos": "tsx src/cli/main.ts"
   },
   "dependencies": {
@@ -126,6 +133,7 @@
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
-    "lefthook@2.1.10": true
+    "lefthook@2.1.10": true,
+    "workerd@1.20260730.1": true
   }
 }

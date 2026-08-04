@@ -19,3 +19,5 @@ lcov.info
 .build/
 dist/desktop/
 dist/release/
+apps/web/dist/
+apps/web/.wrangler/

@@ -177,6 +177,17 @@ npm run desktop:check
 npm run desktop:native-check
 ```
 
+The public website is the `@tta-lab/kepos-web` npm workspace:
+
+```sh
+npm run web:dev
+npm run web:verify
+npm run web:deploy:dry-run
+```
+
+Cloudflare Git Builds are disabled. After a website pull request is merged,
+deploy the current `main` locally with `npm run web:deploy`.
+
 `android:install` uses `adb install -r`, preserving app-private state and the
 subscriber identity. Physical-device tests use the isolated
 `io.github.ttalab.kepos.devicetest` package, so the test runner cannot replace
