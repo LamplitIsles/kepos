@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import {
+  createDefaultCliDependencies,
   runCli,
   type CliDependencies,
 } from "../src/cli/main.js";
 import { waitForSignal } from "../src/cli/signals.js";
 import type { Observation } from "../src/mux/observability.js";
+import { setupPublisher } from "../src/state/publisher.js";
 
 interface Calls {
   setupPublisher: unknown[];
@@ -75,6 +79,7 @@ function fakeCli(): {
     setPublisherServices: async (options) => {
       calls.setPublisherServices.push(options);
     },
+    getPublisherPublicKey: async () => "11".repeat(32),
     startPublisher: async (options) => {
       calls.startPublisher.push(options);
       options.observe?.({
@@ -187,6 +192,26 @@ test("setup publisher parses deny-all state and service targets", async () => {
   ]);
   assert.deepEqual(cli.stdout, [`Publisher key: ${"11".repeat(32)}`]);
   assert.equal(cli.stdout.join("\n").includes("seed"), false);
+});
+
+test("publisher key reports the public key without policy input", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-publisher-key-"));
+  const stateDir = path.join(root, "publisher");
+  const setup = await setupPublisher({
+    stateDir,
+    displayName: "kosmos",
+    subscriberPublicKeys: [],
+    services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
+  });
+  const stdout: string[] = [];
+
+  await runCli(
+    ["publisher", "key", "--state", stateDir],
+    createDefaultCliDependencies({ stdout: (line) => stdout.push(line) }),
+  );
+
+  assert.deepEqual(stdout, [`Publisher key: ${setup.publisherKey}`]);
+  assert.doesNotMatch(stdout.join("\n"), /seed|secret/i);
 });
 
 test("setup subscriber and set-publisher expose only public state", async () => {

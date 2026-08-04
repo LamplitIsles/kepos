@@ -16,6 +16,7 @@ import {
   type SubscriberRuntimeStatus,
 } from "../runtime/subscriber.js";
 import {
+  getPublisherPublicKey,
   setPublisherAllowlist,
   setPublisherServices,
   setupPublisher,
@@ -92,6 +93,7 @@ export interface CliDependencies {
   setPublisherServices: (
     options: SetPublisherServicesOptions,
   ) => Promise<void>;
+  getPublisherPublicKey: (stateDir: string) => Promise<string>;
   startPublisher: (
     options: StartPublisherOptions,
   ) => Promise<CliPublisher>;
@@ -121,6 +123,7 @@ export function createDefaultCliDependencies(
     setSubscriberPublisher,
     setPublisherAllowlist,
     setPublisherServices,
+    getPublisherPublicKey,
     startPublisher,
     startSubscriber,
     acquirePublisherRuntimeLock,
@@ -139,6 +142,7 @@ const CLI_USAGE = [
   "  setup subscriber",
   "  publisher set-allow",
   "  publisher set-services",
+  "  publisher key",
   "  publisher run",
   "  subscriber set-publisher",
   "  subscriber run",
@@ -175,6 +179,10 @@ export async function runCli(
   }
   if (group === "publisher" && action === "set-services") {
     await setPublisherServicesCommand(rest, dependencies);
+    return;
+  }
+  if (group === "publisher" && action === "key") {
+    await getPublisherPublicKeyCommand(rest, dependencies);
     return;
   }
   if (group === "publisher" && action === "run") {
@@ -292,6 +300,17 @@ async function setPublisherServicesCommand(
     ),
   });
   dependencies.stdout("Publisher services updated");
+}
+
+async function getPublisherPublicKeyCommand(
+  arguments_: readonly string[],
+  dependencies: CliDependencies,
+): Promise<void> {
+  const options = parseOptions(arguments_, ["--state"]);
+  const publisherKey = await dependencies.getPublisherPublicKey(
+    requiredState(options),
+  );
+  dependencies.stdout(`Publisher key: ${publisherKey}`);
 }
 
 async function rejectTomlPublisherPolicy(
