@@ -1,5 +1,5 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
+  "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "kepos-web",
   "account_id": "4a7d2cc3b61181986870b57848eff910",
   "compatibility_date": "2026-07-22",

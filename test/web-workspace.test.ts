@@ -32,8 +32,10 @@ test("website is an npm workspace on Node 24", () => {
 
 test("website keeps its Cloudflare deployment contract", () => {
   const config = JSON.parse(read("apps/web/wrangler.jsonc"));
+  const schemaPath = path.resolve(root, "apps/web", config.$schema);
 
   assert.equal(config.name, "kepos-web");
+  assert.equal(existsSync(schemaPath), true);
   assert.equal(config.assets.directory, "./dist");
   assert.deepEqual(config.routes, [
     { pattern: "kepos.guion.io", custom_domain: true },
