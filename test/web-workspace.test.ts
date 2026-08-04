@@ -17,6 +17,9 @@ test("website is an npm workspace on Node 24", () => {
   assert.equal(webPackage.engines.node, ">=24 <25");
   assert.equal(webPackage.packageManager, undefined);
   assert.equal(webPackage.engines.bun, undefined);
+  assert.equal(webPackage.devDependencies.wrangler, undefined);
+  assert.match(rootPackage.devDependencies.wrangler, /^\^4\./);
+  assert.equal(rootPackage.overrides.undici, "7.29.0");
   assert.equal(existsSync(path.join(root, "apps/web/bun.lock")), false);
   assert.equal(rootPackage.scripts["web:dev"], "npm run dev --workspace @tta-lab/kepos-web");
   assert.equal(rootPackage.scripts["web:verify"], "npm run verify --workspace @tta-lab/kepos-web");
