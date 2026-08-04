@@ -49,6 +49,11 @@ export interface SetPublisherServicesOptions {
   services: PublisherStateService[];
 }
 
+export async function getPublisherPublicKey(stateDir: string): Promise<string> {
+  const { config } = await loadPublisherState(stateDir);
+  return derivePublisherHomeKey(config.seed);
+}
+
 export async function setupPublisher(
   options: SetupPublisherOptions,
 ): Promise<SetupPublisherResult> {

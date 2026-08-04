@@ -25,6 +25,14 @@ npm run kepos -- setup publisher \
   --service navidrome:Navidrome:4533
 ```
 
+Print an existing publisher's public key without repeating or changing its
+policy:
+
+```sh
+npm run kepos -- publisher key \
+  --state ~/.local/state/kepos-neo/publisher
+```
+
 Run the publisher, then pin its public key on the subscriber:
 
 ```sh
