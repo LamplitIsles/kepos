@@ -34,10 +34,11 @@ test("package metadata owns the supported runtime and canonical checks", async (
   assert.deepEqual(packageJson.allowScripts, {
     "esbuild@0.28.1": true,
     "lefthook@2.1.10": true,
+    "workerd@1.20260730.1": true,
   });
   assert.equal(
     packageJson.scripts?.check,
-    "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage",
+    "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage && npm run web:verify",
   );
   assert.equal(packageJson.scripts?.["build:home"], undefined);
   assert.equal(packageJson.scripts?.["check:home"], undefined);

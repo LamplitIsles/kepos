@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://kepos.guion.io/sitemap.xml

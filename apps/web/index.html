@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1209" />
+    <meta
+      name="description"
+      content="Kepos makes private services on another machine feel local—without a public IP, account, or virtual subnet."
+    />
+    <meta property="og:title" content="Kepos — Flatten the network" />
+    <meta property="og:description" content="The network was built wrong. It’s time to flatten the world." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://kepos.guion.io" />
+    <meta property="og:image" content="https://kepos.guion.io/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Kepos: Far away. Addressed locally. A remote Navidrome service available at a local address."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://kepos.guion.io/og-image.png" />
+    <meta
+      name="twitter:image:alt"
+      content="Kepos: Far away. Addressed locally. A remote Navidrome service available at a local address."
+    />
+    <link rel="canonical" href="https://kepos.guion.io" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/main.ts"></script>
+    <title>Kepos — Flatten the network</title>
+  </head>
+  <body class="landing pear-noir">
+    <a class="skip-link" href="#content">Skip to content</a>
+    <div class="screen-noise" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="wordmark" href="#top" aria-label="Kepos home">
+        <svg class="portal-mark" viewBox="0 0 40 28" aria-hidden="true">
+          <path d="M15 3H4v22h11M25 3h11v22H25M10 14h20" />
+        </svg>
+        <span>KEPOS</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#why" data-section-link="why"><i data-lucide="book-open" aria-hidden="true"></i>why</a>
+        <a href="#how" data-section-link="how"><i data-lucide="waypoints" aria-hidden="true"></i>how</a>
+        <a class="source-nav" href="https://github.com/tta-lab/kepos-neo" target="_blank" rel="noreferrer">
+          <i data-lucide="code-xml" aria-hidden="true"></i>source
+        </a>
+      </nav>
+    </header>
+
+    <main class="landing-main" id="content">
+      <section class="hero page-chapter" id="top" aria-labelledby="hero-title" data-section="top">
+        <div class="hero-copy">
+          <p class="eyebrow">PRIVATE SERVICES / LOCAL ADDRESSES</p>
+          <h1 id="hero-title">Far away.<strong>Addressed locally.</strong></h1>
+          <p class="product-definition">
+            Kepos makes services on another machine feel local—without a public IP, account, or virtual subnet.
+          </p>
+        </div>
+
+        <aside class="hero-proof" aria-label="A remote Navidrome service available at a local address">
+          <header>
+            <span>LOCAL SURFACE / 01</span>
+            <span class="proof-status"><i aria-hidden="true"></i>DIRECT</span>
+          </header>
+          <div class="proof-service">
+            <i data-lucide="music" aria-hidden="true"></i>
+            <span>YOUR MUSIC, STILL AT HOME</span>
+          </div>
+          <code><span>http://</span><strong>navidrome.localhost</strong><span>:17480/</span></code>
+          <div class="proof-route" aria-hidden="true"><span>REMOTE MACHINE</span><i></i><span>THIS DEVICE</span></div>
+        </aside>
+
+        <div class="hero-lower">
+          <p class="hero-manifesto">
+            <span>The network was built wrong.</span>
+            <strong>It’s time to flatten the world.</strong>
+          </p>
+          <ol class="boundary-list" aria-label="Kepos boundaries">
+            <li><i data-lucide="globe-lock" aria-hidden="true"></i><span>01</span><strong>No public IP.</strong></li>
+            <li><i data-lucide="user-round-x" aria-hidden="true"></i><span>02</span><strong>No account.</strong></li>
+            <li><i data-lucide="network" aria-hidden="true"></i><span>03</span><strong>No virtual subnet.</strong></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="access-chapter page-chapter" id="access" aria-labelledby="access-title" data-section="access">
+        <header class="chapter-lead">
+          <p class="eyebrow">01 / LOCAL SURFACE</p>
+          <h2 id="access-title">The machine stays there.<br /><strong>The address arrives here.</strong></h2>
+          <p>The service stays where it is. Kepos brings its address to the loopback interface in front of you.</p>
+        </header>
+
+        <div class="endpoint-grid">
+          <article class="local-endpoint">
+            <header><i data-lucide="app-window" aria-hidden="true"></i><span>PRIVATE INDEX / HTTP</span></header>
+            <code
+              ><span class="scheme">http://</span><strong>home.localhost</strong
+              ><span class="http-port">:17480</span><span>/</span></code
+            >
+            <p>A private start page, delivered through the local gateway.</p>
+          </article>
+          <article class="local-endpoint">
+            <header><i data-lucide="music" aria-hidden="true"></i><span>NAVIDROME / HTTP</span></header>
+            <code
+              ><span class="scheme">http://</span><strong>navidrome.localhost</strong
+              ><span class="http-port">:17480</span><span>/</span></code
+            >
+            <p>The music library is remote. Its address is local.</p>
+          </article>
+          <article class="local-endpoint command-endpoint">
+            <header><i data-lucide="square-terminal" aria-hidden="true"></i><span>SSH / RAW TCP</span></header>
+            <code><span class="terminal-prompt">$</span> ssh -p 2222 user@127.0.0.1</code>
+            <p>Raw TCP services bind to an explicit loopback port instead of a hostname.</p>
+          </article>
+        </div>
+      </section>
+
+      <section
+        class="topology-chapter page-chapter"
+        id="topology"
+        aria-labelledby="topology-title"
+        data-section="topology"
+      >
+        <header class="chapter-lead">
+          <p class="eyebrow">02 / PRIVATE TOPOLOGY</p>
+          <h2 id="topology-title">Trust draws the topology.</h2>
+          <p>One person opens a service. The people they trust become its private shape.</p>
+        </header>
+
+        <figure class="topology-figure">
+          <div class="topology-canvas">
+            <svg viewBox="0 0 720 620" role="img" aria-labelledby="graph-title graph-desc">
+              <title id="graph-title">Trust forms a private topology</title>
+              <desc id="graph-desc">
+                Many trusted peers connect independently to one publisher. No peer-to-peer mesh exists between them.
+              </desc>
+              <defs>
+                <pattern id="pixel-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                  <path d="M40 0H0v40" class="grid-line" />
+                </pattern>
+              </defs>
+              <rect width="720" height="620" class="map-bg" />
+              <rect width="720" height="620" fill="url(#pixel-grid)" />
+              <circle class="orbit" cx="360" cy="310" r="224" />
+
+              <g class="link link-one"><path d="M360 310V94" /><circle cx="360" cy="202" r="5" /></g>
+              <g class="link link-two"><path d="M360 310H576" /><circle cx="468" cy="310" r="5" /></g>
+              <g class="link link-three"><path d="M360 310V526" /><circle cx="360" cy="418" r="5" /></g>
+              <g class="link link-four"><path d="M360 310H144" /><circle cx="252" cy="310" r="5" /></g>
+
+              <g class="publisher-node"><rect x="303" y="253" width="114" height="114" /></g>
+              <text x="360" y="318" class="node-label center-label">PUBLISHER</text>
+
+              <g class="peer-node peer-one">
+                <rect x="309" y="58" width="102" height="72" />
+                <text x="360" y="99" class="peer-label center-label">TRUSTED_PEER_01</text>
+              </g>
+              <g class="peer-node peer-two">
+                <rect x="548" y="274" width="130" height="72" />
+                <text x="613" y="318" class="peer-label center-label">TRUSTED_PEER_02</text>
+              </g>
+              <g class="peer-node peer-three">
+                <rect x="309" y="490" width="102" height="72" />
+                <text x="360" y="537" class="peer-label center-label">TRUSTED_PEER_03</text>
+              </g>
+              <g class="peer-node peer-four">
+                <rect x="42" y="274" width="130" height="72" />
+                <text x="107" y="318" class="peer-label center-label">TRUSTED_PEER_04</text>
+              </g>
+
+              <text x="26" y="594" class="hud-copy">ONE PUBLISHER / MANY TRUSTED PEERS</text>
+            </svg>
+          </div>
+          <figcaption>
+            <strong>FIG. A — TRUST DRAWS THE BOUNDARY</strong><span>Relationship creates the private space.</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="why-chapter page-chapter" id="why" aria-labelledby="why-title" data-section="why">
+        <header class="chapter-lead chapter-lead-wide">
+          <p class="eyebrow">03 / WHY KEPOS</p>
+          <h2 id="why-title">A simpler network<br /><strong>by design.</strong></h2>
+          <p>
+            Mesh VPNs connect devices into a virtual network. Kepos exposes selected services to the people trusted to
+            enter.
+          </p>
+        </header>
+
+        <div class="principle-grid">
+          <article>
+            <span>01 / SCOPE</span>
+            <i data-lucide="app-window" aria-hidden="true"></i>
+            <h3>Services, not subnets.</h3>
+            <p>The music, the shell, or the private web app—not another network to administer.</p>
+          </article>
+          <article>
+            <span>02 / TRUST</span>
+            <i data-lucide="key-round" aria-hidden="true"></i>
+            <h3>Trust stays with the person opening the service.</h3>
+            <p>A local allowlist decides who may enter. No hosted account authority can add somebody in the middle.</p>
+          </article>
+          <article>
+            <span>03 / SPACE</span>
+            <i data-lucide="network" aria-hidden="true"></i>
+            <h3>Connection creates the private space.</h3>
+            <p>Kepos does not provision an empty network first. The topology exists because the relationship exists.</p>
+          </article>
+        </div>
+
+        <aside class="honesty-note">
+          <span>THE TRADE</span>
+          <p>
+            Mesh VPNs provide broader routing and mature relay fallback. Kepos chooses a smaller scope and less central
+            authority. That is a boundary, not a claim of universal superiority.
+          </p>
+        </aside>
+      </section>
+
+      <section class="how-chapter page-chapter" id="how" aria-labelledby="how-title" data-section="how">
+        <header class="chapter-lead">
+          <p class="eyebrow">04 / HOW IT WORKS</p>
+          <h2 id="how-title">The mountain remains.<br /><strong>The detour doesn’t.</strong></h2>
+          <p>Discovery finds a peer. Local keys decide trust. One encrypted connection carries only selected services.</p>
+        </header>
+
+        <figure class="tunnel-diagram">
+          <svg viewBox="0 0 1040 480" role="img" aria-labelledby="tunnel-title tunnel-desc">
+            <title id="tunnel-title">Kepos opens a clear route through a mountain</title>
+            <desc id="tunnel-desc">
+              A subscriber and publisher sit on opposite sides. An encrypted route passes through a tunnel cut into
+              the mountain.
+            </desc>
+            <defs>
+              <pattern id="article-grid" width="28" height="28" patternUnits="userSpaceOnUse">
+                <path d="M28 0H0v28" class="grid-line" />
+              </pattern>
+            </defs>
+            <rect width="1040" height="480" class="map-bg" />
+            <rect width="1040" height="480" fill="url(#article-grid)" />
+            <path
+              class="mountain-shape"
+              d="M238 400 238 334 294 334 294 278 350 278 350 222 406 222 406 166 462 166 462 110 578 110 578 166 634 166 634 222 690 222 690 278 746 278 746 334 802 334 802 400Z"
+            />
+            <path class="mountain-ridge" d="M294 334h56v-56h56v-56h56v-56h116v56h56v56h56v56h56" />
+            <path class="legacy-path" d="M112 344V64H928V344" />
+            <text x="520" y="48" class="diagram-note center-label">PUBLIC DETOUR</text>
+            <path class="tunnel-mouth" d="M446 400v-76c0-45 33-82 74-82s74 37 74 82v76Z" />
+            <path class="direct-path" d="M112 344H928" />
+            <circle class="packet-dot" cx="520" cy="344" r="8" />
+            <g class="endpoint endpoint-left">
+              <rect x="54" y="308" width="116" height="72" />
+              <text x="112" y="350" class="center-label">SUBSCRIBER</text>
+            </g>
+            <g class="endpoint endpoint-right">
+              <rect x="870" y="308" width="116" height="72" />
+              <text x="928" y="350" class="center-label">PUBLISHER</text>
+            </g>
+            <text x="520" y="330" class="direct-label center-label">ENCRYPTED PATH</text>
+            <text x="520" y="440" class="diagram-note center-label">NO PUBLIC ORIGIN</text>
+          </svg>
+          <figcaption>FIG. B — THE TUNNEL IS THE RELATIONSHIP BETWEEN TWO KEYS.</figcaption>
+        </figure>
+
+        <div class="process-grid">
+          <article>
+            <span>01</span>
+            <i data-lucide="waypoints" aria-hidden="true"></i>
+            <h3>Discover</h3>
+            <p>HyperDHT finds the pinned peer and attempts NAT traversal. Bootstrap nodes do not relay the stream.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <i data-lucide="key-round" aria-hidden="true"></i>
+            <h3>Authenticate</h3>
+            <p>The service owner accepts only public keys in a local allowlist. Private keys stay on their devices.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <i data-lucide="route" aria-hidden="true"></i>
+            <h3>Open</h3>
+            <p>One persistent encrypted connection carries independent channels for the selected services.</p>
+          </article>
+        </div>
+
+      </section>
+
+      <section
+        class="lineage-chapter page-chapter"
+        id="lineage"
+        aria-labelledby="lineage-title"
+        data-section="lineage"
+      >
+        <header class="chapter-lead">
+          <p class="eyebrow">05 / TECHNICAL LINEAGE</p>
+          <h2 id="lineage-title">Built from open<br /><strong>peer-to-peer primitives.</strong></h2>
+          <p>Kepos is an independent project built with technology from the Holepunch ecosystem.</p>
+        </header>
+
+        <div class="primitive-rail">
+          <article>
+            <header>
+              <span>01 / NETWORK</span>
+              <i data-lucide="radio-tower" aria-hidden="true"></i>
+            </header>
+            <h3>HyperDHT</h3>
+            <p><strong>Role</strong> — discovery, NAT traversal, and encrypted streams.</p>
+          </article>
+          <article>
+            <header>
+              <span>02 / CHANNELS</span>
+              <i data-lucide="layers-3" aria-hidden="true"></i>
+            </header>
+            <h3>Protomux</h3>
+            <p><strong>Role</strong> — many selected services over one connection.</p>
+          </article>
+          <article>
+            <header>
+              <span>03 / RUNTIME</span>
+              <i data-lucide="monitor-smartphone" aria-hidden="true"></i>
+            </header>
+            <h3>Bare</h3>
+            <p><strong>Role</strong> — a portable runtime layer across mobile and desktop.</p>
+          </article>
+        </div>
+
+        <footer class="lineage-note">
+          <p>Made possible by the people building these tools and the wider Holepunch ecosystem.</p>
+          <small>Kepos is independent and is not affiliated with or endorsed by Holepunch.</small>
+        </footer>
+      </section>
+
+      <section class="source-chapter page-chapter" id="source" aria-labelledby="source-title" data-section="source">
+        <header class="chapter-lead">
+          <p class="eyebrow">06 / OPEN SOURCE</p>
+          <h2 id="source-title">Inspect the machinery.<br /><strong>Keep the relationship yours.</strong></h2>
+        </header>
+
+        <div class="source-grid">
+          <a class="repository-card" href="https://github.com/tta-lab/kepos-neo" target="_blank" rel="noreferrer">
+            <span>PUBLIC REPOSITORY</span>
+            <i data-lucide="code-xml" aria-hidden="true"></i>
+            <strong>tta-lab/kepos-neo</strong>
+            <small>READ THE SOURCE ↗</small>
+          </a>
+          <section class="quickstart-card" aria-labelledby="quickstart-title">
+            <span>DIRECT DOWNLOAD</span>
+            <i data-lucide="download" aria-hidden="true"></i>
+            <strong id="quickstart-title">GET KEPOS</strong>
+            <p>Signed Android and Apple Silicon macOS builds are published on GitHub.</p>
+            <div class="release-links">
+              <a href="https://github.com/tta-lab/kepos-neo/releases/latest" target="_blank" rel="noreferrer">LATEST RELEASE ↗</a>
+              <a href="https://github.com/tta-lab/kepos-neo/blob/main/docs/releasing.md#verify-a-downloaded-release" target="_blank" rel="noreferrer">VERIFY A DOWNLOAD ↗</a>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="landing-footer">
+      <span>KEEP US CONNECTED</span>
+      <div><a class="landing-link" href="#top">BACK TO TOP ↑</a></div>
+    </footer>
+  </body>
+</html>
