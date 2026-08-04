@@ -1063,6 +1063,21 @@ svg.lucide {
   }
 }
 
+@media (max-width: 1020px) {
+  .access-product-layout {
+    display: block;
+  }
+
+  .access-product-layout .chapter-lead {
+    display: grid;
+    margin-bottom: clamp(58px, 7vw, 90px);
+  }
+
+  .access-product-layout .chapter-lead h2 {
+    font-size: clamp(64px, 9vw, 84px);
+  }
+}
+
 @media (max-width: 980px) {
   :root {
     --page: min(calc(100% - 40px), 820px);
@@ -1083,19 +1098,6 @@ svg.lucide {
   .chapter-lead,
   .topology-chapter {
     grid-template-columns: 1fr;
-  }
-
-  .access-product-layout {
-    display: block;
-  }
-
-  .access-product-layout .chapter-lead {
-    display: grid;
-    margin-bottom: clamp(58px, 7vw, 90px);
-  }
-
-  .access-product-layout .chapter-lead h2 {
-    font-size: clamp(64px, 9vw, 84px);
   }
 
   .chapter-lead > p:last-child {

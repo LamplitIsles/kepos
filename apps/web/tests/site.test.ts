@@ -126,6 +126,19 @@ describe("Kepos landing page", () => {
     expect(androidScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");
   });
 
+  it("stacks the product composition before its columns can overflow", () => {
+    const css = readProjectFile("src/styles.css");
+
+    expect(css).not.toBeNull();
+    if (!css) return;
+
+    const breakpoint = css.match(
+      /@media \(max-width: (\d+)px\) \{[\s\S]*?\.access-product-layout \{\s*display: block;/,
+    )?.[1];
+
+    expect(Number(breakpoint)).toBeGreaterThanOrEqual(1020);
+  });
+
   it("redirects legacy pages to live homepage fragments", () => {
     const redirects = readProjectFile("public/_redirects");
     const sitemap = readProjectFile("public/sitemap.xml");
