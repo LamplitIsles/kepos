@@ -29,21 +29,6 @@ interface DhtStats {
     successes: number;
     aborts: number;
   };
-  relayStatus?:
-    | "relay_unconfigured"
-    | "relay_configured"
-    | "relay_attempt_seen"
-    | "relay_active_seen"
-    | "relay_abort_seen";
-  sockets?: {
-    candidateListener?: DhtSocketObservation;
-    control?: DhtSocketObservation;
-  };
-}
-
-interface DhtSocketObservation {
-  socketClass: "dht_candidate_listener" | "dht_client";
-  localPort: number;
 }
 
 export interface DhtKeyPair {
@@ -82,8 +67,6 @@ export interface DhtNode {
     onConnection: (stream: DhtStream) => void,
   ) => DhtServer;
   stats: DhtStats;
-  address?: () => DhtAddress | null;
-  localAddress?: () => DhtAddress | null;
   destroy: (options?: { force?: boolean }) => Promise<void>;
 }
 
@@ -130,11 +113,9 @@ export function dhtStreamSnapshot(stream: DhtStream): unknown {
     ...keyFields(rawSnapshot, ["publicKey", "remotePublicKey"]),
   };
   const udx = udxStreamSnapshot(stream.rawStream);
-  const path = udxPathSnapshot(stream.rawStream);
 
   return sanitizeObservation({
     ...base,
-    ...path,
     ...(udx ? { udx } : {}),
   });
 }
@@ -151,27 +132,16 @@ export function holepunchObservation(
   localFirewall: number,
   remoteAddresses: DhtAddress[],
   localAddresses: DhtAddress[],
-  options: { localConnection?: boolean } = {},
 ): Record<string, string | number> {
   return {
     remoteFirewall: dhtFirewallName(remoteFirewall),
     localFirewall: dhtFirewallName(localFirewall),
     remoteAddressCount: remoteAddresses.length,
     localAddressCount: localAddresses.length,
-    path: "direct_punch",
-    socketClass: "udx_connection",
-    localCandidateSelection:
-      options.localConnection === false ? "disabled" : "pending",
-    localPortVisibility: "not_exposed",
-    relayStatus: "relay_unconfigured",
   };
 }
 
-export function dhtStatsSnapshot(
-  node: DhtNode,
-  options: { relayConfigured?: boolean } = {},
-): DhtStats {
-  const sockets = dhtSocketObservations(node);
+export function dhtStatsSnapshot(node: DhtNode): DhtStats {
   return {
     punches: {
       consistent: node.stats.punches.consistent,
@@ -183,126 +153,7 @@ export function dhtStatsSnapshot(
       successes: node.stats.relaying.successes,
       aborts: node.stats.relaying.aborts,
     },
-    relayStatus: relayStatus(
-      node.stats.relaying,
-      options.relayConfigured === true,
-    ),
-    ...(sockets ? { sockets } : {}),
   };
-}
-
-function relayStatus(
-  stats: DhtStats["relaying"],
-  configured: boolean,
-): NonNullable<DhtStats["relayStatus"]> {
-  if (stats.successes > 0) return "relay_active_seen";
-  if (stats.aborts > 0) return "relay_abort_seen";
-  if (stats.attempts > 0) return "relay_attempt_seen";
-  return configured ? "relay_configured" : "relay_unconfigured";
-}
-
-function dhtSocketObservations(
-  node: DhtNode,
-): NonNullable<DhtStats["sockets"]> | undefined {
-  const candidate = dhtAddress(() => node.localAddress?.());
-  const control = dhtAddress(() => node.address?.());
-  if (!candidate && !control) return undefined;
-
-  const sockets: NonNullable<DhtStats["sockets"]> = {};
-  if (candidate) {
-    sockets.candidateListener = {
-      socketClass: "dht_candidate_listener",
-      localPort: candidate.port,
-    };
-  }
-  if (control) {
-    sockets.control = {
-      socketClass:
-        candidate?.port === control.port
-          ? "dht_candidate_listener"
-          : "dht_client",
-      localPort: control.port,
-    };
-  }
-  return sockets;
-}
-
-function dhtAddress(
-  read: () => DhtAddress | null | undefined,
-): DhtAddress | undefined {
-  try {
-    const address = read();
-    return address && validPort(address.port) ? address : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function udxPathSnapshot(rawStream: unknown): Record<string, unknown> {
-  if (rawStream === null || typeof rawStream !== "object") return {};
-
-  const raw = rawStream as Record<string, unknown>;
-  const remoteHost = readProperty(raw, "remoteHost");
-  const localPort = udxLocalPort(readProperty(raw, "socket"));
-  const path =
-    typeof remoteHost === "string" && remoteHost.length > 0
-      ? isPrivateAddress(remoteHost)
-        ? "direct_lan"
-        : "direct_public"
-      : "direct_pending";
-
-  return {
-    path,
-    socketClass: "udx_connection",
-    ...(localPort === undefined ? {} : { localPort }),
-    localCandidateSelected:
-      path === "direct_lan" ? true : path === "direct_public" ? false : "unknown",
-    relayStatus: "relay_unconfigured",
-  };
-}
-
-function udxLocalPort(socketValue: unknown): number | undefined {
-  if (socketValue === null || typeof socketValue !== "object") return undefined;
-  const socket = socketValue as Record<string, unknown>;
-  const address = readProperty(socket, "address");
-  if (typeof address !== "function") return undefined;
-  try {
-    const value = address.call(socket) as unknown;
-    if (value === null || typeof value !== "object") return undefined;
-    const port = readProperty(value as Record<string, unknown>, "port");
-    return typeof port === "number" && validPort(port) ? port : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isPrivateAddress(host: string): boolean {
-  const lower = host.toLowerCase();
-  if (lower === "::1" || lower.startsWith("fc") || lower.startsWith("fd")) {
-    return true;
-  }
-  if (/^fe[89ab]/.test(lower)) return true;
-
-  const ipv4 = lower.startsWith("::ffff:") ? lower.slice(7) : lower;
-  const octets = ipv4.split(".").map(Number);
-  if (
-    octets.length !== 4 ||
-    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
-  ) {
-    return false;
-  }
-  const [first, second] = octets as [number, number, number, number];
-  return (
-    first === 10 ||
-    first === 127 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  );
-}
-
-function validPort(port: number): boolean {
-  return Number.isInteger(port) && port > 0 && port <= 65_535;
 }
 
 function booleanFields(

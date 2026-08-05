@@ -66,15 +66,13 @@ port is occupied. The listener is not the whole transport: `dht-rpc` also uses
 an ephemeral DHT client socket, and HyperDHT manages ephemeral UDX connection
 sockets for encrypted peer streams.
 
-Kepos observations identify the candidate listener, the active DHT control
-socket, and a connected UDX stream's local port and private-or-public path
-class without recording IP addresses. The public failed holepunch callback does
-not expose the connection socket's local port or per-datagram results, so it
-must report that limit instead of naming a packet-drop location. HyperDHT's
-aggregate relay attempt, success, and abort counters can show relay activity,
-but the relay counters do not distinguish an unavailable relay from a rejected
-relay. That distinction needs a narrower upstream hook or an external packet
-capture.
+Kepos observations deliberately allowlist connection flags, truncated peer
+keys, UDX counters, and aggregate DHT punch and relay counters. They do not
+classify a connection's LAN, public, or relay path. The public failed holepunch
+callback does not expose the connection socket's local port or per-datagram
+results, and aggregate relay counters do not distinguish an unavailable relay
+from a rejected relay. Those questions need a narrower upstream hook or an
+external packet capture rather than inference from incomplete observations.
 
 This ADR supersedes only ADR 0006's decision that Desktop roles do not share a
 DHT instance. ADR 0006's decisions about separate identities, per-state locks,

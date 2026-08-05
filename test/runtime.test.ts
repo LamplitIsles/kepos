@@ -399,19 +399,11 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
     );
     assert.ok(connected);
     const transport = connected.transport as Record<string, unknown>;
-    assert.equal(transport.socketClass, "udx_connection");
-    assert.equal(typeof transport.localPort, "number");
-    assert.equal(transport.relayStatus, "relay_unconfigured");
-    assert.match(String(transport.path), /^direct_(?:lan|public)$/u);
+    assert.equal(typeof transport.udx, "object");
     assert.doesNotMatch(
       JSON.stringify(connected),
       /(?:127\.0\.0\.1|0\.0\.0\.0|::1)/u,
     );
-    const dht = connected.dht as {
-      sockets?: { candidateListener?: unknown; control?: unknown };
-    };
-    assert.ok(dht.sockets?.candidateListener);
-    assert.ok(dht.sockets.control);
 
     await subscriber.stop();
     assert.equal(subscriber.status().state, "stopped");

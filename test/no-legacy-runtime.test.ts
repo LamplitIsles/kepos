@@ -127,6 +127,10 @@ test("shared HyperDHT docs distinguish the listener from ephemeral UDP sockets",
     /relay.*counters.*do\s+not\s+distinguish.*unavailable.*rejected/isu,
   );
   assert.doesNotMatch(
+    sharedNodeDecision,
+    /Kepos observations identify the candidate listener/iu,
+  );
+  assert.doesNotMatch(
     combined,
     /normally (?:has|uses) one (?:HyperDHT )?UDP endpoint/iu,
   );
