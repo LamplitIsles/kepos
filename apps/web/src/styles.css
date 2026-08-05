@@ -541,6 +541,36 @@ svg.lucide {
   aspect-ratio: 1.18;
 }
 
+.product-window-bar {
+  display: flex;
+  height: 30px;
+  padding: 0 13px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  background: #f4f4f2;
+}
+
+.product-window-control {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 50%;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.product-window-close {
+  background: #ff5f57;
+}
+
+.product-window-minimize {
+  background: #febc2e;
+}
+
+.product-window-zoom {
+  background: #28c840;
+}
+
 .product-frame-desktop img {
   height: 100%;
   object-fit: cover;
@@ -556,7 +586,13 @@ svg.lucide {
 }
 
 .product-frame-desktop {
+  overflow: hidden;
   width: 92%;
+  max-width: 720px;
+  border-radius: 18px;
+  box-shadow:
+    0 28px 70px rgba(0, 0, 0, 0.42),
+    14px 14px 0 rgba(183, 238, 69, 0.045);
 }
 
 .product-frame.product-frame-android {
