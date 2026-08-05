@@ -14,6 +14,15 @@ function readProjectBuffer(path: string): Buffer | null {
   return existsSync(fullPath) ? readFileSync(fullPath) : null;
 }
 
+function readPngDimensions(buffer: Buffer): { width: number; height: number } | null {
+  if (buffer.subarray(1, 4).toString("ascii") !== "PNG") return null;
+
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20),
+  };
+}
+
 function readMetaContent(html: string, key: string): string | undefined {
   return html.match(new RegExp(`<meta\\s+(?:property|name)="${key}"\\s+content="([^"]+)"`))?.[1];
 }
@@ -124,6 +133,37 @@ describe("Kepos landing page", () => {
     expect(html).not.toContain('class="endpoint-grid"');
     expect(desktopScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");
     expect(androidScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");
+  });
+
+  it("keeps the desktop capture Retina-sharp inside macOS window chrome", () => {
+    const html = readProjectFile("index.html");
+    const css = readProjectFile("src/styles.css");
+    const desktopScreenshot = readProjectBuffer("public/kepos-desktop.png");
+
+    expect(html).not.toBeNull();
+    expect(css).not.toBeNull();
+    expect(desktopScreenshot).not.toBeNull();
+    if (!html || !css || !desktopScreenshot) return;
+
+    const dimensions = readPngDimensions(desktopScreenshot);
+    expect(dimensions).not.toBeNull();
+    if (!dimensions) return;
+
+    expect(dimensions.width).toBeGreaterThanOrEqual(1440);
+    expect(dimensions.height).toBeGreaterThanOrEqual(1800);
+    const desktopFrameMaxWidth = Number(css.match(/\.product-frame-desktop\s*\{[^}]*max-width:\s*(\d+)px/s)?.[1]);
+    expect(desktopFrameMaxWidth).toBeLessThanOrEqual(dimensions.width / 2);
+    expect(html).toMatch(
+      new RegExp(
+        `src="/kepos-desktop\\.png"[\\s\\S]*?width="${dimensions.width}"[\\s\\S]*?height="${dimensions.height}"`,
+      ),
+    );
+    expect(html).toContain('class="product-window-bar"');
+    expect(html.match(/class="product-window-control product-window-(?:close|minimize|zoom)"/g)).toHaveLength(3);
+    expect(css).toMatch(/\.product-frame-desktop\s*\{[^}]*border-radius:/s);
+    expect(css).toContain("#ff5f57");
+    expect(css).toContain("#febc2e");
+    expect(css).toContain("#28c840");
   });
 
   it("stacks the product composition before its columns can overflow", () => {
