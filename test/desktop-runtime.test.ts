@@ -24,6 +24,12 @@ const remotePublisherKey = "e4".repeat(32);
 const localSubscriberKey = "d1".repeat(32);
 const localPublisherSeed = "11".repeat(32);
 const localPublisherKey = derivePublisherHomeKey(localPublisherSeed);
+const replacementRemotePublisherKey = "f4".repeat(32);
+const replacementSubscriberKey = "d2".repeat(32);
+const replacementPublisherSeed = "33".repeat(32);
+const replacementPublisherKey = derivePublisherHomeKey(
+  replacementPublisherSeed,
+);
 const registry: HomeRegistry = {
   schemaVersion: 2,
   revision: 1,
@@ -1021,12 +1027,109 @@ test("desktop exposes an initial shared transport failure", async () => {
   assert.equal(snapshots.at(-1)?.appPhase, "running");
   assert.equal(snapshots.at(-1)?.publisher?.phase, "failed");
   assert.equal(snapshots.at(-1)?.publisher?.error, "transport unavailable");
+  assert.equal(snapshots.at(-1)?.publisher?.displayName, "Mac smoke");
+  assert.equal(snapshots.at(-1)?.publisher?.publisherKey, localPublisherKey);
   assert.equal(snapshots.at(-1)?.publisher?.activeSubscribers, 0);
   assert.deepEqual(snapshots.at(-1)?.publisher?.activeSubscriberKeys, []);
   assert.equal(snapshots.at(-1)?.subscriber?.phase, "failed");
   assert.equal(snapshots.at(-1)?.subscriber?.error, "transport unavailable");
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.remotePublisher?.publisherKey,
+    remotePublisherKey,
+  );
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.subscriberKey,
+    localSubscriberKey,
+  );
   assert.equal(events.includes("publisher-lock:release"), true);
   assert.equal(events.includes("subscriber-lock:release"), true);
+});
+
+test("desktop transport replacement failure shows the target relationship", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  let creates = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      bootstrap: [{ host: "bootstrap-one.example", port: 49_737 }],
+      publisher: { stateDir: "/state/publisher" },
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      createDht: (options) => {
+        creates++;
+        if (creates === 2) throw new Error("target transport unavailable");
+        return trackedDht(events, options.bootstrap?.[0]?.host ?? "default");
+      },
+      loadPublisherState: async (stateDir) => {
+        const replacement = stateDir === "/state/replacement-publisher";
+        return {
+          config: {
+            seed: replacement ? replacementPublisherSeed : localPublisherSeed,
+            allow: ["22".repeat(32)],
+          },
+          manifest: {
+            displayName: replacement ? "Replacement Mac" : "Mac smoke",
+            publisherConfig: "publisher.json",
+            services: [],
+          },
+        };
+      },
+      loadSubscriberConnectionState: async (stateDir) => {
+        const replacement = stateDir === "/state/replacement-subscriber";
+        return {
+          identity: {
+            publicKey: replacement
+              ? replacementSubscriberKey
+              : localSubscriberKey,
+            secretKey: "00".repeat(64),
+          },
+          contact: {
+            publisherKey: replacement
+              ? replacementRemotePublisherKey
+              : remotePublisherKey,
+            label: replacement ? "replacement-publisher" : "kosmos",
+            requestedLocalPort: 0,
+          },
+          pending: false,
+        };
+      },
+    }),
+  );
+
+  await assert.rejects(
+    runtime.reconfigure({
+      bootstrap: [{ host: "bootstrap-two.example", port: 49_738 }],
+      publisher: { stateDir: "/state/replacement-publisher" },
+      subscriber: {
+        stateDir: "/state/replacement-subscriber",
+        gatewayPort: 17_481,
+        services: [],
+      },
+    }),
+    /target transport unavailable/,
+  );
+
+  assert.equal(snapshots.at(-1)?.publisher?.displayName, "Replacement Mac");
+  assert.equal(
+    snapshots.at(-1)?.publisher?.publisherKey,
+    replacementPublisherKey,
+  );
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.remotePublisher?.publisherKey,
+    replacementRemotePublisherKey,
+  );
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.subscriberKey,
+    replacementSubscriberKey,
+  );
+  assert.equal(snapshots.at(-1)?.subscriber?.gatewayPort, 17_481);
+  await runtime.stop();
 });
 
 test("desktop reports transport replacement failure and can retry it", async () => {
