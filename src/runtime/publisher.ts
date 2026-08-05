@@ -66,6 +66,7 @@ export interface PublisherRuntimeStatus {
   homeUrl: string;
   acceptedConnections: number;
   activeSubscribers: number;
+  activeSubscriberKeys: string[];
   pairing: PublisherPairingSnapshot;
 }
 
@@ -449,6 +450,7 @@ export async function startPublisher(
       homeUrl: home.url,
       acceptedConnections: accepted,
       activeSubscribers: activeBySubscriberKey.size,
+      activeSubscriberKeys: [...activeBySubscriberKey.keys()].sort(),
       pairing: pairing.snapshot(),
     }),
     async stop(): Promise<void> {

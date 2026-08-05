@@ -197,6 +197,7 @@ export async function startDesktopHost(
             publisher: {
               phase: "starting" as const,
               activeSubscribers: 0,
+              activeSubscriberKeys: [],
               acceptedConnections: 0,
               services: [],
             },

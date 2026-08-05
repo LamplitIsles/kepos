@@ -366,6 +366,7 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
       homeUrl: publisher.home.url,
       acceptedConnections: 0,
       activeSubscribers: 0,
+      activeSubscriberKeys: [],
       pairing: { phase: "idle" },
     } satisfies PublisherRuntimeStatus);
 
@@ -381,11 +382,14 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
       connection: "connected",
       connectionGeneration: 1,
       publisherKey,
+      publisherLabel: "kosmos",
+      subscriberKey,
       homeUrl: subscriber.home.url,
       services: [],
     } satisfies SubscriberRuntimeStatus);
     assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
     assert.equal(publisher.status().activeSubscribers, 1);
+    assert.deepEqual(publisher.status().activeSubscriberKeys, [subscriberKey]);
 
     await subscriber.stop();
     assert.equal(subscriber.status().state, "stopped");

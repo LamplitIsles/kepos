@@ -16,14 +16,17 @@ const snapshot: DesktopSnapshot = {
     publisherKey: "a7".repeat(32),
     keyFingerprint: "a7".repeat(8),
     activeSubscribers: 1,
+    activeSubscriberKeys: ["cd".repeat(32)],
     acceptedConnections: 2,
     services: [{ id: "site", name: "Site", targetPort: 8080 }],
   },
   subscriber: {
     phase: "running",
     connection: "connected",
+    subscriberKey: "cd".repeat(32),
     remotePublisher: {
       displayName: "kosmos",
+      publisherKey: "e4".repeat(32),
       keyFingerprint: "e499c38286e33f48",
     },
     gatewayPort: 17_480,

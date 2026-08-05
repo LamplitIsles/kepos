@@ -51,26 +51,67 @@ test("desktop service glyphs use the same Lucide choices as Android", () => {
   assert.match(html, /<path d="m12 14 4-4"\/>/);
 });
 
-test("desktop UI renders subscriber and local publisher as separate roles", () => {
+test("desktop UI renders remote and hosted relationships at the same time", () => {
   const html = renderDesktopUi();
 
-  assert.match(html, /data-role="role-nav"/);
-  assert.match(html, /data-role-tab="subscriber"/);
-  assert.match(html, /data-role-tab="publisher"/);
-  assert.match(html, /const selectRole = \(role\)/);
+  assert.match(html, /data-role="relationship-nav"/);
+  assert.match(html, /data-relationship-tab="remote"/);
+  assert.match(html, /data-relationship-tab="hosted"/);
+  assert.match(html, /const selectView = \(view\)/);
   assert.match(html, /button\.classList\.toggle\('selected'/);
-  assert.match(html, /Shared services/);
-  assert.match(html, /Available remotely/);
+  assert.match(html, /Services from this publisher/);
+  assert.match(html, /Services published here/);
   assert.doesNotMatch(html, /Shared from this Mac|Share this Mac/);
   assert.match(html, /snapshot\.subscriber/);
   assert.match(html, /snapshot\.publisher/);
-  assert.match(html, /publisher\.activeSubscribers/);
+  assert.match(html, /publisher\.activeSubscriberKeys/);
   assert.match(html, /publisher\.publisherKey/);
-  assert.match(html, /data-action="copy-publisher-key"/);
+  assert.match(html, /data-action="copy-local-publisher-key"/);
   assert.match(html, /publisher\.services\.map\(renderPublishedService\)/);
   assert.match(html, /escapeHtml\(service\.name\)/);
   assert.match(html, /escapeHtml\(service\.id\)/);
   assert.doesNotMatch(html, /type:\s*"copyPublisherKey"/);
+});
+
+test("desktop UI presents publisher-rooted relationships with copyable identities", () => {
+  const html = renderDesktopUi();
+
+  assert.match(html, /data-relationship-tab="remote"/);
+  assert.match(html, /data-relationship-tab="hosted"/);
+  assert.match(html, /Connected to/);
+  assert.match(html, /Published here/);
+  assert.match(html, /data-role="relationship-publisher"/);
+  assert.match(html, /data-role="relationship-subscribers"/);
+  assert.match(html, /data-action="copy-remote-publisher-key"/);
+  assert.match(html, /data-action="copy-local-subscriber-key"/);
+  assert.match(html, /data-action="copy-local-publisher-key"/);
+  assert.match(html, /data-action="copy-connected-subscriber"/);
+  assert.match(html, /subscriber\.remotePublisher\.publisherKey/);
+  assert.match(html, /subscriber\.subscriberKey/);
+  assert.match(html, /publisher\.activeSubscriberKeys/);
+  assert.match(
+    html,
+    /publisher\.activeSubscriberKeys\[index\]/,
+  );
+
+  const remoteRelationship = html.slice(
+    html.indexOf('data-role="remote-surface"'),
+    html.indexOf('data-role="hosted-surface"'),
+  );
+  const hostedRelationship = html.slice(
+    html.indexOf('data-role="hosted-surface"'),
+    html.indexOf('data-role="settings-surface"'),
+  );
+  assert.ok(
+    remoteRelationship.indexOf('data-role="relationship-publisher"') <
+      remoteRelationship.indexOf('data-role="relationship-subscribers"'),
+    "the remote publisher must be the relationship root",
+  );
+  assert.ok(
+    hostedRelationship.indexOf('data-role="relationship-publisher"') <
+      hostedRelationship.indexOf('data-role="relationship-subscribers"'),
+    "the local publisher must be the relationship root",
+  );
 });
 
 test("desktop publisher UI renders QR invitation and explicit approval states", () => {
@@ -78,11 +119,10 @@ test("desktop publisher UI renders QR invitation and explicit approval states", 
 
   assert.match(html, /data-action="create-pairing"/);
   assert.match(html, /class="publisher-primary-actions"/);
-  assert.match(html, /class="publisher-meta"/);
   assert.ok(
     html.indexOf('class="publisher-primary-actions"') <
-      html.indexOf('class="publisher-meta"'),
-    "Add device must stay ahead of optional publisher metadata",
+      html.indexOf('data-role="pairing"'),
+    "Add device must stay ahead of the pairing workflow",
   );
   assert.match(html, /data-role="pairing"/);
   assert.match(html, /pairing\.qrSvg/);

@@ -190,6 +190,7 @@ export async function startDesktopRuntime(
         publisherKey,
         keyFingerprint: publisherKey.slice(0, 16),
         activeSubscribers: 0,
+        activeSubscriberKeys: [],
         acceptedConnections: 0,
         services: policy.services.map(({ id, name, targetPort }) => ({
           id,
@@ -272,6 +273,7 @@ export async function startDesktopRuntime(
       publisherKey: status.publisherKey,
       keyFingerprint: status.publisherKey.slice(0, 16),
       activeSubscribers: status.activeSubscribers,
+      activeSubscriberKeys: [...status.activeSubscriberKeys],
       acceptedConnections: status.acceptedConnections,
       ...(pairingStatus.phase === "idle" ? {} : { pairing: pairingStatus }),
     };
@@ -755,6 +757,7 @@ function initialPublisherRole(): DesktopPublisherRole {
   return {
     phase: "starting",
     activeSubscribers: 0,
+    activeSubscriberKeys: [],
     acceptedConnections: 0,
     services: [],
   };
@@ -783,15 +786,13 @@ function createSubscriberRole(
   return {
     phase: status.state === "stopped" ? "stopped" : "running",
     connection: status.connection,
-    ...(registry
-      ? {
-          remotePublisher: {
-            displayName: registry.publisher.displayName,
-            keyFingerprint: status.publisherKey.slice(0, 16),
-          },
-          gatewayPort,
-        }
-      : {}),
+    subscriberKey: status.subscriberKey,
+    remotePublisher: {
+      displayName: registry?.publisher.displayName ?? status.publisherLabel,
+      publisherKey: status.publisherKey,
+      keyFingerprint: status.publisherKey.slice(0, 16),
+    },
+    gatewayPort,
     services,
     ...(error ? { error } : {}),
   };
@@ -832,6 +833,7 @@ function jitteredDelay(delayMs: number, random: number): number {
 function clonePublisherRole(role: DesktopPublisherRole): DesktopPublisherRole {
   return {
     ...role,
+    activeSubscriberKeys: [...role.activeSubscriberKeys],
     services: role.services.map((service) => ({ ...service })),
   };
 }
