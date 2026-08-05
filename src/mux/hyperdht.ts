@@ -99,10 +99,19 @@ export function keyPairFromSecretKey(secretKey: string): DhtKeyPair {
 
 export function dhtStreamSnapshot(stream: DhtStream): unknown {
   const snapshot = stream.toJSON?.();
-  const base =
+  const rawSnapshot =
     snapshot !== null && typeof snapshot === "object" && !Array.isArray(snapshot)
-      ? snapshot
+      ? (snapshot as Record<string, unknown>)
       : {};
+  const base = {
+    ...booleanFields(rawSnapshot, [
+      "isInitiator",
+      "connected",
+      "destroying",
+      "destroyed",
+    ]),
+    ...keyFields(rawSnapshot, ["publicKey", "remotePublicKey"]),
+  };
   const udx = udxStreamSnapshot(stream.rawStream);
 
   return sanitizeObservation({
@@ -145,6 +154,30 @@ export function dhtStatsSnapshot(node: DhtNode): DhtStats {
       aborts: node.stats.relaying.aborts,
     },
   };
+}
+
+function booleanFields(
+  source: Record<string, unknown>,
+  keys: string[],
+): Record<string, boolean> {
+  const fields: Record<string, boolean> = {};
+  for (const key of keys) {
+    const value = readProperty(source, key);
+    if (typeof value === "boolean") fields[key] = value;
+  }
+  return fields;
+}
+
+function keyFields(
+  source: Record<string, unknown>,
+  keys: string[],
+): Record<string, string | Uint8Array> {
+  const fields: Record<string, string | Uint8Array> = {};
+  for (const key of keys) {
+    const value = readProperty(source, key);
+    if (typeof value === "string" || b4a.isBuffer(value)) fields[key] = value;
+  }
+  return fields;
 }
 
 function udxStreamSnapshot(rawStream: unknown): Record<string, number> | undefined {

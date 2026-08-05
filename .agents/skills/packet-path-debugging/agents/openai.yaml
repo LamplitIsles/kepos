@@ -1,0 +1,4 @@
+interface:
+  display_name: "Packet Path Debugging"
+  short_description: "Trace cross-platform packet loss to its boundary"
+  default_prompt: "Use $packet-path-debugging to locate an asymmetric UDP packet-loss boundary without changing the network."

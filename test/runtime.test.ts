@@ -13,6 +13,7 @@ import {
   createDht,
   type DhtNode,
 } from "../src/mux/hyperdht.js";
+import type { Observation } from "../src/mux/observability.js";
 import {
   startPublisher,
   type PublisherRuntimeStatus,
@@ -303,6 +304,7 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
   const publisherState = path.join(root, "publisher");
   const subscriberState = path.join(root, "subscriber");
   const output: string[] = [];
+  const subscriberEvents: Observation[] = [];
   const cli = {
     ...createDefaultCliDependencies({
       stdout: (line) => output.push(line),
@@ -374,6 +376,7 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
       stateDir: subscriberState,
       bootstrap: testnet.bootstrap,
       gatewayPort: 0,
+      observe: (event) => subscriberEvents.push(event),
       services: [],
     });
     assert.deepEqual(subscriber.status(), {
@@ -390,6 +393,17 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
     assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
     assert.equal(publisher.status().activeSubscribers, 1);
     assert.deepEqual(publisher.status().activeSubscriberKeys, [subscriberKey]);
+
+    const connected = subscriberEvents.find(
+      ({ event }) => event === "outer.connected",
+    );
+    assert.ok(connected);
+    const transport = connected.transport as Record<string, unknown>;
+    assert.equal(typeof transport.udx, "object");
+    assert.doesNotMatch(
+      JSON.stringify(connected),
+      /(?:127\.0\.0\.1|0\.0\.0\.0|::1)/u,
+    );
 
     await subscriber.stop();
     assert.equal(subscriber.status().state, "stopped");

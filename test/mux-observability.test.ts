@@ -147,10 +147,12 @@ test("observation fields cannot replace stable context", () => {
   assert.equal(event.role, "subscriber");
 });
 
-test("DHT stream snapshots include live UDX congestion and retransmit state", () => {
+test("DHT stream snapshots expose only allowlisted fields without addresses", () => {
   const stream = {
     connected: true,
     rawStream: {
+      remoteHost: "192.168.31.116",
+      remotePort: 49_737,
       rtt: 83,
       cwnd: 24,
       inflight: 7,
@@ -165,13 +167,23 @@ test("DHT stream snapshots include live UDX congestion and retransmit state", ()
       packetsReceived: 340,
       socket: {
         packetsDroppedByKernel: 4,
+        address: () => ({ host: "0.0.0.0", port: 54_300 }),
       },
     },
-    toJSON: () => ({ connected: true }),
+    toJSON: () => ({
+      connected: true,
+      remotePublicKey: "b".repeat(64),
+      rawStream: {
+        remoteHost: "192.168.31.116",
+        remotePort: 49_737,
+        socket: { address: { host: "0.0.0.0", port: 54_300 } },
+      },
+    }),
   } as unknown as DhtStream;
 
   assert.deepEqual(dhtStreamSnapshot(stream), {
     connected: true,
+    remotePublicKey: "b".repeat(16),
     udx: {
       rtt: 83,
       cwnd: 24,
@@ -188,6 +200,7 @@ test("DHT stream snapshots include live UDX congestion and retransmit state", ()
       packetsDroppedByKernel: 4,
     },
   });
+  assert.doesNotMatch(JSON.stringify(dhtStreamSnapshot(stream)), /192\.168|0\.0\.0\.0/);
 });
 
 test("DHT observations expose NAT classes and aggregate punch stats without addresses", () => {

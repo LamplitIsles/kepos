@@ -230,9 +230,12 @@ whole. They cannot be assigned exactly to publisher or subscriber traffic even
 when an observation was emitted by one role. Role-specific events are recorded
 above the DHT layer.
 
-Operators should admit HyperDHT's UDP candidate range, normally `49737-49741`,
-rather than only the preferred first port. A shared node normally uses one UDP
-endpoint, but it may select a later candidate when an earlier port is occupied.
+Operators should admit HyperDHT's UDP candidate listener range, normally
+`49737-49741`, rather than only the preferred first port. A shared node normally
+selects one listener from that range, but `dht-rpc` also uses an ephemeral DHT
+client socket and HyperDHT manages ephemeral UDX connection sockets. The
+candidate listener range does not cover those UDX connection sockets and does
+not guarantee the encrypted data path by itself.
 
 These diagnostics are sanitized but their shape is not a stable API. Never
 copy state files into logs.

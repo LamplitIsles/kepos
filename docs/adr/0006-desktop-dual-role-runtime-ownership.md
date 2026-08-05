@@ -80,7 +80,9 @@ controls or filesystem watching.
 
 - A desktop can consume remote services while sharing local services.
 - CLI and desktop cannot use the same publisher or subscriber state at once.
-- Two enabled roles share one device-owned DHT and normally one UDP endpoint.
+- Two enabled roles share one device-owned DHT and one preferred DHT candidate
+  listener. HyperDHT still uses an ephemeral DHT client socket and ephemeral
+  UDX connection sockets.
 - Role combinations are configuration results, not separate product modes.
 - The desktop snapshot and UI must distinguish the remote publisher from the
   publisher owned by this machine.

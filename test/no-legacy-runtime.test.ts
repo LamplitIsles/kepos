@@ -100,3 +100,40 @@ test("network research tools live outside the Kepos product repository", async (
     assert.equal(packageJson.scripts?.[script], undefined, script);
   }
 });
+
+test("shared HyperDHT docs distinguish the listener from ephemeral UDP sockets", async () => {
+  const documents = await Promise.all(
+    [
+      "docs/adr/0006-desktop-dual-role-runtime-ownership.md",
+      "docs/adr/0008-share-one-hyperdht-node-per-device-runtime.md",
+      "docs/cli.md",
+      "docs/platforms/macos.md",
+    ].map((filePath) => readFile(filePath, "utf8")),
+  );
+  const [desktopDecision, sharedNodeDecision, cli, macos] = documents;
+  const combined = documents.join("\n");
+
+  assert.match(sharedNodeDecision, /one preferred DHT candidate listener/iu);
+  assert.match(sharedNodeDecision, /ephemeral DHT client socket/iu);
+  assert.match(sharedNodeDecision, /ephemeral UDX connection sockets/iu);
+  assert.match(cli, /49737-49741.*candidate listener range/isu);
+  assert.match(cli, /does not cover.*UDX connection sockets/isu);
+  assert.match(
+    sharedNodeDecision,
+    /failed holepunch.*does\s+not\s+expose.*local port/isu,
+  );
+  assert.match(
+    sharedNodeDecision,
+    /relay.*counters.*do\s+not\s+distinguish.*unavailable.*rejected/isu,
+  );
+  assert.doesNotMatch(
+    sharedNodeDecision,
+    /Kepos observations identify the candidate listener/iu,
+  );
+  assert.doesNotMatch(
+    combined,
+    /normally (?:has|uses) one (?:HyperDHT )?UDP endpoint/iu,
+  );
+  assert.doesNotMatch(desktopDecision, /normally one UDP endpoint/iu);
+  assert.doesNotMatch(macos, /normally one UDP endpoint/iu);
+});
