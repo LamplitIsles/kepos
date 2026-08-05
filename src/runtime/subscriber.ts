@@ -90,6 +90,8 @@ export interface SubscriberRuntimeStatus {
   connection: SubscriberConnectionStatus;
   connectionGeneration: number;
   publisherKey: string;
+  publisherLabel: string;
+  subscriberKey: string;
   homeUrl: string;
   services: RunningSubscriberService[];
 }
@@ -260,6 +262,8 @@ export async function startSubscriber(
         connection: connection.status(),
         connectionGeneration: connection.generation(),
         publisherKey: contact.publisherKey,
+        publisherLabel: contact.label,
+        subscriberKey: identity.publicKey,
         homeUrl: gateway.url,
         services: services.map((service) => ({ ...service })),
       }),

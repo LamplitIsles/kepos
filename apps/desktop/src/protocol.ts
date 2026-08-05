@@ -37,8 +37,10 @@ export type RolePhase =
 export interface DesktopSubscriberRole {
   phase: RolePhase;
   connection: DesktopConnection;
+  subscriberKey?: string;
   remotePublisher?: {
     displayName: string;
+    publisherKey: string;
     keyFingerprint: string;
   };
   gatewayPort?: number;
@@ -52,6 +54,7 @@ export interface DesktopPublisherRole {
   publisherKey?: string;
   keyFingerprint?: string;
   activeSubscribers: number;
+  activeSubscriberKeys: string[];
   acceptedConnections: number;
   services: Array<{ id: string; name: string; targetPort: number }>;
   pairing?:

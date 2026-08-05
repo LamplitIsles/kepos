@@ -495,11 +495,13 @@ function createHarness(options: HarnessOptions = {}) {
           type: "snapshot",
           appPhase: "running",
           subscriber: startOptions.subscriber
-            ? {
+              ? {
                 phase: "running",
                 connection: "connected",
+                subscriberKey: "cd".repeat(32),
                 remotePublisher: {
                   displayName: "kosmos",
+                  publisherKey: remotePublisherKey,
                   keyFingerprint: remotePublisherKey.slice(0, 16),
                 },
                 gatewayPort: 17_480,
@@ -523,6 +525,7 @@ function createHarness(options: HarnessOptions = {}) {
                 publisherKey: "a7".repeat(32),
                 keyFingerprint: "a7".repeat(8),
                 activeSubscribers: 0,
+                activeSubscriberKeys: [],
                 acceptedConnections: 0,
                 services: [],
               }

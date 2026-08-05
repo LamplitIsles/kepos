@@ -29,6 +29,7 @@ import {
   type SubscriberRuntimeStatus,
 } from "../../../src/runtime/subscriber.js";
 import { loadPublisherState } from "../../../src/state/publisher.js";
+import { loadSubscriberConnectionState } from "../../../src/state/subscriber.js";
 import type {
   DesktopPublisherRole,
   DesktopService,
@@ -72,6 +73,7 @@ export interface DesktopRuntimeDependencies {
   acquirePublisherLock(stateDir: string): Promise<RuntimeLock>;
   acquireSubscriberLock(stateDir: string): Promise<RuntimeLock>;
   loadPublisherState: typeof loadPublisherState;
+  loadSubscriberConnectionState: typeof loadSubscriberConnectionState;
   startPublisher(options: StartPublisherOptions): Promise<RunningPublisher>;
   startSubscriber(options: StartSubscriberOptions): Promise<RunningSubscriber>;
   readRegistry(gatewayPort: number): Promise<HomeRegistry>;
@@ -100,6 +102,7 @@ const defaultDependencies: DesktopRuntimeDependencies = {
   acquirePublisherLock: acquirePublisherRuntimeLock,
   acquireSubscriberLock: acquireSubscriberRuntimeLock,
   loadPublisherState,
+  loadSubscriberConnectionState,
   startPublisher,
   startSubscriber,
   readRegistry: readHomeRegistry,
@@ -130,6 +133,20 @@ export async function startDesktopRuntime(
   let appPhase: DesktopSnapshot["appPhase"] = "starting";
   let publisherRole = publisherOptions ? initialPublisherRole() : undefined;
   let subscriberRole = subscriberOptions ? initialSubscriberRole() : undefined;
+  let preparedPublisherRole: DesktopPublisherRole | undefined;
+  let preparedSubscriberRole: DesktopSubscriberRole | undefined;
+  let publisherPreparation:
+    | {
+        options: StartDesktopPublisherOptions;
+        result: Promise<PublisherRuntimePolicy>;
+      }
+    | undefined;
+  let subscriberPreparation:
+    | {
+        options: StartDesktopSubscriberOptions;
+        result: Promise<void>;
+      }
+    | undefined;
   let publisherLock = publisherOptions?.lock;
   let subscriberLock = subscriberOptions?.lock;
   let runningPublisher: RunningPublisher | undefined;
@@ -160,17 +177,24 @@ export async function startDesktopRuntime(
   });
   const publish = (): void => options.onSnapshot(snapshot());
 
-  const startPublisherRole = async (): Promise<RoleStartResult> => {
-    if (!publisherOptions || !publisherRole) return { ok: true };
-    try {
+  const preparePublisherRole = (): Promise<PublisherRuntimePolicy> => {
+    if (!publisherOptions || !publisherRole) {
+      return Promise.reject(new Error("desktop publisher is not configured"));
+    }
+    if (publisherPreparation?.options === publisherOptions) {
+      return publisherPreparation.result;
+    }
+    const currentOptions = publisherOptions;
+    preparedPublisherRole = undefined;
+    const result = (async (): Promise<PublisherRuntimePolicy> => {
       publisherLock ??= await dependencies.acquirePublisherLock(
-        publisherOptions.stateDir,
+        currentOptions.stateDir,
       );
       const { config, manifest } = await dependencies.loadPublisherState(
-        publisherOptions.stateDir,
+        currentOptions.stateDir,
       );
       const policy: PublisherRuntimePolicy =
-        publisherOptions.policy ?? {
+        currentOptions.policy ?? {
           displayName: manifest.displayName,
           allow: config.allow,
           services: manifest.services.map(
@@ -183,13 +207,13 @@ export async function startDesktopRuntime(
           ),
         };
       const publisherKey = derivePublisherHomeKey(config.seed);
-      const configPath = publisherOptions.configPath;
-      publisherRole = {
+      preparedPublisherRole = {
         phase: "starting",
         displayName: policy.displayName,
         publisherKey,
         keyFingerprint: publisherKey.slice(0, 16),
         activeSubscribers: 0,
+        activeSubscriberKeys: [],
         acceptedConnections: 0,
         services: policy.services.map(({ id, name, targetPort }) => ({
           id,
@@ -197,6 +221,50 @@ export async function startDesktopRuntime(
           targetPort,
         })),
       };
+      return policy;
+    })();
+    publisherPreparation = { options: currentOptions, result };
+    return result;
+  };
+
+  const prepareSubscriberRole = (): Promise<void> => {
+    if (!subscriberOptions || !subscriberRole) {
+      return Promise.reject(new Error("desktop subscriber is not configured"));
+    }
+    if (subscriberPreparation?.options === subscriberOptions) {
+      return subscriberPreparation.result;
+    }
+    const currentOptions = subscriberOptions;
+    preparedSubscriberRole = undefined;
+    const result = (async (): Promise<void> => {
+      subscriberLock ??= await dependencies.acquireSubscriberLock(
+        currentOptions.stateDir,
+      );
+      const { contact, identity } =
+        await dependencies.loadSubscriberConnectionState(
+          currentOptions.stateDir,
+        );
+      preparedSubscriberRole = {
+        ...initialSubscriberRole(),
+        subscriberKey: identity.publicKey,
+        remotePublisher: {
+          displayName: contact.label,
+          publisherKey: contact.publisherKey,
+          keyFingerprint: contact.publisherKey.slice(0, 16),
+        },
+        gatewayPort: currentOptions.gatewayPort,
+      };
+    })();
+    subscriberPreparation = { options: currentOptions, result };
+    return result;
+  };
+
+  const startPublisherRole = async (): Promise<RoleStartResult> => {
+    if (!publisherOptions || !publisherRole) return { ok: true };
+    try {
+      const policy = await preparePublisherRole();
+      publisherRole = preparedPublisherRole ?? publisherRole;
+      const configPath = publisherOptions.configPath;
       runningPublisher = await dependencies.startPublisher({
         stateDir: publisherOptions.stateDir,
         dht: requireDht(dht),
@@ -215,9 +283,8 @@ export async function startDesktopRuntime(
       return { ok: true };
     } catch (error) {
       publisherRole = {
-        ...publisherRole,
+        ...withoutActiveSubscribers(publisherRole),
         phase: "failed",
-        activeSubscribers: 0,
         acceptedConnections: 0,
         error: errorMessage(error),
       };
@@ -229,9 +296,8 @@ export async function startDesktopRuntime(
   const startSubscriberRole = async (): Promise<RoleStartResult> => {
     if (!subscriberOptions || !subscriberRole) return { ok: true };
     try {
-      subscriberLock ??= await dependencies.acquireSubscriberLock(
-        subscriberOptions.stateDir,
-      );
+      await prepareSubscriberRole();
+      subscriberRole = preparedSubscriberRole ?? subscriberRole;
       runningSubscriber = await dependencies.startSubscriber({
         stateDir: subscriberOptions.stateDir,
         gatewayPort: subscriberOptions.gatewayPort,
@@ -246,6 +312,7 @@ export async function startDesktopRuntime(
       return { ok: true };
     } catch (error) {
       subscriberRole = {
+        ...subscriberRole,
         phase: "failed",
         connection: "stopped",
         services: [],
@@ -272,6 +339,7 @@ export async function startDesktopRuntime(
       publisherKey: status.publisherKey,
       keyFingerprint: status.publisherKey.slice(0, 16),
       activeSubscribers: status.activeSubscribers,
+      activeSubscriberKeys: [...status.activeSubscriberKeys],
       acceptedConnections: status.acceptedConnections,
       ...(pairingStatus.phase === "idle" ? {} : { pairing: pairingStatus }),
     };
@@ -460,16 +528,21 @@ export async function startDesktopRuntime(
     const message = errorMessage(error);
     publisherRole = configuration.publisher
       ? {
-          ...(publisherRole ?? initialPublisherRole()),
+          ...withoutActiveSubscribers(
+            preparedPublisherRole ??
+              publisherRole ??
+              initialPublisherRole(),
+          ),
           phase: "failed",
-          activeSubscribers: 0,
           acceptedConnections: 0,
           error: message,
         }
       : undefined;
     subscriberRole = configuration.subscriber
       ? {
-          ...(subscriberRole ?? initialSubscriberRole()),
+          ...(preparedSubscriberRole ??
+            subscriberRole ??
+            initialSubscriberRole()),
           phase: "failed",
           connection: "stopped",
           error: message,
@@ -515,7 +588,7 @@ export async function startDesktopRuntime(
     if (failure !== undefined) {
       if (publisherChanged && publisherRole) {
         publisherRole = {
-          ...publisherRole,
+          ...withoutActiveSubscribers(publisherRole),
           phase: "failed",
           error: errorMessage(failure),
         };
@@ -531,6 +604,38 @@ export async function startDesktopRuntime(
       publish();
       throw failure;
     }
+
+    if (publisherChanged) {
+      publisherOptions = configuration.publisher;
+      publisherLock = configuration.publisher?.lock;
+      publisherRole = configuration.publisher ? initialPublisherRole() : undefined;
+      preparedPublisherRole = undefined;
+      publisherPreparation = undefined;
+    }
+    if (subscriberChanged) {
+      subscriberOptions = configuration.subscriber;
+      subscriberLock = configuration.subscriber?.lock;
+      subscriberRole = configuration.subscriber ? initialSubscriberRole() : undefined;
+      preparedSubscriberRole = undefined;
+      subscriberPreparation = undefined;
+      registry = undefined;
+      registryError = undefined;
+      refreshedGeneration = undefined;
+      observedGeneration = undefined;
+      resetIssuedGeneration = undefined;
+      registryRetryAttempt = 0;
+      nextRegistryAttemptAt = 0;
+      forcedResetStreak = 0;
+      nextForcedResetAt = 0;
+    }
+    await Promise.allSettled([
+      publisherChanged && publisherOptions
+        ? preparePublisherRole()
+        : undefined,
+      subscriberChanged && subscriberOptions
+        ? prepareSubscriberRole()
+        : undefined,
+    ]);
 
     if (transportChanged) {
       const dhtFailure = await cleanupDht();
@@ -551,25 +656,6 @@ export async function startDesktopRuntime(
       }
     }
 
-    if (publisherChanged) {
-      publisherOptions = configuration.publisher;
-      publisherLock = configuration.publisher?.lock;
-      publisherRole = configuration.publisher ? initialPublisherRole() : undefined;
-    }
-    if (subscriberChanged) {
-      subscriberOptions = configuration.subscriber;
-      subscriberLock = configuration.subscriber?.lock;
-      subscriberRole = configuration.subscriber ? initialSubscriberRole() : undefined;
-      registry = undefined;
-      registryError = undefined;
-      refreshedGeneration = undefined;
-      observedGeneration = undefined;
-      resetIssuedGeneration = undefined;
-      registryRetryAttempt = 0;
-      nextRegistryAttemptAt = 0;
-      forcedResetStreak = 0;
-      nextForcedResetAt = 0;
-    }
     if (stopped) return;
     publish();
     const startResults = await Promise.all([
@@ -583,6 +669,11 @@ export async function startDesktopRuntime(
     );
     if (failedStart) throw failedStart.error;
   }
+
+  await Promise.allSettled([
+    publisherOptions ? preparePublisherRole() : undefined,
+    subscriberOptions ? prepareSubscriberRole() : undefined,
+  ]);
 
   try {
     dht = dependencies.createDht({ bootstrap });
@@ -705,7 +796,12 @@ export async function startDesktopRuntime(
         const dhtFailure = await cleanupDht();
         failure ??= dhtFailure;
         appPhase = "stopped";
-        if (publisherRole) publisherRole = { ...publisherRole, phase: "stopped" };
+        if (publisherRole) {
+          publisherRole = {
+            ...withoutActiveSubscribers(publisherRole),
+            phase: "stopped",
+          };
+        }
         if (subscriberRole) {
           subscriberRole = {
             ...subscriberRole,
@@ -755,8 +851,19 @@ function initialPublisherRole(): DesktopPublisherRole {
   return {
     phase: "starting",
     activeSubscribers: 0,
+    activeSubscriberKeys: [],
     acceptedConnections: 0,
     services: [],
+  };
+}
+
+function withoutActiveSubscribers(
+  role: DesktopPublisherRole,
+): DesktopPublisherRole {
+  return {
+    ...role,
+    activeSubscribers: 0,
+    activeSubscriberKeys: [],
   };
 }
 
@@ -783,15 +890,13 @@ function createSubscriberRole(
   return {
     phase: status.state === "stopped" ? "stopped" : "running",
     connection: status.connection,
-    ...(registry
-      ? {
-          remotePublisher: {
-            displayName: registry.publisher.displayName,
-            keyFingerprint: status.publisherKey.slice(0, 16),
-          },
-          gatewayPort,
-        }
-      : {}),
+    subscriberKey: status.subscriberKey,
+    remotePublisher: {
+      displayName: registry?.publisher.displayName ?? status.publisherLabel,
+      publisherKey: status.publisherKey,
+      keyFingerprint: status.publisherKey.slice(0, 16),
+    },
+    gatewayPort,
     services,
     ...(error ? { error } : {}),
   };
@@ -832,6 +937,7 @@ function jitteredDelay(delayMs: number, random: number): number {
 function clonePublisherRole(role: DesktopPublisherRole): DesktopPublisherRole {
   return {
     ...role,
+    activeSubscriberKeys: [...role.activeSubscriberKeys],
     services: role.services.map((service) => ({ ...service })),
   };
 }

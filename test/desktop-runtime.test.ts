@@ -21,8 +21,15 @@ import type {
 } from "../src/runtime/subscriber.js";
 
 const remotePublisherKey = "e4".repeat(32);
+const localSubscriberKey = "d1".repeat(32);
 const localPublisherSeed = "11".repeat(32);
 const localPublisherKey = derivePublisherHomeKey(localPublisherSeed);
+const replacementRemotePublisherKey = "f4".repeat(32);
+const replacementSubscriberKey = "d2".repeat(32);
+const replacementPublisherSeed = "33".repeat(32);
+const replacementPublisherKey = derivePublisherHomeKey(
+  replacementPublisherSeed,
+);
 const registry: HomeRegistry = {
   schemaVersion: 2,
   revision: 1,
@@ -77,10 +84,11 @@ test("desktop runtime starts and stops a publisher-only role", async () => {
     {
       type: "snapshot",
       appPhase: "starting",
-      publisher: {
-        phase: "starting",
-        activeSubscribers: 0,
-        acceptedConnections: 0,
+        publisher: {
+          phase: "starting",
+          activeSubscribers: 0,
+          activeSubscriberKeys: [],
+          acceptedConnections: 0,
         services: [],
       },
     },
@@ -93,6 +101,7 @@ test("desktop runtime starts and stops a publisher-only role", async () => {
         publisherKey: localPublisherKey,
         keyFingerprint: localPublisherKey.slice(0, 16),
         activeSubscribers: 1,
+        activeSubscriberKeys: ["01".repeat(32)],
         acceptedConnections: 2,
         services: [
           { id: "smoke", name: "Smoke", targetPort: 18_080 },
@@ -114,6 +123,8 @@ test("desktop runtime starts and stops a publisher-only role", async () => {
   ]);
   assert.equal(snapshots.at(-1)?.appPhase, "stopped");
   assert.equal(snapshots.at(-1)?.publisher?.phase, "stopped");
+  assert.equal(snapshots.at(-1)?.publisher?.activeSubscribers, 0);
+  assert.deepEqual(snapshots.at(-1)?.publisher?.activeSubscriberKeys, []);
 });
 
 test("desktop runtime keeps subscriber service behavior in subscriber-only mode", async () => {
@@ -162,8 +173,10 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
   assert.deepEqual(snapshots.at(-1)?.subscriber, {
     phase: "running",
     connection: "connected",
+    subscriberKey: localSubscriberKey,
     remotePublisher: {
       displayName: "kosmos",
+      publisherKey: remotePublisherKey,
       keyFingerprint: remotePublisherKey.slice(0, 16),
     },
     gatewayPort: 17_480,
@@ -215,6 +228,46 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
     snapshots.at(-1)?.subscriber?.services.map(({ available }) => available),
     [true, true, true],
   );
+  await runtime.stop();
+});
+
+test("desktop exposes the pinned publisher relationship before Home is available", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      startSubscriber: async () =>
+        runningSubscriber(
+          () => subscriberStatus("reconnecting", 0, []),
+          events,
+        ),
+      readRegistry: async () => {
+        throw new Error("Home must not be required for public identities");
+      },
+    }),
+  );
+
+  assert.deepEqual(snapshots.at(-1)?.subscriber, {
+    phase: "running",
+    connection: "reconnecting",
+    subscriberKey: localSubscriberKey,
+    remotePublisher: {
+      displayName: "kosmos",
+      publisherKey: remotePublisherKey,
+      keyFingerprint: remotePublisherKey.slice(0, 16),
+    },
+    gatewayPort: 17_480,
+    services: [],
+  });
+
   await runtime.stop();
 });
 
@@ -568,7 +621,20 @@ test("desktop runtime starts both roles concurrently and polls publisher counter
   await runtime.poll();
   assert.equal(snapshots.at(-1)?.publisher?.activeSubscribers, 3);
   assert.equal(snapshots.at(-1)?.publisher?.acceptedConnections, 5);
+  assert.deepEqual(snapshots.at(-1)?.publisher?.activeSubscriberKeys, [
+    "01".repeat(32),
+    "02".repeat(32),
+    "03".repeat(32),
+  ]);
   assert.equal(snapshots.at(-1)?.subscriber?.connection, "connected");
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.remotePublisher?.publisherKey,
+    remotePublisherKey,
+  );
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.subscriberKey,
+    localSubscriberKey,
+  );
 
   await runtime.stop();
   assert.ok(
@@ -961,10 +1027,109 @@ test("desktop exposes an initial shared transport failure", async () => {
   assert.equal(snapshots.at(-1)?.appPhase, "running");
   assert.equal(snapshots.at(-1)?.publisher?.phase, "failed");
   assert.equal(snapshots.at(-1)?.publisher?.error, "transport unavailable");
+  assert.equal(snapshots.at(-1)?.publisher?.displayName, "Mac smoke");
+  assert.equal(snapshots.at(-1)?.publisher?.publisherKey, localPublisherKey);
+  assert.equal(snapshots.at(-1)?.publisher?.activeSubscribers, 0);
+  assert.deepEqual(snapshots.at(-1)?.publisher?.activeSubscriberKeys, []);
   assert.equal(snapshots.at(-1)?.subscriber?.phase, "failed");
   assert.equal(snapshots.at(-1)?.subscriber?.error, "transport unavailable");
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.remotePublisher?.publisherKey,
+    remotePublisherKey,
+  );
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.subscriberKey,
+    localSubscriberKey,
+  );
   assert.equal(events.includes("publisher-lock:release"), true);
   assert.equal(events.includes("subscriber-lock:release"), true);
+});
+
+test("desktop transport replacement failure shows the target relationship", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  let creates = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      bootstrap: [{ host: "bootstrap-one.example", port: 49_737 }],
+      publisher: { stateDir: "/state/publisher" },
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      createDht: (options) => {
+        creates++;
+        if (creates === 2) throw new Error("target transport unavailable");
+        return trackedDht(events, options.bootstrap?.[0]?.host ?? "default");
+      },
+      loadPublisherState: async (stateDir) => {
+        const replacement = stateDir === "/state/replacement-publisher";
+        return {
+          config: {
+            seed: replacement ? replacementPublisherSeed : localPublisherSeed,
+            allow: ["22".repeat(32)],
+          },
+          manifest: {
+            displayName: replacement ? "Replacement Mac" : "Mac smoke",
+            publisherConfig: "publisher.json",
+            services: [],
+          },
+        };
+      },
+      loadSubscriberConnectionState: async (stateDir) => {
+        const replacement = stateDir === "/state/replacement-subscriber";
+        return {
+          identity: {
+            publicKey: replacement
+              ? replacementSubscriberKey
+              : localSubscriberKey,
+            secretKey: "00".repeat(64),
+          },
+          contact: {
+            publisherKey: replacement
+              ? replacementRemotePublisherKey
+              : remotePublisherKey,
+            label: replacement ? "replacement-publisher" : "kosmos",
+            requestedLocalPort: 0,
+          },
+          pending: false,
+        };
+      },
+    }),
+  );
+
+  await assert.rejects(
+    runtime.reconfigure({
+      bootstrap: [{ host: "bootstrap-two.example", port: 49_738 }],
+      publisher: { stateDir: "/state/replacement-publisher" },
+      subscriber: {
+        stateDir: "/state/replacement-subscriber",
+        gatewayPort: 17_481,
+        services: [],
+      },
+    }),
+    /target transport unavailable/,
+  );
+
+  assert.equal(snapshots.at(-1)?.publisher?.displayName, "Replacement Mac");
+  assert.equal(
+    snapshots.at(-1)?.publisher?.publisherKey,
+    replacementPublisherKey,
+  );
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.remotePublisher?.publisherKey,
+    replacementRemotePublisherKey,
+  );
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.subscriberKey,
+    replacementSubscriberKey,
+  );
+  assert.equal(snapshots.at(-1)?.subscriber?.gatewayPort, 17_481);
+  await runtime.stop();
 });
 
 test("desktop reports transport replacement failure and can retry it", async () => {
@@ -1004,6 +1169,7 @@ test("desktop reports transport replacement failure and can retry it", async () 
   );
   assert.equal(snapshots.at(-1)?.publisher?.phase, "failed");
   assert.equal(snapshots.at(-1)?.publisher?.error, "transport unavailable");
+  assert.deepEqual(snapshots.at(-1)?.publisher?.activeSubscriberKeys, []);
   assert.equal(snapshots.at(-1)?.subscriber?.phase, "failed");
   assert.equal(snapshots.at(-1)?.subscriber?.error, "transport unavailable");
 
@@ -1174,6 +1340,7 @@ test("desktop runtime isolates publisher startup failure from subscriber", async
     publisherKey: localPublisherKey,
     keyFingerprint: localPublisherKey.slice(0, 16),
     activeSubscribers: 0,
+    activeSubscriberKeys: [],
     acceptedConnections: 0,
     services: [{ id: "smoke", name: "Smoke", targetPort: 18_080 }],
     error: "publisher unavailable",
@@ -1210,6 +1377,13 @@ test("desktop runtime isolates subscriber startup failure from publisher", async
   assert.deepEqual(snapshots.at(-1)?.subscriber, {
     phase: "failed",
     connection: "stopped",
+    subscriberKey: localSubscriberKey,
+    remotePublisher: {
+      displayName: "kosmos",
+      publisherKey: remotePublisherKey,
+      keyFingerprint: remotePublisherKey.slice(0, 16),
+    },
+    gatewayPort: 17_480,
     services: [],
     error: "subscriber unavailable",
   });
@@ -1433,6 +1607,21 @@ function dependencies(
         },
       };
     },
+    loadSubscriberConnectionState: async (stateDir) => {
+      events.push(`subscriber-state:load:${stateDir}`);
+      return {
+        identity: {
+          publicKey: localSubscriberKey,
+          secretKey: "00".repeat(64),
+        },
+        contact: {
+          publisherKey: remotePublisherKey,
+          label: "kosmos",
+          requestedLocalPort: 0,
+        },
+        pending: false,
+      };
+    },
     startPublisher: async (options) => {
       events.push(`publisher:start:${options.stateDir}`);
       return runningPublisher(() => publisherStatus(1, 2), events);
@@ -1466,6 +1655,8 @@ function subscriberStatus(
     connection,
     connectionGeneration,
     publisherKey: remotePublisherKey,
+    publisherLabel: "kosmos",
+    subscriberKey: localSubscriberKey,
     homeUrl: "http://home.localhost:17480",
     services,
   };
@@ -1504,6 +1695,10 @@ function publisherStatus(
     publisherKey: localPublisherKey,
     homeUrl: "http://127.0.0.1:3000",
     activeSubscribers,
+    activeSubscriberKeys: Array.from(
+      { length: activeSubscribers },
+      (_, index) => (index + 1).toString(16).padStart(2, "0").repeat(32),
+    ),
     acceptedConnections,
     pairing: { phase: "idle" },
   };

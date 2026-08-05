@@ -10,8 +10,10 @@ const initial: DesktopSnapshot = {
   subscriber: {
     phase: "running",
     connection: "connected",
+    subscriberKey: "cd".repeat(32),
     remotePublisher: {
       displayName: "kosmos",
+      publisherKey: "e4".repeat(32),
       keyFingerprint: "e499c38286e33f48",
     },
     gatewayPort: 17_480,

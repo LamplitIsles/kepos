@@ -5,6 +5,13 @@ inside one Bare process. Enabled roles share one device-owned HyperDHT node and
 normally one UDP endpoint while retaining separate role identities and state.
 It starts no Node or Electron child process.
 
+The window groups each connection as a publisher relationship. A remote
+relationship shows the publisher this Mac trusts and this Mac's subscriber
+identity. A hosted relationship shows this Mac's publisher identity and its
+currently connected subscribers. Every displayed fingerprint has a copy action
+for the complete public key; private identity material never enters the UI
+snapshot.
+
 The shared Kepos TOML decides which roles start. Their identities stay under
 `$XDG_STATE_HOME` when it is set:
 
@@ -78,8 +85,8 @@ One role's startup failure remains visible without stopping a healthy sibling.
 ## Native surface
 
 The tray is the lifecycle and status surface. The app shows remote services
-from the subscriber registry and a separate **Shared services** section for the
-local publisher.
+from the subscriber registry and a separate **Services published here** section
+for the local publisher.
 
 - HTTP actions open the macOS default browser.
 - Navidrome copies its canonical `*.localhost` URL for Navic.

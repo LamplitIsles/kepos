@@ -32,6 +32,7 @@ test("formats healthy role combinations", () => {
       publisher: {
         phase: "running",
         activeSubscribers: 2,
+        activeSubscriberKeys: ["01".repeat(32), "02".repeat(32)],
         acceptedConnections: 2,
         services: [
           { id: "ssh", name: "SSH", targetPort: 22 },
@@ -67,6 +68,7 @@ for (const phase of ["failed", "stopped"] as const) {
               ? {
                   phase,
                   activeSubscribers: 0,
+                  activeSubscriberKeys: [],
                   acceptedConnections: 0,
                   services: [],
                 }
@@ -93,6 +95,7 @@ for (const phase of ["starting", "stopping"] as const) {
               ? {
                   phase,
                   activeSubscribers: 0,
+                  activeSubscriberKeys: [],
                   acceptedConnections: 0,
                   services: [],
                 }
@@ -112,6 +115,7 @@ test("dual-role attention takes precedence over a healthy peer", () => {
       publisher: {
         phase: "running",
         activeSubscribers: 1,
+        activeSubscriberKeys: ["01".repeat(32)],
         acceptedConnections: 1,
         services: [],
       },
@@ -129,6 +133,7 @@ test("dual-role attention takes precedence over a transitional peer", () => {
       publisher: {
         phase: "stopping",
         activeSubscribers: 0,
+        activeSubscriberKeys: [],
         acceptedConnections: 0,
         services: [],
       },

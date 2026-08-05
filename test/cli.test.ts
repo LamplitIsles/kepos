@@ -105,6 +105,7 @@ function fakeCli(): {
           homeUrl: "http://127.0.0.1:3000",
           acceptedConnections: 1,
           activeSubscribers: 1,
+          activeSubscriberKeys: ["22".repeat(32)],
           pairing: { phase: "idle" as const },
         }),
         stop: async () => {
@@ -136,6 +137,8 @@ function fakeCli(): {
           connection: "connected" as const,
           connectionGeneration: 1,
           publisherKey: "11".repeat(32),
+          publisherLabel: "publisher",
+          subscriberKey: "22".repeat(32),
           homeUrl: "http://127.0.0.1:4000",
           services: options.services.map(({ id, localPort }) => ({
             id,
