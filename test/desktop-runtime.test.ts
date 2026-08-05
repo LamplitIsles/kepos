@@ -1014,6 +1014,109 @@ test("desktop reports transport replacement failure and can retry it", async () 
   await runtime.stop();
 });
 
+test("desktop recreates the original transport after a failed replacement is rolled back", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  const publisher = { stateDir: "/state/publisher" };
+  const subscriber = {
+    stateDir: "/state/subscriber",
+    gatewayPort: 17_480,
+    services: [],
+  };
+  const original = {
+    bootstrap: [{ host: "bootstrap-one.example", port: 49_737 }],
+    publisher,
+    subscriber,
+  };
+  let creates = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      ...original,
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      createDht: (options) => {
+        creates++;
+        if (creates === 2) throw new Error("replacement unavailable");
+        return trackedDht(events, options.bootstrap?.[0]?.host ?? "default");
+      },
+    }),
+  );
+
+  await assert.rejects(
+    runtime.reconfigure({
+      bootstrap: [{ host: "bootstrap-two.example", port: 49_738 }],
+      publisher,
+      subscriber,
+    }),
+    /replacement unavailable/,
+  );
+  await runtime.reconfigure(original);
+
+  assert.equal(creates, 3);
+  assert.equal(snapshots.at(-1)?.publisher?.phase, "running");
+  assert.equal(snapshots.at(-1)?.subscriber?.phase, "running");
+  await runtime.stop();
+});
+
+test("desktop retains a transport until its failed destruction succeeds", async () => {
+  const events: string[] = [];
+  const publisher = { stateDir: "/state/publisher" };
+  const subscriber = {
+    stateDir: "/state/subscriber",
+    gatewayPort: 17_480,
+    services: [],
+  };
+  let creates = 0;
+  let originalDestroyAttempts = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      bootstrap: [{ host: "bootstrap-one.example", port: 49_737 }],
+      publisher,
+      subscriber,
+      onSnapshot: () => undefined,
+    },
+    dependencies(events, {
+      createDht: (options) => {
+        creates++;
+        if (creates !== 1) {
+          return trackedDht(
+            events,
+            options.bootstrap?.[0]?.host ?? "default",
+          );
+        }
+        return {
+          ...trackedDht(events, "bootstrap-one.example"),
+          destroy: async () => {
+            originalDestroyAttempts++;
+            events.push("dht:destroy:bootstrap-one.example");
+            if (originalDestroyAttempts === 1) {
+              throw new Error("transport destroy failed");
+            }
+          },
+        } as DhtNode;
+      },
+    }),
+  );
+  const replacement = {
+    bootstrap: [{ host: "bootstrap-two.example", port: 49_738 }],
+    publisher,
+    subscriber,
+  };
+
+  await assert.rejects(
+    runtime.reconfigure(replacement),
+    /transport destroy failed/,
+  );
+  assert.equal(creates, 1);
+  assert.equal(originalDestroyAttempts, 1);
+
+  await runtime.reconfigure(replacement);
+  assert.equal(originalDestroyAttempts, 2);
+  assert.equal(creates, 2);
+  await runtime.stop();
+});
+
 test("desktop reconfiguration attempts both role cleanups after one fails", async () => {
   const events: string[] = [];
   const runtime = await startDesktopRuntime(

@@ -86,6 +86,102 @@ test("borrowed DHT rejects role-level bootstrap before loading state", async () 
   }
 });
 
+test("publisher stop reports cleanup failure after closing its Home server", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-publisher-stop-"));
+  const stateDir = path.join(root, "publisher");
+  await setupPublisher({
+    stateDir,
+    displayName: "cleanup",
+    subscriberPublicKeys: [],
+    services: [],
+  });
+  let serverCloseAttempts = 0;
+  const dht = {
+    stats: {
+      punches: { consistent: 0, random: 0, open: 0 },
+      relaying: { attempts: 0, successes: 0, aborts: 0 },
+    },
+    connect: () => {
+      throw new Error("unexpected connect");
+    },
+    createServer: () => ({
+      listen: async () => undefined,
+      close: async () => {
+        serverCloseAttempts++;
+        throw new Error("publisher server close failed");
+      },
+    }),
+    destroy: async () => undefined,
+  } as DhtNode;
+  const publisher = await startPublisher({ stateDir, dht });
+
+  try {
+    await assert.rejects(publisher.stop(), /publisher server close failed/);
+    assert.equal(serverCloseAttempts, 1);
+    await assert.rejects(fetch(`${publisher.home.url}/healthz`));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("subscriber stop closes its gateway after connection cleanup fails", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-subscriber-stop-"));
+  const stateDir = path.join(root, "subscriber");
+  await setupSubscriber({ stateDir });
+  await setSubscriberPublisher({
+    stateDir,
+    label: "cleanup",
+    publisherKey: "ab".repeat(32),
+  });
+  const dht = {
+    stats: {
+      punches: { consistent: 0, random: 0, open: 0 },
+      relaying: { attempts: 0, successes: 0, aborts: 0 },
+    },
+    connect: () => {
+      throw new Error("unexpected connect");
+    },
+    createServer: () => {
+      throw new Error("unexpected server");
+    },
+    destroy: async () => undefined,
+  } as DhtNode;
+  const subscriber = await startSubscriber(
+    {
+      stateDir,
+      dht,
+      gatewayPort: 0,
+      services: [],
+      waitForPublisher: false,
+    },
+    {
+      createPublisherConnection: () => ({
+        start: async () => undefined,
+        startInBackground: () => undefined,
+        generation: () => 1,
+        invalidate: () => false,
+        status: () => "connected",
+        open: async () => {
+          throw new Error("unexpected open");
+        },
+        stop: async () => {
+          throw new Error("subscriber connection stop failed");
+        },
+      }),
+    },
+  );
+
+  try {
+    await assert.rejects(
+      subscriber.stop(),
+      /subscriber connection stop failed/,
+    );
+    await assert.rejects(fetch(`${subscriber.home.url}/healthz`));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("dual-role runtimes borrow one DHT without merging role identities", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-runtime-shared-dht-"));
   const devicePublisherState = path.join(root, "device-publisher");

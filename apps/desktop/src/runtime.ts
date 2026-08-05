@@ -444,9 +444,9 @@ export async function startDesktopRuntime(
 
   async function cleanupDht(): Promise<unknown> {
     const current = dht;
-    dht = undefined;
     try {
       await current?.destroy({ force: true });
+      if (dht === current) dht = undefined;
       return undefined;
     } catch (error) {
       return error;
@@ -481,10 +481,9 @@ export async function startDesktopRuntime(
     configuration: DesktopRuntimeConfiguration,
   ): Promise<void> {
     if (stopped) throw new Error("desktop runtime is stopped");
-    const transportChanged = !sameTransportConfiguration(
-      bootstrap,
-      configuration.bootstrap,
-    );
+    const transportChanged =
+      dht === undefined ||
+      !sameTransportConfiguration(bootstrap, configuration.bootstrap);
     const publisherChanged = transportChanged || !sameRoleConfiguration(
       publisherOptions,
       configuration.publisher,

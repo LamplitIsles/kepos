@@ -42,6 +42,7 @@ import {
   promoteSubscriberPendingPublisher,
   setSubscriberPendingPublisher,
 } from "../state/subscriber.js";
+import { cleanupAll } from "./cleanup.js";
 
 export interface SubscriberService {
   id: string;
@@ -116,8 +117,17 @@ type ScheduleConnectTimeout = (
 
 const defaultConnectTimeoutMs = 20_000;
 
+export interface SubscriberRuntimeDependencies {
+  createPublisherConnection: typeof createPublisherConnection;
+}
+
+const defaultDependencies: SubscriberRuntimeDependencies = {
+  createPublisherConnection,
+};
+
 export async function startSubscriber(
   options: StartSubscriberOptions,
+  dependencies: SubscriberRuntimeDependencies = defaultDependencies,
 ): Promise<RunningSubscriber> {
   if (options.dht && options.bootstrap) {
     throw new Error("subscriber dht and bootstrap are mutually exclusive");
@@ -148,7 +158,7 @@ export async function startSubscriber(
     options.dht ?? createDht({ bootstrap: options.bootstrap, keyPair });
   const now = options.now ?? Date.now;
   const route = options.route ?? "auto";
-  const connection = createPublisherConnection({
+  const connection = dependencies.createPublisherConnection({
     connect: (observe) =>
       dht.connect(Buffer.from(contact.publisherKey, "hex"), {
         keyPair,
@@ -256,17 +266,19 @@ export async function startSubscriber(
       async stop(): Promise<void> {
         if (stopped) return;
         stopped = true;
-        await connection.stop();
-        await Promise.allSettled(servers.map(closeServer));
-        if (ownsDht) await dht.destroy({ force: true });
+        await cleanupAll([
+          () => connection.stop(),
+          ...servers.map((server) => () => closeServer(server)),
+          ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
+        ]);
       },
     };
   } catch (error) {
-    await connection.stop();
-    await Promise.allSettled([
-      ...servers.map(closeServer),
-      ...(ownsDht ? [dht.destroy({ force: true })] : []),
-    ]);
+    await cleanupAll([
+      () => connection.stop(),
+      ...servers.map((server) => () => closeServer(server)),
+      ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
+    ]).catch(() => undefined);
     throw error;
   }
 }

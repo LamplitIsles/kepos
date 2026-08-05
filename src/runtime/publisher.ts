@@ -31,6 +31,7 @@ import {
   setPublisherAllowlist,
 } from "../state/publisher.js";
 import type { PublisherService } from "../config.js";
+import { cleanupAll } from "./cleanup.js";
 
 const maximumPairingCandidates = 3;
 type PublisherRuntimeService = Omit<PublisherService, "kind">;
@@ -377,11 +378,11 @@ export async function startPublisher(
   try {
     await server.listen(keyPair);
   } catch (error) {
-    await Promise.allSettled([
-      server.close(),
-      home.close(),
-      ...(ownsDht ? [dht.destroy({ force: true })] : []),
-    ]);
+    await cleanupAll([
+      () => server.close(),
+      () => home.close(),
+      ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
+    ]).catch(() => undefined);
     throw error;
   }
 
@@ -456,13 +457,13 @@ export async function startPublisher(
       clearPairingExpiry();
       await pairing.waitForApproval().catch(() => undefined);
       for (const mux of muxes.values()) mux.close();
-      await Promise.allSettled([
-        server.close(),
-        home.close(),
-        ...[...subscriberHomes.values()].map(async (starting) =>
-          (await starting).close(),
+      await cleanupAll([
+        () => server.close(),
+        () => home.close(),
+        ...[...subscriberHomes.values()].map(
+          (starting) => async () => (await starting).close(),
         ),
-        ...(ownsDht ? [dht.destroy({ force: true })] : []),
+        ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
       ]);
     },
   };
