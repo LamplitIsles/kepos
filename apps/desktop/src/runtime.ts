@@ -29,6 +29,7 @@ import {
   type SubscriberRuntimeStatus,
 } from "../../../src/runtime/subscriber.js";
 import { loadPublisherState } from "../../../src/state/publisher.js";
+import { loadSubscriberConnectionState } from "../../../src/state/subscriber.js";
 import type {
   DesktopPublisherRole,
   DesktopService,
@@ -72,6 +73,7 @@ export interface DesktopRuntimeDependencies {
   acquirePublisherLock(stateDir: string): Promise<RuntimeLock>;
   acquireSubscriberLock(stateDir: string): Promise<RuntimeLock>;
   loadPublisherState: typeof loadPublisherState;
+  loadSubscriberConnectionState: typeof loadSubscriberConnectionState;
   startPublisher(options: StartPublisherOptions): Promise<RunningPublisher>;
   startSubscriber(options: StartSubscriberOptions): Promise<RunningSubscriber>;
   readRegistry(gatewayPort: number): Promise<HomeRegistry>;
@@ -100,6 +102,7 @@ const defaultDependencies: DesktopRuntimeDependencies = {
   acquirePublisherLock: acquirePublisherRuntimeLock,
   acquireSubscriberLock: acquireSubscriberRuntimeLock,
   loadPublisherState,
+  loadSubscriberConnectionState,
   startPublisher,
   startSubscriber,
   readRegistry: readHomeRegistry,
@@ -216,9 +219,8 @@ export async function startDesktopRuntime(
       return { ok: true };
     } catch (error) {
       publisherRole = {
-        ...publisherRole,
+        ...withoutActiveSubscribers(publisherRole),
         phase: "failed",
-        activeSubscribers: 0,
         acceptedConnections: 0,
         error: errorMessage(error),
       };
@@ -233,6 +235,20 @@ export async function startDesktopRuntime(
       subscriberLock ??= await dependencies.acquireSubscriberLock(
         subscriberOptions.stateDir,
       );
+      const { contact, identity } =
+        await dependencies.loadSubscriberConnectionState(
+          subscriberOptions.stateDir,
+        );
+      subscriberRole = {
+        ...subscriberRole,
+        subscriberKey: identity.publicKey,
+        remotePublisher: {
+          displayName: contact.label,
+          publisherKey: contact.publisherKey,
+          keyFingerprint: contact.publisherKey.slice(0, 16),
+        },
+        gatewayPort: subscriberOptions.gatewayPort,
+      };
       runningSubscriber = await dependencies.startSubscriber({
         stateDir: subscriberOptions.stateDir,
         gatewayPort: subscriberOptions.gatewayPort,
@@ -247,6 +263,7 @@ export async function startDesktopRuntime(
       return { ok: true };
     } catch (error) {
       subscriberRole = {
+        ...subscriberRole,
         phase: "failed",
         connection: "stopped",
         services: [],
@@ -462,9 +479,10 @@ export async function startDesktopRuntime(
     const message = errorMessage(error);
     publisherRole = configuration.publisher
       ? {
-          ...(publisherRole ?? initialPublisherRole()),
+          ...withoutActiveSubscribers(
+            publisherRole ?? initialPublisherRole(),
+          ),
           phase: "failed",
-          activeSubscribers: 0,
           acceptedConnections: 0,
           error: message,
         }
@@ -517,7 +535,7 @@ export async function startDesktopRuntime(
     if (failure !== undefined) {
       if (publisherChanged && publisherRole) {
         publisherRole = {
-          ...publisherRole,
+          ...withoutActiveSubscribers(publisherRole),
           phase: "failed",
           error: errorMessage(failure),
         };
@@ -707,7 +725,12 @@ export async function startDesktopRuntime(
         const dhtFailure = await cleanupDht();
         failure ??= dhtFailure;
         appPhase = "stopped";
-        if (publisherRole) publisherRole = { ...publisherRole, phase: "stopped" };
+        if (publisherRole) {
+          publisherRole = {
+            ...withoutActiveSubscribers(publisherRole),
+            phase: "stopped",
+          };
+        }
         if (subscriberRole) {
           subscriberRole = {
             ...subscriberRole,
@@ -760,6 +783,16 @@ function initialPublisherRole(): DesktopPublisherRole {
     activeSubscriberKeys: [],
     acceptedConnections: 0,
     services: [],
+  };
+}
+
+function withoutActiveSubscribers(
+  role: DesktopPublisherRole,
+): DesktopPublisherRole {
+  return {
+    ...role,
+    activeSubscribers: 0,
+    activeSubscriberKeys: [],
   };
 }
 

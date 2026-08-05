@@ -117,6 +117,8 @@ test("desktop runtime starts and stops a publisher-only role", async () => {
   ]);
   assert.equal(snapshots.at(-1)?.appPhase, "stopped");
   assert.equal(snapshots.at(-1)?.publisher?.phase, "stopped");
+  assert.equal(snapshots.at(-1)?.publisher?.activeSubscribers, 0);
+  assert.deepEqual(snapshots.at(-1)?.publisher?.activeSubscriberKeys, []);
 });
 
 test("desktop runtime keeps subscriber service behavior in subscriber-only mode", async () => {
@@ -1019,6 +1021,8 @@ test("desktop exposes an initial shared transport failure", async () => {
   assert.equal(snapshots.at(-1)?.appPhase, "running");
   assert.equal(snapshots.at(-1)?.publisher?.phase, "failed");
   assert.equal(snapshots.at(-1)?.publisher?.error, "transport unavailable");
+  assert.equal(snapshots.at(-1)?.publisher?.activeSubscribers, 0);
+  assert.deepEqual(snapshots.at(-1)?.publisher?.activeSubscriberKeys, []);
   assert.equal(snapshots.at(-1)?.subscriber?.phase, "failed");
   assert.equal(snapshots.at(-1)?.subscriber?.error, "transport unavailable");
   assert.equal(events.includes("publisher-lock:release"), true);
@@ -1062,6 +1066,7 @@ test("desktop reports transport replacement failure and can retry it", async () 
   );
   assert.equal(snapshots.at(-1)?.publisher?.phase, "failed");
   assert.equal(snapshots.at(-1)?.publisher?.error, "transport unavailable");
+  assert.deepEqual(snapshots.at(-1)?.publisher?.activeSubscriberKeys, []);
   assert.equal(snapshots.at(-1)?.subscriber?.phase, "failed");
   assert.equal(snapshots.at(-1)?.subscriber?.error, "transport unavailable");
 
@@ -1269,6 +1274,13 @@ test("desktop runtime isolates subscriber startup failure from publisher", async
   assert.deepEqual(snapshots.at(-1)?.subscriber, {
     phase: "failed",
     connection: "stopped",
+    subscriberKey: localSubscriberKey,
+    remotePublisher: {
+      displayName: "kosmos",
+      publisherKey: remotePublisherKey,
+      keyFingerprint: remotePublisherKey.slice(0, 16),
+    },
+    gatewayPort: 17_480,
     services: [],
     error: "subscriber unavailable",
   });
@@ -1490,6 +1502,21 @@ function dependencies(
             { id: "smoke", name: "Smoke", kind: "tcp", targetPort: 18_080 },
           ],
         },
+      };
+    },
+    loadSubscriberConnectionState: async (stateDir) => {
+      events.push(`subscriber-state:load:${stateDir}`);
+      return {
+        identity: {
+          publicKey: localSubscriberKey,
+          secretKey: "00".repeat(64),
+        },
+        contact: {
+          publisherKey: remotePublisherKey,
+          label: "kosmos",
+          requestedLocalPort: 0,
+        },
+        pending: false,
       };
     },
     startPublisher: async (options) => {

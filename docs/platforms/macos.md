@@ -85,8 +85,8 @@ One role's startup failure remains visible without stopping a healthy sibling.
 ## Native surface
 
 The tray is the lifecycle and status surface. The app shows remote services
-from the subscriber registry and a separate **Shared services** section for the
-local publisher.
+from the subscriber registry and a separate **Services published here** section
+for the local publisher.
 
 - HTTP actions open the macOS default browser.
 - Navidrome copies its canonical `*.localhost` URL for Navic.

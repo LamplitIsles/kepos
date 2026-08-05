@@ -93,6 +93,25 @@ test("desktop UI presents publisher-rooted relationships with copyable identitie
     html,
     /publisher\.activeSubscriberKeys\[index\]/,
   );
+  assert.match(
+    html,
+    /const availableServices = services\.filter\(\(service\) => service\.available\)/,
+  );
+  assert.match(
+    html,
+    /remoteServiceLabel\.textContent = plural\(availableServices\.length/,
+  );
+  assert.match(
+    html,
+    /showingRemote \? availableServices\.length/,
+  );
+  assert.match(html, /aria-label="Copy remote publisher public key"/);
+  assert.match(html, /aria-label="Copy this Mac subscriber public key"/);
+  assert.match(html, /aria-label="Copy this Mac publisher public key"/);
+  assert.match(
+    html,
+    /aria-label="Copy ' \+ label \+ ' public key"/,
+  );
 
   const remoteRelationship = html.slice(
     html.indexOf('data-role="remote-surface"'),

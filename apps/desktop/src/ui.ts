@@ -407,12 +407,12 @@ export function renderDesktopUi(): string {
           <div class="relationship-map">
             <article class="identity-card" data-role="relationship-publisher" data-identity="remote-publisher">
               <div class="identity-top"><div><p class="identity-role">Publisher</p><h2 class="identity-name" data-role="remote-publisher-name">Remote publisher</h2></div><span class="identity-place">Remote</span></div>
-              <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="remote-publisher-key">Pending</span><button class="action compact" type="button" data-action="copy-remote-publisher-key" disabled>Copy</button></div></div>
+              <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="remote-publisher-key">Pending</span><button class="action compact" type="button" data-action="copy-remote-publisher-key" aria-label="Copy remote publisher public key" disabled>Copy</button></div></div>
             </article>
             <div class="relation-flow"><span class="relation-flow-label">publishes services to</span><svg viewBox="0 0 36 18" aria-hidden="true"><path d="M2 9h30M26 3l6 6-6 6"/></svg></div>
             <article class="identity-card local" data-role="relationship-subscribers" data-identity="local-subscriber">
               <div class="identity-top"><div><p class="identity-role">Subscriber</p><h2 class="identity-name">This Mac</h2></div><span class="identity-place">Local</span></div>
-              <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="local-subscriber-key">Pending</span><button class="action compact" type="button" data-action="copy-local-subscriber-key" disabled>Copy</button></div></div>
+              <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="local-subscriber-key">Pending</span><button class="action compact" type="button" data-action="copy-local-subscriber-key" aria-label="Copy this Mac subscriber public key" disabled>Copy</button></div></div>
             </article>
           </div>
           <div class="section-head"><strong>Services from this publisher</strong><span data-role="remote-service-label">0 available</span></div>
@@ -421,7 +421,7 @@ export function renderDesktopUi(): string {
         <section class="surface" data-role="hosted-surface" hidden>
           <article class="identity-card local" data-role="relationship-publisher" data-identity="local-publisher">
             <div class="identity-top"><div><p class="identity-role">Publisher</p><h2 class="identity-name" data-role="local-publisher-name">This Mac</h2></div><div class="publisher-primary-actions"><button class="action compact" type="button" data-action="create-pairing">Add device</button><span class="identity-place">Local</span></div></div>
-            <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="local-publisher-key">Pending</span><button class="action compact" type="button" data-action="copy-local-publisher-key" disabled>Copy</button></div></div>
+            <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="local-publisher-key">Pending</span><button class="action compact" type="button" data-action="copy-local-publisher-key" aria-label="Copy this Mac publisher public key" disabled>Copy</button></div></div>
           </article>
           <div class="pairing" data-role="pairing" hidden></div>
           <section class="subscriber-roster" data-role="relationship-subscribers">
@@ -530,11 +530,13 @@ export function renderDesktopUi(): string {
           '<p class="service-address">' + escapeHtml(address) + '</p></div></article>';
       };
 
-      const renderConnectedSubscriber = (key, index) =>
-        '<article class="subscriber-row"><span class="member-dot"></span><div class="member-copy">' +
-        '<p class="member-name">Subscriber ' + String(index + 1).padStart(2, '0') + '</p>' +
-        '<p class="member-key">' + escapeHtml(fingerprint(key)) + '</p></div>' +
-        '<button class="action compact" type="button" data-action="copy-connected-subscriber" data-subscriber-index="' + index + '">Copy</button></article>';
+      const renderConnectedSubscriber = (key, index) => {
+        const label = 'Subscriber ' + String(index + 1).padStart(2, '0');
+        return '<article class="subscriber-row"><span class="member-dot"></span><div class="member-copy">' +
+          '<p class="member-name">' + label + '</p>' +
+          '<p class="member-key">' + escapeHtml(fingerprint(key)) + '</p></div>' +
+          '<button class="action compact" type="button" data-action="copy-connected-subscriber" data-subscriber-index="' + index + '" aria-label="Copy ' + label + ' public key">Copy</button></article>';
+      };
 
       const renderPairing = (pairing) => {
         if (!pairing || pairing.phase === 'idle') {
@@ -571,6 +573,7 @@ export function renderDesktopUi(): string {
         const subscriber = snapshot.subscriber;
         const publisher = snapshot.publisher;
         const services = subscriber && Array.isArray(subscriber.services) ? subscriber.services : [];
+        const availableServices = services.filter((service) => service.available);
         const subscriberKeys = publisher && Array.isArray(publisher.activeSubscriberKeys) ? publisher.activeSubscriberKeys : [];
         if (selectedView === 'remote' && !subscriber) selectedView = publisher ? 'hosted' : 'settings';
         if (selectedView === 'hosted' && !publisher) selectedView = subscriber ? 'remote' : 'settings';
@@ -601,7 +604,7 @@ export function renderDesktopUi(): string {
           localSubscriberCopy.disabled = !subscriber.subscriberKey;
           subscriberRuntimeNode.textContent = subscriber.phase + ' · ' + subscriber.connection;
           gatewayNode.textContent = subscriber.gatewayPort ? 'localhost:' + subscriber.gatewayPort : 'Not available';
-          remoteServiceLabel.textContent = plural(services.length, 'available', 'available');
+          remoteServiceLabel.textContent = plural(availableServices.length, 'available', 'available');
           servicesNode.innerHTML = subscriber.error
             ? '<div class="error">' + escapeHtml(subscriber.error) + '</div>'
             : services.length ? services.map(renderService).join('') : '<div class="empty">Finding your private services…</div>';
@@ -648,7 +651,7 @@ export function renderDesktopUi(): string {
         viewTitleNode.textContent = showingRemote
           ? (subscriber.remotePublisher ? subscriber.remotePublisher.displayName : 'Remote publisher')
           : showingHosted ? (publisher.displayName || 'Local publisher') : 'Settings';
-        const visibleCount = showingRemote ? services.length : showingHosted ? publisher.services.length : 0;
+        const visibleCount = showingRemote ? availableServices.length : showingHosted ? publisher.services.length : 0;
         countNode.textContent = selectedView === 'settings' ? 'DEVICE' : plural(visibleCount, 'SERVICE', 'SERVICES');
       };
 
