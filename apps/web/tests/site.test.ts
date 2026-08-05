@@ -135,7 +135,7 @@ describe("Kepos landing page", () => {
     expect(androidScreenshot.subarray(1, 4).toString("ascii")).toBe("PNG");
   });
 
-  it("keeps the desktop capture Retina-sharp inside macOS window chrome", () => {
+  it("keeps the desktop capture Retina-sharp at its declared display size", () => {
     const html = readProjectFile("index.html");
     const css = readProjectFile("src/styles.css");
     const desktopScreenshot = readProjectBuffer("public/kepos-desktop.png");
@@ -158,12 +158,6 @@ describe("Kepos landing page", () => {
         `src="/kepos-desktop\\.png"[\\s\\S]*?width="${dimensions.width}"[\\s\\S]*?height="${dimensions.height}"`,
       ),
     );
-    expect(html).toContain('class="product-window-bar"');
-    expect(html.match(/class="product-window-control product-window-(?:close|minimize|zoom)"/g)).toHaveLength(3);
-    expect(css).toMatch(/\.product-frame-desktop\s*\{[^}]*border-radius:/s);
-    expect(css).toContain("#ff5f57");
-    expect(css).toContain("#febc2e");
-    expect(css).toContain("#28c840");
   });
 
   it("stacks the product composition before its columns can overflow", () => {
