@@ -1,9 +1,10 @@
 # CLI, identity, and configuration
 
-The Kepos CLI can run a publisher, a subscriber, or both as separate processes.
-One subscriber keeps one encrypted connection open to one publisher. Registry,
-control, HTTP, SSH, and other services use independent Protomux channels on
-that connection.
+The Kepos CLI can run a publisher, a subscriber, or both roles in one device
+process. Standalone role commands remain available when the roles need separate
+network policy or lifecycles. One subscriber keeps one encrypted connection
+open to one publisher. Registry, control, HTTP, SSH, and other services use
+independent Protomux channels on that connection.
 
 ## Create identities
 
@@ -133,6 +134,36 @@ npm run kepos -- publisher set-services \
 These commands fail instead of editing inactive state when TOML owns the
 publisher policy. Neither command rotates the publisher key.
 
+## Run both roles as one device
+
+A dual-role host can keep the two state directories and identities while
+sharing one device-owned HyperDHT node and UDP transport:
+
+```sh
+npm run kepos -- device run \
+  --publisher-state ~/.local/state/kepos-neo/publisher \
+  --subscriber-state ~/.local/state/kepos-neo/subscriber \
+  --subscriber-service ssh:2222
+```
+
+The state flags select the roles explicitly. The TOML `enabled` fields control
+Desktop auto-start and do not silently add a role to `device run`. The command
+reads publisher policy and subscriber gateway, route, and service defaults from
+the shared TOML. Repeated `--subscriber-service id:local-port` options replace
+configured subscriber bindings for that invocation.
+
+`--bootstrap host:port` is device-wide for this command and replaces
+`[network].bootstrap` once for both roles. Startup is atomic: if either selected
+role cannot start, Kepos stops any role that did start, destroys the shared
+node, releases both state locks, and exits for the host supervisor to retry.
+The publisher lock is acquired before the subscriber lock; shutdown releases
+them in the opposite order.
+
+`publisher run` and `subscriber run` still create and own independent DHT nodes.
+Use them for single-role hosts, separate supervisors, transport isolation, or
+rollback. Sharing a device node never merges role keys, allowlists, publisher
+pins, or state.
+
 ## Local services
 
 Run the subscriber with a raw SSH listener:
@@ -173,8 +204,9 @@ silent path is replaced after about 35 seconds: 15 seconds before a probe, a
 control-ready connection replaces the previous connection for the same
 subscriber public key.
 
-The CLI locks a subscriber state directory while it owns that identity.
-Different installations must use different subscriber identities.
+The CLI locks a subscriber state directory while it owns that identity. The
+publisher and `device run` commands take the matching publisher lock too.
+Different installations must use different identities.
 
 ## Route and observations
 
@@ -192,6 +224,15 @@ stdout stays valid NDJSON. `outerId` correlates one connection with its service
 channels. Transport snapshots include RTT, congestion window, retransmit,
 recovery, and byte counters. Hole-punch observations contain firewall classes
 and candidate counts, never candidate IP addresses.
+
+When both roles share a device node, HyperDHT counters describe that node as a
+whole. They cannot be assigned exactly to publisher or subscriber traffic even
+when an observation was emitted by one role. Role-specific events are recorded
+above the DHT layer.
+
+Operators should admit HyperDHT's UDP candidate range, normally `49737-49741`,
+rather than only the preferred first port. A shared node normally uses one UDP
+endpoint, but it may select a later candidate when an earlier port is occupied.
 
 These diagnostics are sanitized but their shape is not a stable API. Never
 copy state files into logs.

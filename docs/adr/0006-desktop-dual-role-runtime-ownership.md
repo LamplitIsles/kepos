@@ -4,6 +4,11 @@ Status: Accepted
 
 Date: 2026-07-25
 
+Superseded in part by ADR 0008. The original decision that Desktop roles do not
+share a DHT instance is replaced by device-owned shared HyperDHT transport.
+Separate role identities, state locks, no implicit self-connection, failure
+reporting, and native UI lifecycle remain in force.
+
 ## Context
 
 Kepos Desktop already owns one subscriber runtime directly in its Bare process.
@@ -19,14 +24,15 @@ desktop singleton and subscriber-state lock but does not cover publisher state.
 ## Decision
 
 One desktop process may run publisher-only, subscriber-only, or both roles. Each
-role keeps its existing state, identity, DHT runtime, and connection model:
+role keeps its existing state, identity, and connection model:
 
 - the subscriber maintains one outbound connection to one pinned publisher;
 - the publisher listens under its own key and keeps one inbound connection per
   active subscriber.
 
-The roles do not share a DHT instance and desktop never connects its subscriber
-to its own publisher implicitly.
+Under ADR 0008, the process owns one shared DHT instance and lends it to every
+enabled role. Desktop never connects its subscriber to its own publisher
+implicitly.
 
 Desktop keeps the machine-wide singleton from ADR 0004. It also acquires a
 per-state lock for every configured role before creating native UI:
@@ -74,7 +80,7 @@ controls or filesystem watching.
 
 - A desktop can consume remote services while sharing local services.
 - CLI and desktop cannot use the same publisher or subscriber state at once.
-- Two enabled roles create two local DHT owners and may use two UDP sockets.
+- Two enabled roles share one device-owned DHT and normally one UDP endpoint.
 - Role combinations are configuration results, not separate product modes.
 - The desktop snapshot and UI must distinguish the remote publisher from the
   publisher owned by this machine.

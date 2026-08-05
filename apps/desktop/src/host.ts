@@ -39,6 +39,7 @@ export interface DesktopNativeWebView {
 
 export interface StartDesktopHostOptions {
   homeDirectory: string;
+  bootstrap?: StartDesktopRuntimeOptions["bootstrap"];
   publisher?: Omit<StartDesktopPublisherOptions, "lock">;
   subscriber?: Omit<StartDesktopSubscriberOptions, "lock">;
 }
@@ -160,7 +161,7 @@ export async function startDesktopHost(
         try {
           runtimeToStop = await runtimeStartTask;
         } catch {
-          // The runtime owns release of its subscriber lock on startup failure.
+          // The runtime owns release of every role lock on startup failure.
         }
       }
       await cleanup(() => runtimeToStop?.stop());
@@ -259,6 +260,7 @@ export async function startDesktopHost(
   let startedRuntime: RunningDesktopRuntime;
   try {
     runtimeStartTask = dependencies.startRuntime({
+      ...(options.bootstrap ? { bootstrap: options.bootstrap } : {}),
       ...(options.publisher
         ? {
             publisher: {
@@ -282,8 +284,8 @@ export async function startDesktopHost(
     });
     startedRuntime = await runtimeStartTask;
   } catch {
-    // startDesktopRuntime already publishes a safe failed snapshot and releases
-    // the subscriber-state lock. Keep the window open so the user can read it.
+    // startDesktopRuntime publishes a safe failed snapshot and releases every
+    // role lock it received. Keep the window open so the user can read it.
     return { reconfigure, shutdown };
   }
   if (shutdownPromise === undefined) {

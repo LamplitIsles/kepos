@@ -10,6 +10,10 @@ import {
   runCli,
 } from "../src/cli/main.js";
 import {
+  createDht,
+  type DhtNode,
+} from "../src/mux/hyperdht.js";
+import {
   startPublisher,
   type PublisherRuntimeStatus,
 } from "../src/runtime/publisher.js";
@@ -34,6 +38,265 @@ const require = createRequire(import.meta.url);
 const createHyperDhtTestnet = require(
   "hyperdht/testnet",
 ) as CreateHyperDhtTestnet;
+
+function trackDht(node: DhtNode): {
+  calls: { connect: number; createServer: number; destroy: number };
+  node: DhtNode;
+} {
+  const calls = { connect: 0, createServer: 0, destroy: 0 };
+  return {
+    calls,
+    node: {
+      connect: (...arguments_) => {
+        calls.connect++;
+        return node.connect(...arguments_);
+      },
+      createServer: (...arguments_) => {
+        calls.createServer++;
+        return node.createServer(...arguments_);
+      },
+      stats: node.stats,
+      destroy: async (...arguments_) => {
+        calls.destroy++;
+        await node.destroy(...arguments_);
+      },
+    },
+  };
+}
+
+test("borrowed DHT rejects role-level bootstrap before loading state", async () => {
+  const dht = createDht({});
+  const options = {
+    stateDir: path.join(tmpdir(), "kepos-missing-borrowed-state"),
+    bootstrap: [{ host: "bootstrap.example", port: 49_737 }],
+    dht,
+  };
+
+  try {
+    await assert.rejects(
+      startPublisher(options),
+      /publisher dht and bootstrap are mutually exclusive/,
+    );
+    await assert.rejects(
+      startSubscriber({ ...options, services: [] }),
+      /subscriber dht and bootstrap are mutually exclusive/,
+    );
+  } finally {
+    await dht.destroy({ force: true });
+  }
+});
+
+test("publisher stop reports cleanup failure after closing its Home server", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-publisher-stop-"));
+  const stateDir = path.join(root, "publisher");
+  await setupPublisher({
+    stateDir,
+    displayName: "cleanup",
+    subscriberPublicKeys: [],
+    services: [],
+  });
+  let serverCloseAttempts = 0;
+  const dht = {
+    stats: {
+      punches: { consistent: 0, random: 0, open: 0 },
+      relaying: { attempts: 0, successes: 0, aborts: 0 },
+    },
+    connect: () => {
+      throw new Error("unexpected connect");
+    },
+    createServer: () => ({
+      listen: async () => undefined,
+      close: async () => {
+        serverCloseAttempts++;
+        throw new Error("publisher server close failed");
+      },
+    }),
+    destroy: async () => undefined,
+  } as DhtNode;
+  const publisher = await startPublisher({ stateDir, dht });
+
+  try {
+    await assert.rejects(publisher.stop(), /publisher server close failed/);
+    assert.equal(serverCloseAttempts, 1);
+    await assert.rejects(fetch(`${publisher.home.url}/healthz`));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("subscriber stop closes its gateway after connection cleanup fails", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-subscriber-stop-"));
+  const stateDir = path.join(root, "subscriber");
+  await setupSubscriber({ stateDir });
+  await setSubscriberPublisher({
+    stateDir,
+    label: "cleanup",
+    publisherKey: "ab".repeat(32),
+  });
+  const dht = {
+    stats: {
+      punches: { consistent: 0, random: 0, open: 0 },
+      relaying: { attempts: 0, successes: 0, aborts: 0 },
+    },
+    connect: () => {
+      throw new Error("unexpected connect");
+    },
+    createServer: () => {
+      throw new Error("unexpected server");
+    },
+    destroy: async () => undefined,
+  } as DhtNode;
+  const subscriber = await startSubscriber(
+    {
+      stateDir,
+      dht,
+      gatewayPort: 0,
+      services: [],
+      waitForPublisher: false,
+    },
+    {
+      createPublisherConnection: () => ({
+        start: async () => undefined,
+        startInBackground: () => undefined,
+        generation: () => 1,
+        invalidate: () => false,
+        status: () => "connected",
+        open: async () => {
+          throw new Error("unexpected open");
+        },
+        stop: async () => {
+          throw new Error("subscriber connection stop failed");
+        },
+      }),
+    },
+  );
+
+  try {
+    await assert.rejects(
+      subscriber.stop(),
+      /subscriber connection stop failed/,
+    );
+    await assert.rejects(fetch(`${subscriber.home.url}/healthz`));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("dual-role runtimes borrow one DHT without merging role identities", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-runtime-shared-dht-"));
+  const devicePublisherState = path.join(root, "device-publisher");
+  const deviceSubscriberState = path.join(root, "device-subscriber");
+  const remotePublisherState = path.join(root, "remote-publisher");
+  const remoteSubscriberState = path.join(root, "remote-subscriber");
+  const deviceSubscriberIdentity = await setupSubscriber({
+    stateDir: deviceSubscriberState,
+  });
+  const remoteSubscriberIdentity = await setupSubscriber({
+    stateDir: remoteSubscriberState,
+  });
+  const devicePublisherIdentity = await setupPublisher({
+    stateDir: devicePublisherState,
+    displayName: "device",
+    subscriberPublicKeys: [remoteSubscriberIdentity.publicKey],
+    services: [],
+  });
+  const remotePublisherIdentity = await setupPublisher({
+    stateDir: remotePublisherState,
+    displayName: "remote",
+    subscriberPublicKeys: [deviceSubscriberIdentity.publicKey],
+    services: [],
+  });
+  await Promise.all([
+    setSubscriberPublisher({
+      stateDir: deviceSubscriberState,
+      label: "remote",
+      publisherKey: remotePublisherIdentity.publisherKey,
+    }),
+    setSubscriberPublisher({
+      stateDir: remoteSubscriberState,
+      label: "device",
+      publisherKey: devicePublisherIdentity.publisherKey,
+    }),
+  ]);
+  const testnet = await createHyperDhtTestnet(3);
+  const sharedDht = createDht({ bootstrap: testnet.bootstrap });
+  const tracked = trackDht(sharedDht);
+  let devicePublisher: Awaited<ReturnType<typeof startPublisher>> | undefined;
+  let deviceSubscriber: Awaited<ReturnType<typeof startSubscriber>> | undefined;
+  let remotePublisher: Awaited<ReturnType<typeof startPublisher>> | undefined;
+  let remoteSubscriber: Awaited<ReturnType<typeof startSubscriber>> | undefined;
+
+  try {
+    [devicePublisher, remotePublisher] = await Promise.all([
+      startPublisher({
+        stateDir: devicePublisherState,
+        dht: tracked.node,
+      }),
+      startPublisher({
+        stateDir: remotePublisherState,
+        bootstrap: testnet.bootstrap,
+      }),
+    ]);
+    [deviceSubscriber, remoteSubscriber] = await Promise.all([
+      startSubscriber({
+        stateDir: deviceSubscriberState,
+        dht: tracked.node,
+        gatewayPort: 0,
+        services: [],
+      }),
+      startSubscriber({
+        stateDir: remoteSubscriberState,
+        bootstrap: testnet.bootstrap,
+        gatewayPort: 0,
+        services: [],
+      }),
+    ]);
+
+    assert.notEqual(
+      devicePublisherIdentity.publisherKey,
+      deviceSubscriberIdentity.publicKey,
+    );
+    assert.deepEqual(tracked.calls, {
+      connect: 1,
+      createServer: 1,
+      destroy: 0,
+    });
+    assert.equal(devicePublisher.activeSubscribers(), 1);
+    assert.equal(remotePublisher.activeSubscribers(), 1);
+
+    await deviceSubscriber.stop();
+    assert.equal(tracked.calls.destroy, 0);
+    assert.equal(
+      (await fetch(`${remoteSubscriber.home.url}/healthz`)).status,
+      200,
+    );
+
+    deviceSubscriber = await startSubscriber({
+      stateDir: deviceSubscriberState,
+      dht: tracked.node,
+      gatewayPort: 0,
+      services: [],
+    });
+    await devicePublisher.stop();
+    assert.equal(tracked.calls.destroy, 0);
+    assert.equal(
+      (await fetch(`${deviceSubscriber.home.url}/healthz`)).status,
+      200,
+    );
+  } finally {
+    await Promise.allSettled([
+      deviceSubscriber?.stop(),
+      devicePublisher?.stop(),
+      remoteSubscriber?.stop(),
+      remotePublisher?.stop(),
+    ]);
+    await Promise.allSettled([
+      sharedDht.destroy({ force: true }),
+      testnet.destroy(),
+      rm(root, { recursive: true, force: true }),
+    ]);
+  }
+});
 
 test("publisher and subscriber expose synchronous status around an awaited lifecycle", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-runtime-"));

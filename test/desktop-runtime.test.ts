@@ -8,6 +8,7 @@ import {
 import type { DesktopSnapshot } from "../apps/desktop/src/protocol.js";
 import type { HomeRegistry } from "../src/home/registry.js";
 import { derivePublisherHomeKey } from "../src/keys.js";
+import type { DhtNode } from "../src/mux/hyperdht.js";
 import { HomeRegistryTimeoutError } from "../src/runtime/registry-client.js";
 import type {
   PublisherRuntimeStatus,
@@ -33,6 +34,24 @@ const registry: HomeRegistry = {
     { id: "dagger", name: "Dagger", kind: "tcp" },
   ],
 };
+
+function trackedDht(events: string[], label: string): DhtNode {
+  return {
+    stats: {
+      punches: { consistent: 0, random: 0, open: 0 },
+      relaying: { attempts: 0, successes: 0, aborts: 0 },
+    },
+    connect: () => {
+      throw new Error("unexpected connect");
+    },
+    createServer: () => {
+      throw new Error("unexpected server");
+    },
+    destroy: async () => {
+      events.push(`dht:destroy:${label}`);
+    },
+  } as DhtNode;
+}
 
 test("desktop runtime starts and stops a publisher-only role", async () => {
   const events: string[] = [];
@@ -671,24 +690,31 @@ test("desktop runtime applies shared network and role policy", async () => {
     allow: ["22".repeat(32)],
     services: [{ id: "web", name: "Web", targetPort: 8_080 }],
   };
+  const dht = trackedDht(events, "initial");
+  let dhtCreates = 0;
+  let createdBootstrap: unknown;
   const runtime = await startDesktopRuntime(
     {
+      bootstrap,
       publisher: {
         stateDir: "/state/publisher",
         configPath: "/config/kepos.toml",
-        bootstrap,
         policy: publisherPolicy,
       },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: 17_480,
-        bootstrap,
         route: "public",
         services: [],
       },
       onSnapshot: () => undefined,
     },
     dependencies(events, {
+      createDht: (options) => {
+        dhtCreates++;
+        createdBootstrap = options.bootstrap;
+        return dht;
+      },
       startPublisher: async (options) => {
         publisherStartOptions = options as unknown as Record<string, unknown>;
         return runningPublisher(() => publisherStatus(0, 0), events);
@@ -706,7 +732,10 @@ test("desktop runtime applies shared network and role policy", async () => {
     }),
   );
 
-  assert.deepEqual(publisherStartOptions?.bootstrap, bootstrap);
+  assert.equal(dhtCreates, 1);
+  assert.deepEqual(createdBootstrap, bootstrap);
+  assert.equal(publisherStartOptions?.dht, dht);
+  assert.equal(publisherStartOptions?.bootstrap, undefined);
   assert.deepEqual(publisherStartOptions?.policy, publisherPolicy);
   await (
     publisherStartOptions?.persistAllowlist as (allow: string[]) => Promise<void>
@@ -714,13 +743,17 @@ test("desktop runtime applies shared network and role policy", async () => {
   assert.deepEqual(persisted, [
     { configPath: "/config/kepos.toml", allow: ["33".repeat(32)] },
   ]);
-  assert.deepEqual(subscriberStartOptions?.bootstrap, bootstrap);
+  assert.equal(subscriberStartOptions?.dht, dht);
+  assert.equal(subscriberStartOptions?.bootstrap, undefined);
   assert.equal(subscriberStartOptions?.route, "public");
   await runtime.stop();
+  assert.equal(events.filter((event) => event === "dht:destroy:initial").length, 1);
 });
 
 test("desktop runtime reconfigures only the changed role", async () => {
   const events: string[] = [];
+  const dht = trackedDht(events, "shared");
+  let dhtCreates = 0;
   const subscriber = {
     stateDir: "/state/subscriber",
     gatewayPort: 17_480,
@@ -740,7 +773,12 @@ test("desktop runtime reconfigures only the changed role", async () => {
       subscriber,
       onSnapshot: () => undefined,
     },
-    dependencies(events),
+    dependencies(events, {
+      createDht: () => {
+        dhtCreates++;
+        return dht;
+      },
+    }),
   );
   const before = events.length;
   const configurable = runtime as typeof runtime & {
@@ -766,6 +804,316 @@ test("desktop runtime reconfigures only the changed role", async () => {
     "publisher:start:/state/publisher",
   ]);
   assert.equal(events.slice(before).includes("subscriber:stop"), false);
+  assert.equal(dhtCreates, 1);
+  assert.equal(events.includes("dht:destroy:shared"), false);
+  await runtime.stop();
+});
+
+test("desktop transport reconfiguration replaces one node and restarts both roles", async () => {
+  const events: string[] = [];
+  const publisher = { stateDir: "/state/publisher" };
+  const subscriber = {
+    stateDir: "/state/subscriber",
+    gatewayPort: 17_480,
+    services: [],
+  };
+  const nodes: DhtNode[] = [];
+  const publisherNodes: DhtNode[] = [];
+  const subscriberNodes: DhtNode[] = [];
+  const runtime = await startDesktopRuntime(
+    {
+      bootstrap: [{ host: "bootstrap-one.example", port: 49_737 }],
+      publisher,
+      subscriber,
+      onSnapshot: () => undefined,
+    },
+    dependencies(events, {
+      createDht: (options) => {
+        const label = options.bootstrap?.[0]?.host ?? "default";
+        events.push(`dht:create:${label}`);
+        const node = trackedDht(events, label);
+        nodes.push(node);
+        return node;
+      },
+      startPublisher: async (options) => {
+        publisherNodes.push(options.dht!);
+        return runningPublisher(() => publisherStatus(0, 0), events);
+      },
+      startSubscriber: async (options) => {
+        subscriberNodes.push(options.dht!);
+        return runningSubscriber(
+          () => subscriberStatus("connected", 1),
+          events,
+        );
+      },
+    }),
+  );
+  const before = events.length;
+
+  await runtime.reconfigure({
+    bootstrap: [{ host: "bootstrap-two.example", port: 49_738 }],
+    publisher,
+    subscriber,
+  });
+
+  assert.equal(nodes.length, 2);
+  assert.deepEqual(publisherNodes, nodes);
+  assert.deepEqual(subscriberNodes, nodes);
+  assert.equal(
+    events.slice(before).filter((event) => event.startsWith("dht:destroy:"))
+      .length,
+    1,
+  );
+  assert.equal(
+    events.slice(before).filter((event) => event.startsWith("dht:create:"))
+      .length,
+    1,
+  );
+  assert.ok(
+    events.indexOf("publisher:stop") <
+      events.indexOf("dht:destroy:bootstrap-one.example"),
+  );
+  assert.ok(
+    events.indexOf("subscriber:stop") <
+      events.indexOf("dht:destroy:bootstrap-one.example"),
+  );
+  assert.ok(
+    events.indexOf("dht:destroy:bootstrap-one.example") <
+      events.indexOf("dht:create:bootstrap-two.example"),
+  );
+  await runtime.stop();
+});
+
+test("desktop keeps the shared node when one role cannot start", async () => {
+  const events: string[] = [];
+  const dht = trackedDht(events, "shared");
+  const runtime = await startDesktopRuntime(
+    {
+      publisher: { stateDir: "/state/publisher" },
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: 17_480,
+        services: [],
+      },
+      onSnapshot: () => undefined,
+    },
+    dependencies(events, {
+      createDht: () => dht,
+      startPublisher: async (options) => {
+        assert.equal(options.dht, dht);
+        throw new Error("publisher unavailable");
+      },
+      startSubscriber: async (options) => {
+        assert.equal(options.dht, dht);
+        return runningSubscriber(
+          () => subscriberStatus("connected", 1),
+          events,
+        );
+      },
+    }),
+  );
+
+  assert.equal(events.includes("dht:destroy:shared"), false);
+  await runtime.stop();
+  await runtime.stop();
+  assert.equal(
+    events.filter((event) => event === "dht:destroy:shared").length,
+    1,
+  );
+});
+
+test("desktop exposes an initial shared transport failure", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+
+  await assert.rejects(
+    startDesktopRuntime(
+      {
+        publisher: {
+          stateDir: "/state/publisher",
+          lock: {
+            release: async () => {
+              events.push("publisher-lock:release");
+            },
+          },
+        },
+        subscriber: {
+          stateDir: "/state/subscriber",
+          gatewayPort: 17_480,
+          services: [],
+          lock: {
+            release: async () => {
+              events.push("subscriber-lock:release");
+            },
+          },
+        },
+        onSnapshot: (snapshot) => snapshots.push(snapshot),
+      },
+      dependencies(events, {
+        createDht: () => {
+          throw new Error("transport unavailable");
+        },
+      }),
+    ),
+    /transport unavailable/,
+  );
+
+  assert.equal(snapshots.at(-1)?.appPhase, "running");
+  assert.equal(snapshots.at(-1)?.publisher?.phase, "failed");
+  assert.equal(snapshots.at(-1)?.publisher?.error, "transport unavailable");
+  assert.equal(snapshots.at(-1)?.subscriber?.phase, "failed");
+  assert.equal(snapshots.at(-1)?.subscriber?.error, "transport unavailable");
+  assert.equal(events.includes("publisher-lock:release"), true);
+  assert.equal(events.includes("subscriber-lock:release"), true);
+});
+
+test("desktop reports transport replacement failure and can retry it", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  const publisher = { stateDir: "/state/publisher" };
+  const subscriber = {
+    stateDir: "/state/subscriber",
+    gatewayPort: 17_480,
+    services: [],
+  };
+  let creates = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      bootstrap: [{ host: "bootstrap-one.example", port: 49_737 }],
+      publisher,
+      subscriber,
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      createDht: (options) => {
+        creates++;
+        if (creates === 2) throw new Error("transport unavailable");
+        return trackedDht(events, options.bootstrap?.[0]?.host ?? "default");
+      },
+    }),
+  );
+  const replacement = {
+    bootstrap: [{ host: "bootstrap-two.example", port: 49_738 }],
+    publisher,
+    subscriber,
+  };
+
+  await assert.rejects(
+    runtime.reconfigure(replacement),
+    /transport unavailable/,
+  );
+  assert.equal(snapshots.at(-1)?.publisher?.phase, "failed");
+  assert.equal(snapshots.at(-1)?.publisher?.error, "transport unavailable");
+  assert.equal(snapshots.at(-1)?.subscriber?.phase, "failed");
+  assert.equal(snapshots.at(-1)?.subscriber?.error, "transport unavailable");
+
+  await runtime.reconfigure(replacement);
+  assert.equal(creates, 3);
+  assert.equal(snapshots.at(-1)?.publisher?.phase, "running");
+  assert.equal(snapshots.at(-1)?.subscriber?.phase, "running");
+  await runtime.stop();
+});
+
+test("desktop recreates the original transport after a failed replacement is rolled back", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  const publisher = { stateDir: "/state/publisher" };
+  const subscriber = {
+    stateDir: "/state/subscriber",
+    gatewayPort: 17_480,
+    services: [],
+  };
+  const original = {
+    bootstrap: [{ host: "bootstrap-one.example", port: 49_737 }],
+    publisher,
+    subscriber,
+  };
+  let creates = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      ...original,
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      createDht: (options) => {
+        creates++;
+        if (creates === 2) throw new Error("replacement unavailable");
+        return trackedDht(events, options.bootstrap?.[0]?.host ?? "default");
+      },
+    }),
+  );
+
+  await assert.rejects(
+    runtime.reconfigure({
+      bootstrap: [{ host: "bootstrap-two.example", port: 49_738 }],
+      publisher,
+      subscriber,
+    }),
+    /replacement unavailable/,
+  );
+  await runtime.reconfigure(original);
+
+  assert.equal(creates, 3);
+  assert.equal(snapshots.at(-1)?.publisher?.phase, "running");
+  assert.equal(snapshots.at(-1)?.subscriber?.phase, "running");
+  await runtime.stop();
+});
+
+test("desktop retains a transport until its failed destruction succeeds", async () => {
+  const events: string[] = [];
+  const publisher = { stateDir: "/state/publisher" };
+  const subscriber = {
+    stateDir: "/state/subscriber",
+    gatewayPort: 17_480,
+    services: [],
+  };
+  let creates = 0;
+  let originalDestroyAttempts = 0;
+  const runtime = await startDesktopRuntime(
+    {
+      bootstrap: [{ host: "bootstrap-one.example", port: 49_737 }],
+      publisher,
+      subscriber,
+      onSnapshot: () => undefined,
+    },
+    dependencies(events, {
+      createDht: (options) => {
+        creates++;
+        if (creates !== 1) {
+          return trackedDht(
+            events,
+            options.bootstrap?.[0]?.host ?? "default",
+          );
+        }
+        return {
+          ...trackedDht(events, "bootstrap-one.example"),
+          destroy: async () => {
+            originalDestroyAttempts++;
+            events.push("dht:destroy:bootstrap-one.example");
+            if (originalDestroyAttempts === 1) {
+              throw new Error("transport destroy failed");
+            }
+          },
+        } as DhtNode;
+      },
+    }),
+  );
+  const replacement = {
+    bootstrap: [{ host: "bootstrap-two.example", port: 49_738 }],
+    publisher,
+    subscriber,
+  };
+
+  await assert.rejects(
+    runtime.reconfigure(replacement),
+    /transport destroy failed/,
+  );
+  assert.equal(creates, 1);
+  assert.equal(originalDestroyAttempts, 1);
+
+  await runtime.reconfigure(replacement);
+  assert.equal(originalDestroyAttempts, 2);
+  assert.equal(creates, 2);
   await runtime.stop();
 });
 
@@ -1055,6 +1403,7 @@ function dependencies(
   overrides: Partial<DesktopRuntimeDependencies> = {},
 ): DesktopRuntimeDependencies {
   return {
+    createDht: () => trackedDht([], "default"),
     acquirePublisherLock: async (stateDir) => {
       events.push(`publisher-lock:acquire:${stateDir}`);
       return {

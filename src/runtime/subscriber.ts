@@ -17,6 +17,7 @@ import {
   holepunchObservation,
   keyPairFromSecretKey,
   type DhtAddress,
+  type DhtNode,
   type DhtStream,
 } from "../mux/hyperdht.js";
 import {
@@ -41,6 +42,7 @@ import {
   promoteSubscriberPendingPublisher,
   setSubscriberPendingPublisher,
 } from "../state/subscriber.js";
+import { cleanupAll } from "./cleanup.js";
 
 export interface SubscriberService {
   id: string;
@@ -55,6 +57,7 @@ export interface RunningSubscriberService {
 export interface StartSubscriberOptions {
   stateDir: string;
   bootstrap?: DhtAddress[];
+  dht?: DhtNode;
   gatewayPort?: number;
   gatewayHost?: string;
   gatewayDomain?: string;
@@ -114,9 +117,21 @@ type ScheduleConnectTimeout = (
 
 const defaultConnectTimeoutMs = 20_000;
 
+export interface SubscriberRuntimeDependencies {
+  createPublisherConnection: typeof createPublisherConnection;
+}
+
+const defaultDependencies: SubscriberRuntimeDependencies = {
+  createPublisherConnection,
+};
+
 export async function startSubscriber(
   options: StartSubscriberOptions,
+  dependencies: SubscriberRuntimeDependencies = defaultDependencies,
 ): Promise<RunningSubscriber> {
+  if (options.dht && options.bootstrap) {
+    throw new Error("subscriber dht and bootstrap are mutually exclusive");
+  }
   let pairingRequest: PairingRequest | undefined;
   let pairingExpiresAt: number | undefined;
   if (options.pairing) {
@@ -138,10 +153,12 @@ export async function startSubscriber(
   const { contact, identity, pending } =
     await loadSubscriberConnectionState(options.stateDir);
   const keyPair = keyPairFromSecretKey(identity.secretKey);
-  const dht = createDht({ bootstrap: options.bootstrap, keyPair });
+  const ownsDht = options.dht === undefined;
+  const dht =
+    options.dht ?? createDht({ bootstrap: options.bootstrap, keyPair });
   const now = options.now ?? Date.now;
   const route = options.route ?? "auto";
-  const connection = createPublisherConnection({
+  const connection = dependencies.createPublisherConnection({
     connect: (observe) =>
       dht.connect(Buffer.from(contact.publisherKey, "hex"), {
         keyPair,
@@ -249,17 +266,19 @@ export async function startSubscriber(
       async stop(): Promise<void> {
         if (stopped) return;
         stopped = true;
-        await connection.stop();
-        await Promise.allSettled(servers.map(closeServer));
-        await dht.destroy({ force: true });
+        await cleanupAll([
+          () => connection.stop(),
+          ...servers.map((server) => () => closeServer(server)),
+          ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
+        ]);
       },
     };
   } catch (error) {
-    await connection.stop();
-    await Promise.allSettled([
-      ...servers.map(closeServer),
-      dht.destroy({ force: true }),
-    ]);
+    await cleanupAll([
+      () => connection.stop(),
+      ...servers.map((server) => () => closeServer(server)),
+      ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
+    ]).catch(() => undefined);
     throw error;
   }
 }

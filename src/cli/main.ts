@@ -16,6 +16,10 @@ import {
   type SubscriberRuntimeStatus,
 } from "../runtime/subscriber.js";
 import {
+  startDevice,
+  type StartDeviceOptions,
+} from "../runtime/device.js";
+import {
   getPublisherPublicKey,
   setPublisherAllowlist,
   setPublisherServices,
@@ -74,6 +78,12 @@ interface CliSubscriber {
   stop: () => Promise<void>;
 }
 
+interface CliDevice {
+  publisher?: CliPublisher;
+  subscriber?: CliSubscriber;
+  stop: () => Promise<void>;
+}
+
 export interface CliDependencies {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
@@ -100,6 +110,7 @@ export interface CliDependencies {
   startSubscriber: (
     options: StartSubscriberOptions,
   ) => Promise<CliSubscriber>;
+  startDevice: (options: StartDeviceOptions) => Promise<CliDevice>;
   acquireSubscriberRuntimeLock: (
     stateDir: string,
   ) => Promise<RuntimeLock>;
@@ -126,6 +137,7 @@ export function createDefaultCliDependencies(
     getPublisherPublicKey,
     startPublisher,
     startSubscriber,
+    startDevice,
     acquirePublisherRuntimeLock,
     acquireSubscriberRuntimeLock,
     waitForSignal,
@@ -146,6 +158,7 @@ const CLI_USAGE = [
   "  publisher run",
   "  subscriber set-publisher",
   "  subscriber run",
+  "  device run",
 ].join("\n");
 
 export async function runCli(
@@ -191,6 +204,10 @@ export async function runCli(
   }
   if (group === "subscriber" && action === "run") {
     await runSubscriberCommand(rest, dependencies);
+    return;
+  }
+  if (group === "device" && action === "run") {
+    await runDeviceCommand(rest, dependencies);
     return;
   }
   throw new Error(
@@ -406,6 +423,138 @@ async function runSubscriberCommand(
   } finally {
     await lock.release();
   }
+}
+
+async function runDeviceCommand(
+  arguments_: readonly string[],
+  dependencies: CliDependencies,
+): Promise<void> {
+  const options = parseOptions(arguments_, [
+    "--publisher-state",
+    "--subscriber-state",
+    "--subscriber-service",
+    "--gateway-port",
+    "--gateway-host",
+    "--gateway-domain",
+    "--route",
+    "--observations",
+    "--bootstrap",
+    "--config",
+  ]);
+  const mode = observationMode(options);
+  const config = await dependencies.loadConfig(configPath(options));
+  const publisherState = resolvedState(options, "--publisher-state");
+  const subscriberState = resolvedState(options, "--subscriber-state");
+  if (!publisherState && !subscriberState) {
+    throw new Error(
+      "device run requires --publisher-state or --subscriber-state",
+    );
+  }
+  if (
+    !subscriberState &&
+    [
+      "--subscriber-service",
+      "--gateway-port",
+      "--gateway-host",
+      "--gateway-domain",
+      "--route",
+    ].some((name) => options.has(name))
+  ) {
+    throw new Error("subscriber options require --subscriber-state");
+  }
+  const services = options.has("--subscriber-service")
+    ? repeatedOption(options, "--subscriber-service").map(
+        parseSubscriberService,
+      )
+    : (config?.subscriber?.services ?? []);
+  if (new Set(services.map(({ id }) => id)).size !== services.length) {
+    throw new Error("subscriber services must have unique ids");
+  }
+  const observe = observationWriter(mode, dependencies);
+  const publisherLock = publisherState
+    ? await dependencies.acquirePublisherRuntimeLock(publisherState)
+    : undefined;
+  let subscriberLock: RuntimeLock | undefined;
+  try {
+    subscriberLock = subscriberState
+      ? await dependencies.acquireSubscriberRuntimeLock(subscriberState)
+      : undefined;
+    const running = await dependencies.startDevice({
+      bootstrap: resolvedBootstrap(options, config),
+      ...(publisherState
+        ? {
+            publisher: {
+              stateDir: publisherState,
+              policy: config?.publisher,
+              observe,
+            },
+          }
+        : {}),
+      ...(subscriberState
+        ? {
+            subscriber: {
+              stateDir: subscriberState,
+              gatewayPort:
+                parseGatewayPortOption(options) ??
+                config?.subscriber?.gatewayPort,
+              gatewayHost:
+                parseGatewayHostOption(options) ??
+                config?.subscriber?.gatewayHost,
+              gatewayDomain:
+                parseGatewayDomainOption(options) ??
+                config?.subscriber?.gatewayDomain,
+              services,
+              route: options.has("--route")
+                ? parseRouteOption(options)
+                : (config?.subscriber?.route ?? "auto"),
+              observe,
+              waitForPublisher: false,
+            },
+          }
+        : {}),
+    });
+    if (running.publisher) {
+      statusWriter(mode, dependencies)(
+        `Publisher running: key=${running.publisher.publisherKey} registry=${running.publisher.home.url}${HOME_REGISTRY_PATH}`,
+      );
+    }
+    if (running.subscriber) {
+      statusWriter(mode, dependencies)(
+        `Subscriber running: publisher=${running.subscriber.publisherKey} registry=${running.subscriber.home.url}${HOME_REGISTRY_PATH}`,
+      );
+      for (const service of running.subscriber.services) {
+        statusWriter(mode, dependencies)(
+          `Local service: ${service.id}=127.0.0.1:${service.port}`,
+        );
+      }
+    }
+    await dependencies.waitForSignal(running.stop);
+  } finally {
+    await releaseRuntimeLocks(subscriberLock, publisherLock);
+  }
+}
+
+function resolvedState(
+  options: ReturnType<typeof parseOptions>,
+  name: "--publisher-state" | "--subscriber-state",
+): string | undefined {
+  const value = singleOption(options, name);
+  return value === undefined ? undefined : path.resolve(value);
+}
+
+async function releaseRuntimeLocks(
+  ...locks: Array<RuntimeLock | undefined>
+): Promise<void> {
+  let firstError: unknown;
+  for (const lock of locks) {
+    if (!lock) continue;
+    try {
+      await lock.release();
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  if (firstError !== undefined) throw firstError;
 }
 
 function resolvedBootstrap(

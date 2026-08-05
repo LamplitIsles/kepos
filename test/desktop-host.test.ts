@@ -120,13 +120,13 @@ test("desktop host forwards configured role policy to the runtime", async () => 
     services: [],
   };
   const options = dualOptions();
-  Object.assign(options.publisher ?? {}, { bootstrap, policy });
-  Object.assign(options.subscriber ?? {}, { bootstrap, route: "public" });
+  Object.assign(options, { bootstrap });
+  Object.assign(options.publisher ?? {}, { policy });
+  Object.assign(options.subscriber ?? {}, { route: "public" });
   const host = await startDesktopHost(options, harness.dependencies);
 
-  assert.deepEqual(harness.runtimeOptions?.publisher?.bootstrap, bootstrap);
+  assert.deepEqual(harness.runtimeOptions?.bootstrap, bootstrap);
   assert.deepEqual(harness.runtimeOptions?.publisher?.policy, policy);
-  assert.deepEqual(harness.runtimeOptions?.subscriber?.bootstrap, bootstrap);
   assert.equal(harness.runtimeOptions?.subscriber?.route, "public");
   await host.shutdown();
 });

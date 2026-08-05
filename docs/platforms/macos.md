@@ -1,7 +1,9 @@
 # macOS desktop
 
 The native Apple Silicon app runs the real publisher, subscriber, or both roles
-inside one Bare process. It starts no Node or Electron child process.
+inside one Bare process. Enabled roles share one device-owned HyperDHT node and
+normally one UDP endpoint while retaining separate role identities and state.
+It starts no Node or Electron child process.
 
 The shared Kepos TOML decides which roles start. Their identities stay under
 `$XDG_STATE_HOME` when it is set:
@@ -48,6 +50,9 @@ An absent role table, or one with `enabled = false`, is not auto-started by the
 desktop. Explicit CLI run commands still start the requested role.
 
 ```toml
+[network]
+bootstrap = ["bootstrap.example:49737"]
+
 [publisher]
 enabled = true
 display_name = "kosmos"
@@ -65,7 +70,10 @@ local_port = 2222
 ```
 
 Use `--config <path>` for an isolated configuration. Role-explicit state flags
-remain available for smoke tests.
+remain available for smoke tests. Bootstrap is device-wide. A publisher policy
+or subscriber binding change restarts only that role and preserves the shared
+node; a bootstrap change replaces the node and restarts every enabled role.
+One role's startup failure remains visible without stopping a healthy sibling.
 
 ## Native surface
 
@@ -91,5 +99,6 @@ pre-login service operation are not claimed.
 
 Lifecycle and pairing decisions are documented in
 [ADR 0004](../adr/0004-two-level-subscriber-runtime-locking.md),
-[ADR 0006](../adr/0006-desktop-dual-role-runtime-ownership.md), and
-[ADR 0007](../adr/0007-pair-on-the-final-publisher-connection.md).
+[ADR 0006](../adr/0006-desktop-dual-role-runtime-ownership.md),
+[ADR 0007](../adr/0007-pair-on-the-final-publisher-connection.md), and
+[ADR 0008](../adr/0008-share-one-hyperdht-node-per-device-runtime.md).
