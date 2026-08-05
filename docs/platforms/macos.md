@@ -2,8 +2,9 @@
 
 The native Apple Silicon app runs the real publisher, subscriber, or both roles
 inside one Bare process. Enabled roles share one device-owned HyperDHT node and
-normally one UDP endpoint while retaining separate role identities and state.
-It starts no Node or Electron child process.
+one preferred DHT candidate listener while retaining separate role identities
+and state. HyperDHT still uses an ephemeral DHT client socket and ephemeral UDX
+connection sockets. Kepos starts no Node or Electron child process.
 
 The window groups each connection as a publisher relationship. A remote
 relationship shows the publisher this Mac trusts and this Mac's subscriber

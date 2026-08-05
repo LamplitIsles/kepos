@@ -178,6 +178,7 @@ export async function startSubscriber(
               localFirewall,
               remoteAddresses,
               localAddresses,
+              { localConnection: route === "auto" },
             ),
           );
           return true;

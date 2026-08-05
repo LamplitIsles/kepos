@@ -147,10 +147,12 @@ test("observation fields cannot replace stable context", () => {
   assert.equal(event.role, "subscriber");
 });
 
-test("DHT stream snapshots include live UDX congestion and retransmit state", () => {
+test("DHT stream snapshots identify the safe UDX path without exposing addresses", () => {
   const stream = {
     connected: true,
     rawStream: {
+      remoteHost: "192.168.31.116",
+      remotePort: 49_737,
       rtt: 83,
       cwnd: 24,
       inflight: 7,
@@ -165,13 +167,28 @@ test("DHT stream snapshots include live UDX congestion and retransmit state", ()
       packetsReceived: 340,
       socket: {
         packetsDroppedByKernel: 4,
+        address: () => ({ host: "0.0.0.0", port: 54_300 }),
       },
     },
-    toJSON: () => ({ connected: true }),
+    toJSON: () => ({
+      connected: true,
+      remotePublicKey: "b".repeat(64),
+      rawStream: {
+        remoteHost: "192.168.31.116",
+        remotePort: 49_737,
+        socket: { address: { host: "0.0.0.0", port: 54_300 } },
+      },
+    }),
   } as unknown as DhtStream;
 
   assert.deepEqual(dhtStreamSnapshot(stream), {
     connected: true,
+    remotePublicKey: "b".repeat(16),
+    path: "direct_lan",
+    socketClass: "udx_connection",
+    localPort: 54_300,
+    localCandidateSelected: true,
+    relayStatus: "relay_unconfigured",
     udx: {
       rtt: 83,
       cwnd: 24,
@@ -188,6 +205,7 @@ test("DHT stream snapshots include live UDX congestion and retransmit state", ()
       packetsDroppedByKernel: 4,
     },
   });
+  assert.doesNotMatch(JSON.stringify(dhtStreamSnapshot(stream)), /192\.168|0\.0\.0\.0/);
 });
 
 test("DHT observations expose NAT classes and aggregate punch stats without addresses", () => {
@@ -206,6 +224,11 @@ test("DHT observations expose NAT classes and aggregate punch stats without addr
       localFirewall: "consistent",
       remoteAddressCount: 1,
       localAddressCount: 2,
+      path: "direct_punch",
+      socketClass: "udx_connection",
+      localCandidateSelection: "pending",
+      localPortVisibility: "not_exposed",
+      relayStatus: "relay_unconfigured",
     },
   );
 
@@ -215,11 +238,66 @@ test("DHT observations expose NAT classes and aggregate punch stats without addr
       relaying: { attempts: 7, successes: 1, aborts: 6 },
       queries: { sent: 999 },
     },
+    socketOwner: true,
+    localAddress(this: { socketOwner: boolean }) {
+      assert.equal(this.socketOwner, true);
+      return { host: "192.168.1.179", port: 49_737 };
+    },
+    address(this: { socketOwner: boolean }) {
+      assert.equal(this.socketOwner, true);
+      return { host: "0.0.0.0", port: 52_467 };
+    },
   } as unknown as DhtNode;
   assert.deepEqual(dhtStatsSnapshot(node), {
     punches: { consistent: 2, random: 3, open: 5 },
     relaying: { attempts: 7, successes: 1, aborts: 6 },
+    relayStatus: "relay_active_seen",
+    sockets: {
+      candidateListener: {
+        socketClass: "dht_candidate_listener",
+        localPort: 49_737,
+      },
+      control: {
+        socketClass: "dht_client",
+        localPort: 52_467,
+      },
+    },
   });
+
+  const configuredIdleRelay = {
+    stats: {
+      punches: { consistent: 0, random: 0, open: 0 },
+      relaying: { attempts: 0, successes: 0, aborts: 0 },
+    },
+  } as unknown as DhtNode;
+  assert.equal(
+    dhtStatsSnapshot(configuredIdleRelay, { relayConfigured: true })
+      .relayStatus,
+    "relay_configured",
+  );
+});
+
+test("public route diagnostics never claim that a local candidate was selected", () => {
+  assert.deepEqual(
+    holepunchObservation(
+      2,
+      2,
+      [{ host: "remote", port: 1 }],
+      [{ host: "local", port: 2 }],
+      { localConnection: false },
+    ),
+    {
+      remoteFirewall: "consistent",
+      localFirewall: "consistent",
+      remoteAddressCount: 1,
+      localAddressCount: 1,
+      path: "direct_punch",
+      socketClass: "udx_connection",
+      localCandidateSelection: "disabled",
+      localPortVisibility: "not_exposed",
+      relayStatus: "relay_unconfigured",
+    },
+  );
 });
 
 test("mux observations identify channel open, first bytes, totals, and close source", async () => {
