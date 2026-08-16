@@ -202,6 +202,7 @@ or remove the installed Kepos app.
 - [macOS desktop](docs/platforms/macos.md)
 - [Release and artifact verification](docs/releasing.md)
 - [Nix, container, and Kubernetes deployment](docs/deployment.md)
+- [DeepSeek Harness integration](docs/integrations/deepseek-harness.md)
 - [Network transport and compatibility](docs/network-transport-and-compatibility.md)
 - [How Kepos grew from Hypertele](docs/hypertele-provenance.md)
 - [Proposed Capacitor Bare Kit Android bounty](docs/capacitor-bare-kit-android-bounty.md)
