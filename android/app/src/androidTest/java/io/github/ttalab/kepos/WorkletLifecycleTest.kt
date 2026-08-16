@@ -63,6 +63,7 @@ class WorkletLifecycleTest {
     assertTrue(configured.configured)
     assertLoopbackListener(BuildConfig.GATEWAY_PORT)
     assertLoopbackListener(BuildConfig.MIHOMO_PORT)
+    assertLoopbackListener(BuildConfig.DSH_PORT)
 
     ActivityScenario.launch(MainActivity::class.java).use { activity ->
       activity.recreate()

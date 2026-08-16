@@ -90,6 +90,7 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.match(foregroundService!, /filesDir\.resolve\("subscriber"\)/);
   assert.match(foregroundService!, /BuildConfig\.GATEWAY_PORT/);
   assert.match(foregroundService!, /BuildConfig\.MIHOMO_PORT/);
+  assert.match(foregroundService!, /BuildConfig\.DSH_PORT/);
   assert.doesNotMatch(foregroundService!, /BuildConfig\.NAVIDROME_PORT/);
   assert.doesNotMatch(`${subscriberRuntime}\n${gateway}`, /\bAbortController\b/);
   assert.doesNotMatch(workflow!, /uses: actions\/(?:checkout|setup-node)@v\d/);
@@ -125,13 +126,17 @@ test("Android device commands isolate tests and preserve installed state", async
   assert.match(appBuild!, /applicationIdSuffix\s*=\s*"\.devicetest"/);
   assert.match(appBuild!, /GATEWAY_PORT.*18480/);
   assert.match(appBuild!, /MIHOMO_PORT.*18490/);
+  assert.match(appBuild!, /DSH_PORT.*18380/);
   assert.match(foregroundService!, /BuildConfig\.GATEWAY_PORT/);
   assert.match(foregroundService!, /BuildConfig\.MIHOMO_PORT/);
+  assert.match(foregroundService!, /BuildConfig\.DSH_PORT/);
   assert.match(lifecycleTest!, /BuildConfig\.GATEWAY_PORT/);
   assert.match(lifecycleTest!, /BuildConfig\.MIHOMO_PORT/);
+  assert.match(lifecycleTest!, /BuildConfig\.DSH_PORT/);
   assert.match(worklet!, /Bare\.argv\[2\]/);
   assert.match(worklet!, /Bare\.argv\[3\]/);
   assert.match(worklet!, /Bare\.argv\[4\]/);
+  assert.match(worklet!, /Bare\.argv\[5\]/);
   assert.match(foregroundService!, /kepos-bootstrap\.json/);
   assert.match(foregroundService!, /readText\(\)/);
   assert.match(readme!, /npm run android:install/);

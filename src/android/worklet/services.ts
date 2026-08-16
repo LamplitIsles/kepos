@@ -2,6 +2,10 @@ import type { SubscriberService } from "../../runtime/subscriber.js";
 
 export function createAndroidSubscriberServices(
   mihomoPort: number,
+  dshPort: number,
 ): SubscriberService[] {
-  return [{ id: "mihomo", localPort: mihomoPort }];
+  return [
+    { id: "mihomo", localPort: mihomoPort },
+    { id: "dsh", localPort: dshPort },
+  ];
 }

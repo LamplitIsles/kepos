@@ -62,6 +62,11 @@ http://127.0.0.1:13080/
 The explicit listener binds to loopback. `gateway_port` remains enabled for
 other published HTTP services that use Kepos's `*.localhost` gateway.
 
+On Android, the subscriber includes this mapping by default. Once the paired
+publisher advertises the service with `id = "dsh"`, the app routes it to
+`127.0.0.1:13080` and its service card opens that loopback URL. No phone-side
+TOML configuration is required.
+
 ## Security and behavior
 
 - The `127.0.0.1:13080` listener preserves dsh's loopback Host semantics. A
