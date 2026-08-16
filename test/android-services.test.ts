@@ -155,6 +155,7 @@ test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated ac
     services: [
       { id: "home", name: "Home", kind: "tcp" },
       { id: "navidrome", name: "Navidrome", kind: "tcp" },
+      { id: "dsh", name: "DeepSeek Harness", kind: "tcp" },
       { id: "mihomo", name: "Mihomo", kind: "tcp" },
       { id: "bookorbit", name: "BookOrbit", kind: "tcp" },
       { id: "mihomo-dashboard", name: "Mihomo Dashboard", kind: "tcp" },
@@ -165,9 +166,20 @@ test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated ac
     createAndroidRegistrySnapshot(
       registry,
       17_480,
-      new Map([["mihomo", 17_890]]),
+      new Map([
+        ["mihomo", 17_890],
+        ["dsh", 13_080],
+      ]),
     ).services,
     [
+      {
+        id: "dsh",
+        name: "DeepSeek Harness",
+        access: "http",
+        action: "open",
+        icon: "terminal",
+        url: "http://127.0.0.1:13080/",
+      },
       {
         id: "bookorbit",
         name: "BookOrbit",
@@ -205,9 +217,10 @@ test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated ac
   );
 });
 
-test("Android maps its fixed raw listener to Mihomo", () => {
-  assert.deepEqual(createAndroidSubscriberServices(17_890), [
+test("Android maps its fixed raw listeners to Mihomo and dsh", () => {
+  assert.deepEqual(createAndroidSubscriberServices(17_890, 13_080), [
     { id: "mihomo", localPort: 17_890 },
+    { id: "dsh", localPort: 13_080 },
   ]);
 });
 

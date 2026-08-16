@@ -30,7 +30,7 @@ interface BuiltInServiceHandler {
   httpUrl?: "open" | "origin";
   icon: ServiceIcon;
   localCommand?: {
-    access: "ssh" | "tcp";
+    access: "http" | "ssh" | "tcp";
     format(localPort: number): string;
   };
   sortGroup: 0 | 1 | 2;
@@ -54,6 +54,15 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
     httpUrl: "origin",
     icon: "storage",
     sortGroup: 2,
+  },
+  dsh: {
+    action: "open",
+    icon: "terminal",
+    localCommand: {
+      access: "http",
+      format: (localPort) => `http://127.0.0.1:${localPort}/`,
+    },
+    sortGroup: 0,
   },
   dagger: {
     action: "copy-command",
@@ -179,7 +188,9 @@ function createPresentation(
     access: handler.localCommand.access,
     action: handler.action,
     icon: handler.icon,
-    copyText: handler.localCommand.format(localPort),
+    ...(handler.action === "open"
+      ? { url: handler.localCommand.format(localPort) }
+      : { copyText: handler.localCommand.format(localPort) }),
   };
 }
 

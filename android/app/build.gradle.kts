@@ -18,6 +18,7 @@ android {
     versionName = keposVersionName.getOrElse("0.1.0")
     buildConfigField("int", "GATEWAY_PORT", "17480")
     buildConfigField("int", "MIHOMO_PORT", "17890")
+    buildConfigField("int", "DSH_PORT", "13080")
 
     ndk {
       abiFilters += "arm64-v8a"
@@ -42,6 +43,7 @@ android {
       matchingFallbacks += listOf("debug")
       buildConfigField("int", "GATEWAY_PORT", "18480")
       buildConfigField("int", "MIHOMO_PORT", "18490")
+      buildConfigField("int", "DSH_PORT", "18380")
     }
   }
 

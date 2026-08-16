@@ -99,6 +99,7 @@ class KeposForegroundService : Service() {
           stateDir.absolutePath,
           BuildConfig.GATEWAY_PORT.toString(),
           BuildConfig.MIHOMO_PORT.toString(),
+          BuildConfig.DSH_PORT.toString(),
           readBootstrapAsset(),
         ),
       )
