@@ -37,6 +37,15 @@ export interface MacosReleaseCommand {
   arguments: string[];
 }
 
+export function macosReleaseEnvironment(
+  kind: MacosReleaseCommandKind,
+  baseEnvironment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const environment = releaseSubprocessEnvironment(baseEnvironment);
+  if (kind === "build") environment.NPM_CONFIG_USERCONFIG = os.devNull;
+  return environment;
+}
+
 export interface MacosReleasePaths {
   repository: string;
   versionName: string;
@@ -291,7 +300,7 @@ async function runCommand(
   return new Promise<string>((resolve, reject) => {
     const child = spawn(command.command, command.arguments, {
       cwd: repository,
-      env: releaseSubprocessEnvironment(process.env),
+      env: macosReleaseEnvironment(command.kind, process.env),
       stdio: ["inherit", "pipe", "pipe"],
     });
     let output = "";
