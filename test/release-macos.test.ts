@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import {
   createMacosReleasePaths,
+  macosReleaseEnvironment,
   macosSigningCommands,
   parseMacosReleaseArguments,
   releaseMacos,
@@ -25,6 +27,20 @@ test("parses one strict tag and an optional rehearsal flag", () => {
   assert.throws(
     () => parseMacosReleaseArguments(["v1.2.3", "--unknown"]),
     /usage/i,
+  );
+});
+
+test("isolates the macOS build from user npm configuration", () => {
+  assert.deepEqual(
+    macosReleaseEnvironment("build", {
+      PATH: "/usr/bin",
+      NPM_CONFIG_USERCONFIG: "/Users/releaser/.npmrc",
+      KEPOS_ANDROID_KEY_PASSWORD: "must-not-leak",
+    }),
+    {
+      PATH: "/usr/bin",
+      NPM_CONFIG_USERCONFIG: os.devNull,
+    },
   );
 });
 
