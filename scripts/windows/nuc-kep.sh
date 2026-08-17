@@ -16,6 +16,7 @@ readonly LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 readonly LOCAL_OUTPUT="${LOCAL_ROOT}/dist/windows/${RUN_ID}"
 readonly REMOTE_RUN="${WINDOWS_BUILDS}/${RUN_ID}"
+readonly REMOTE_SOURCE="${WINDOWS_BUILDS}/source"
 readonly WINDOWS_SCRIPT_WSL="${WINDOWS_TOOLS}/${SCRIPT_NAME}"
 readonly WINDOWS_SCRIPT="${WINDOWS_ROOT}\\.local\\kepos-tools\\${SCRIPT_NAME}"
 
@@ -37,7 +38,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs \
   --exclude='*/build' \
   --exclude='*/prebuilds' \
   -cf - -C "$LOCAL_ROOT" . |
-  ssh "$HOST" "rm -rf '$REMOTE_RUN/source' && mkdir -p '$REMOTE_RUN/source' && tar -xf - -C '$REMOTE_RUN/source'"
+  ssh "$HOST" "rm -rf '$REMOTE_SOURCE' && mkdir -p '$REMOTE_SOURCE' && tar -xf - -C '$REMOTE_SOURCE'"
 
 scp "$LOCAL_ROOT/scripts/windows/$SCRIPT_NAME" \
   "$HOST:$WINDOWS_SCRIPT_WSL"
@@ -49,7 +50,7 @@ bare_app_kit_revision=$(git -C "$LOCAL_ROOT/vendor/holepunch/bare-app-kit" rev-p
 
 remote_command=(
   "$POWERSHELL" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$WINDOWS_SCRIPT"
-  -Repository "${WINDOWS_BUILD_ROOT}\\${RUN_ID}\\source"
+  -Repository "${WINDOWS_BUILD_ROOT}\\source"
   -RunDirectory "${WINDOWS_BUILD_ROOT}\\${RUN_ID}"
   -WorkspaceRoot "$WINDOWS_BUILD_ROOT"
   -ToolsDirectory "${WINDOWS_ROOT}\\.local\\kepos-tools"

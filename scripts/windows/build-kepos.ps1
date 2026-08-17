@@ -86,7 +86,7 @@ try {
   $Repository = Get-CanonicalPath $Repository
   $ToolsDirectory = Get-CanonicalPath $ToolsDirectory
   Assert-OwnedPath $WorkspaceRoot $RunDirectory 'RunDirectory'
-  Assert-OwnedPath $RunDirectory $Repository 'Repository'
+  Assert-OwnedPath $WorkspaceRoot $Repository 'Repository'
 
   $Node = Join-Path $ToolsDirectory 'node-v24.18.1-win-x64\node.exe'
   $Npm = Join-Path $ToolsDirectory 'node-v24.18.1-win-x64\npm.cmd'
@@ -156,7 +156,7 @@ try {
   }
 
   # All npm, CMake, Bare, and native sample paths below use this short alias.
-  $BuildRepository = "K:\$RunId\source"
+  $BuildRepository = 'K:\source'
   Set-Location -LiteralPath $BuildRepository
   $NativeCheck = Join-Path $BuildRepository '.build\windows-native-check'
   $CanonicalNativeCheck = Join-Path $Repository '.build\windows-native-check'
