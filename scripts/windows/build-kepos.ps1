@@ -160,6 +160,11 @@ try {
   Set-Location -LiteralPath $BuildRepository
   $NativeCheck = Join-Path $BuildRepository '.build\windows-native-check'
   $CanonicalNativeCheck = Join-Path $Repository '.build\windows-native-check'
+  $NativeBuildRoot = Join-Path $RunDirectory 'b'
+  Assert-OwnedPath $RunDirectory $NativeBuildRoot 'native build root'
+  if (Test-Path -LiteralPath $NativeBuildRoot) { Remove-Item -LiteralPath $NativeBuildRoot -Recurse -Force }
+  New-Item -ItemType Directory -Path $NativeBuildRoot -Force | Out-Null
+  $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT = $NativeBuildRoot
   Assert-OwnedPath $Repository $CanonicalNativeCheck 'native check output'
   if (Test-Path -LiteralPath $NativeCheck) { Remove-Item -LiteralPath $NativeCheck -Recurse -Force }
 

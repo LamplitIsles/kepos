@@ -247,6 +247,8 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
 test("desktop Windows plan builds an unpackaged WinUI directory and links native shims", () => {
   const repository = "/checkout";
   const plan = desktopBuildPlan("win32-x64");
+  const previousBuildRoot = process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT;
+  process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT = "/short-native-build";
   const commands = plan.commands(repository, {
     node: "C:\\tools\\node.exe",
     npm: "C:\\tools\\npm.cmd",
@@ -257,7 +259,17 @@ test("desktop Windows plan builds an unpackaged WinUI directory and links native
   );
   const bareBuild = commands.find(({ command }) => command === "bare-build");
   const links = commands.filter(({ command }) => command === "bare-link");
+  if (previousBuildRoot === undefined) {
+    delete process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT;
+  } else {
+    process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT = previousBuildRoot;
+  }
 
+  assert.ok(
+    makeGenerate?.arguments.includes(
+      path.join("/short-native-build", "winui"),
+    ),
+  );
   assert.ok(makeGenerate?.arguments.includes("--platform"));
   assert.ok(makeGenerate?.arguments.includes("win32"));
   assert.ok(makeGenerate?.arguments.includes("--arch"));

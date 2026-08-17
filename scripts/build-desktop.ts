@@ -211,7 +211,13 @@ function windowsPlan(
   tools: DesktopBuildTools,
 ): DesktopBuildCommand[] {
   const winUi = sourcePath(repository, "bare-win-ui");
-  const winUiBuild = path.join(winUi, "build");
+  const nativeBuildRoot = process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT;
+  if (nativeBuildRoot && !path.isAbsolute(nativeBuildRoot)) {
+    throw new Error("KEPOS_WINDOWS_NATIVE_BUILD_ROOT must be absolute");
+  }
+  const winUiBuild = nativeBuildRoot
+    ? path.join(nativeBuildRoot, "winui")
+    : path.join(winUi, "build");
   return [
     ...typescriptBuildCommands(),
     {
