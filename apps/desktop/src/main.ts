@@ -1,6 +1,5 @@
 import process from "node:process";
 import os from "node:os";
-import { writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { Tray, WebView, Window } from "bare-native";
 
@@ -64,10 +63,10 @@ async function main(): Promise<void> {
         const timer = setInterval(callback, 500);
         return () => clearInterval(timer);
       },
-      exit: (code) => {
+      exit: async (code) => {
         if (smokeQuitFile) {
           try {
-            writeFileSync(smokeQuitFile, "KEPOS_DESKTOP_QUIT\n");
+            await writeFile(smokeQuitFile, "KEPOS_DESKTOP_QUIT\n");
           } catch {
             // The process exit code remains the authoritative smoke result.
           }
