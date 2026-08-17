@@ -173,13 +173,13 @@ function Invoke-PortableSmoke {
     [Parameter(Mandatory = $true)] [string]$Logs
   )
   $state = Join-Path $SmokeRoot 'state'
-  $home = Join-Path $SmokeRoot 'home'
+  $smokeHome = Join-Path $SmokeRoot 'home'
   $appData = Join-Path $SmokeRoot 'AppData\Roaming'
   $localAppData = Join-Path $SmokeRoot 'AppData\Local'
   $webViewData = Join-Path $SmokeRoot 'WebView2'
   $ready = Join-Path $SmokeRoot 'ready.marker'
   $quit = Join-Path $SmokeRoot 'quit.marker'
-  New-Item -ItemType Directory -Path $state, $home, $appData, $localAppData, $webViewData, $Logs -Force | Out-Null
+  New-Item -ItemType Directory -Path $state, $smokeHome, $appData, $localAppData, $webViewData, $Logs -Force | Out-Null
   $utf8 = New-Object System.Text.UTF8Encoding($false)
   $publisherManifest = @{ displayName = 'Kepos release smoke'; publisherConfig = 'publisher.json'; services = @() } |
     ConvertTo-Json -Depth 5
@@ -193,7 +193,7 @@ function Invoke-PortableSmoke {
   $env:KEPOS_WINDOWS_SMOKE_QUIT_FILE = $quit
   $process = New-Object System.Diagnostics.Process
   $process.StartInfo.FileName = $Executable
-  $process.StartInfo.Arguments = "--publisher-state `"$state`" --smoke-test --smoke-home `"$home`""
+  $process.StartInfo.Arguments = "--publisher-state `"$state`" --smoke-test --smoke-home `"$smokeHome`""
   $process.StartInfo.WorkingDirectory = Split-Path -Parent $Executable
   $process.StartInfo.UseShellExecute = $false
   $process.StartInfo.RedirectStandardOutput = $false
