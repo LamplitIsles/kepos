@@ -247,15 +247,19 @@ try {
   Assert-OwnedPath $RunDirectory $WebViewData 'WebView2 test data'
   New-Item -ItemType Directory -Path $WebViewData -Force | Out-Null
   $env:WEBVIEW2_USER_DATA_FOLDER = $WebViewData
-  $process = Start-Process -FilePath $NativeExecutable.FullName -PassThru -RedirectStandardOutput $NativeCheckStdout -RedirectStandardError $NativeCheckStderr
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo.FileName = $NativeExecutable.FullName
+  $process.StartInfo.UseShellExecute = $false
+  $process.StartInfo.RedirectStandardOutput = $true
+  $process.StartInfo.RedirectStandardError = $true
+  if (-not $process.Start()) { throw 'bare-win-ui native check did not start' }
   if (-not $process.WaitForExit(30000)) {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    $process.Kill()
+    $process.WaitForExit()
     throw "bare-win-ui native check timed out; see $NativeCheckStdout"
   }
-  # Complete redirected stream draining before Windows PowerShell 5.1 reads
-  # ExitCode; otherwise the property can remain unset after timed WaitForExit.
-  $process.WaitForExit()
-  $process.Refresh()
+  $process.StandardOutput.ReadToEnd() | Set-Content -LiteralPath $NativeCheckStdout -Encoding utf8
+  $process.StandardError.ReadToEnd() | Set-Content -LiteralPath $NativeCheckStderr -Encoding utf8
   $nativeExitCode = $process.ExitCode
   if ($nativeExitCode -ne 0) { throw "bare-win-ui native check failed with exit code $nativeExitCode; see $NativeCheckStdout" }
 
