@@ -5,8 +5,11 @@ set -euo pipefail
 # the control plane; all Node, Bare, CMake, and MSVC work happens in PowerShell.
 readonly HOST="nuc-kep"
 readonly POWERSHELL="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-readonly WINDOWS_TOOLS="/mnt/c/Users/white/.local/kepos-tools"
-readonly WINDOWS_BUILDS="/mnt/c/Users/white/.local/kepos-build"
+readonly WINDOWS_USER="${WINDOWS_USER:?set WINDOWS_USER to the Windows account used for dogfood}"
+readonly WINDOWS_HOME="/mnt/c/Users/${WINDOWS_USER}"
+readonly WINDOWS_TOOLS="${WINDOWS_HOME}/.local/kepos-tools"
+readonly WINDOWS_BUILDS="${WINDOWS_HOME}/.local/kepos-build"
+readonly WINDOWS_ROOT="C:\\Users\\${WINDOWS_USER}"
 readonly SCRIPT_NAME="build-kepos.ps1"
 readonly LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -44,8 +47,10 @@ bare_app_kit_revision=$(git -C "$LOCAL_ROOT/vendor/holepunch/bare-app-kit" rev-p
 
 remote_command=(
   "$POWERSHELL" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$WINDOWS_SCRIPT"
-  -Repository "C:\\Users\\white\\.local\\kepos-build\\${RUN_ID}\\source"
-  -RunDirectory "C:\\Users\\white\\.local\\kepos-build\\${RUN_ID}"
+  -Repository "${WINDOWS_ROOT}\\.local\\kepos-build\\${RUN_ID}\\source"
+  -RunDirectory "${WINDOWS_ROOT}\\.local\\kepos-build\\${RUN_ID}"
+  -WorkspaceRoot "${WINDOWS_ROOT}\\.local\\kepos-build"
+  -ToolsDirectory "${WINDOWS_ROOT}\\.local\\kepos-tools"
   -RunId "$RUN_ID"
   -RootRevision "$root_revision"
   -BareNativeRevision "$bare_native_revision"

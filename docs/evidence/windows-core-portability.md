@@ -25,8 +25,8 @@ were run from the LF-materialized checkout.
 The designated Windows checkout was run with the pinned native binaries:
 
 ```text
-C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\node.exe --version -> v24.18.1
-C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\node.exe C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\node_modules\npm\bin\npm-cli.js --version -> 11.16.0
+%USERPROFILE%\.local\kepos-tools\node-v24.18.1-win-x64\node.exe --version -> v24.18.1
+%USERPROFILE%\.local\kepos-tools\node-v24.18.1-win-x64\node.exe %USERPROFILE%\.local\kepos-tools\node-v24.18.1-win-x64\node_modules\npm\bin\npm-cli.js --version -> 11.16.0
 ```
 
 The direct CLI tracer was created in a new test-owned directory under
@@ -34,8 +34,8 @@ The direct CLI tracer was created in a new test-owned directory under
 removed in its `finally` cleanup. The invocation used the equivalent of:
 
 ```text
-cd C:\Users\white\.local\kepos-build\repo-final
-C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\node.exe C:\Users\white\AppData\Local\Temp\<test-owned-script>\tracer.mjs
+cd %USERPROFILE%\.local\kepos-build\repo-final
+%USERPROFILE%\.local\kepos-tools\node-v24.18.1-win-x64\node.exe %TEMP%\<test-owned-script>\tracer.mjs
 ```
 
 Its generated publisher/subscriber state was

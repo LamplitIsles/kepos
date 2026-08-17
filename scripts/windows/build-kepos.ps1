@@ -2,6 +2,8 @@
 param(
   [Parameter(Mandatory = $true)] [string]$Repository,
   [Parameter(Mandatory = $true)] [string]$RunDirectory,
+  [Parameter(Mandatory = $true)] [string]$WorkspaceRoot,
+  [Parameter(Mandatory = $true)] [string]$ToolsDirectory,
   [Parameter(Mandatory = $true)] [ValidatePattern('^[0-9TZ-]+$')] [string]$RunId,
   [Parameter(Mandatory = $true)] [string]$RootRevision,
   [Parameter(Mandatory = $true)] [string]$BareNativeRevision,
@@ -12,28 +14,54 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$WorkspaceRoot = 'C:\Users\white\.local\kepos-build'
-$Node = 'C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\node.exe'
-$Npm = 'C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\npm.cmd'
+function Get-CanonicalPath {
+  param([Parameter(Mandatory = $true)] [string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Path arguments must not be empty' }
+  if (-not [System.IO.Path]::IsPathRooted($Path)) { throw "Path must be absolute: $Path" }
+  return [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+}
+
+function Assert-OwnedPath {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Parent,
+    [Parameter(Mandatory = $true)] [string]$Child,
+    [Parameter(Mandatory = $true)] [string]$Name
+  )
+  $parentForComparison = $Parent.Replace('/', '\').TrimEnd('\')
+  $childForComparison = $Child.Replace('/', '\').TrimEnd('\')
+  $prefix = "$parentForComparison\"
+  if (
+    $childForComparison -eq $parentForComparison -or
+    -not $childForComparison.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
+  ) {
+    throw "$Name must be inside $Parent"
+  }
+}
+
+$WorkspaceRoot = Get-CanonicalPath $WorkspaceRoot
+$RunDirectory = Get-CanonicalPath $RunDirectory
+$Repository = Get-CanonicalPath $Repository
+$ToolsDirectory = Get-CanonicalPath $ToolsDirectory
+Assert-OwnedPath $WorkspaceRoot $RunDirectory 'RunDirectory'
+Assert-OwnedPath $RunDirectory $Repository 'Repository'
+
+$Node = Join-Path $ToolsDirectory 'node-v24.18.1-win-x64\node.exe'
+$Npm = Join-Path $ToolsDirectory 'node-v24.18.1-win-x64\npm.cmd'
 $Logs = Join-Path $RunDirectory 'logs'
 $Artifact = Join-Path $RunDirectory 'dist\desktop'
 $RevisionFile = Join-Path $RunDirectory 'build-revisions.txt'
 
-if (-not $RunDirectory.StartsWith("$WorkspaceRoot\", [System.StringComparison]::OrdinalIgnoreCase)) {
-  throw "RunDirectory must be owned by $WorkspaceRoot"
-}
-if (-not $Repository.StartsWith("$RunDirectory\", [System.StringComparison]::OrdinalIgnoreCase)) {
-  throw "Repository must be inside the owned run directory"
-}
+if (-not (Test-Path -LiteralPath $WorkspaceRoot -PathType Container)) { throw "Workspace root is missing: $WorkspaceRoot" }
+if (-not (Test-Path -LiteralPath $Repository -PathType Container)) { throw "Repository snapshot is missing: $Repository" }
+
 $ownedRuns = Get-ChildItem -LiteralPath $WorkspaceRoot -Directory -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '^[0-9TZ-]+$' } |
   Sort-Object LastWriteTime -Descending
 $ownedRuns | Select-Object -Skip 3 | Remove-Item -Recurse -Force
-if (-not (Test-Path $Repository)) { throw "Repository snapshot is missing: $Repository" }
 foreach ($ownedOutput in @($Logs, (Join-Path $RunDirectory 'dist'), (Join-Path $RunDirectory 'native-check'))) {
-  if (Test-Path $ownedOutput) { Remove-Item -LiteralPath $ownedOutput -Recurse -Force }
+  if (Test-Path -LiteralPath $ownedOutput) { Remove-Item -LiteralPath $ownedOutput -Recurse -Force }
 }
-New-Item -ItemType Directory -Path $Logs -Force | Out-Null
+New-Item -ItemType Directory -LiteralPath $Logs -Force | Out-Null
 Start-Transcript -LiteralPath (Join-Path $Logs 'orchestrator.log') -Force | Out-Null
 
 function Invoke-LoggedNative {
@@ -78,6 +106,7 @@ Import-MsvcEnvironment
 Require-Version $Node 'Node' '^v24\.'
 Require-Version $Npm 'npm' '^11\.'
 if (-not (Get-Command cmake.exe -ErrorAction SilentlyContinue)) { throw 'CMake is missing from PATH' }
+Set-Location -LiteralPath $Repository
 
 Invoke-LoggedNative $Npm 'npm-ci' @('ci', '--ignore-scripts', '--no-audit', '--no-fund')
 $BareMake = Join-Path $Repository 'node_modules\.bin\bare-make.cmd'
@@ -108,7 +137,7 @@ $NativeCheckStderr = Join-Path $Logs 'bare-win-ui-run.stderr.log'
 $process = Start-Process -FilePath $NativeExecutable.FullName -Wait -PassThru -RedirectStandardOutput $NativeCheckStdout -RedirectStandardError $NativeCheckStderr
 if ($process.ExitCode -ne 0) { throw "bare-win-ui native check failed with exit code $($process.ExitCode); see $NativeCheckStdout" }
 
-if (-not (Test-Path (Join-Path $Artifact 'Kepos\App\Kepos.exe'))) { throw 'Kepos.exe was not produced' }
-Get-ChildItem -LiteralPath $Artifact -File | Select-Object Name, Length | Format-Table -AutoSize | Out-File (Join-Path $Logs 'artifact-files.txt')
+if (-not (Test-Path -LiteralPath (Join-Path $Artifact 'Kepos\App\Kepos.exe'))) { throw 'Kepos.exe was not produced' }
+Get-ChildItem -LiteralPath $Artifact -File -Recurse | Select-Object FullName, Length | Format-Table -AutoSize | Out-File (Join-Path $Logs 'artifact-files.txt')
 Write-Host "Windows desktop build complete: $Artifact"
 Stop-Transcript | Out-Null

@@ -31,11 +31,12 @@ run directory:
 
 ```sh
 /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -Command "
-  \$root = 'C:\\Users\\white\\.local\\kepos-build\\<run>\\dogfood';
+  \$buildRoot = Join-Path \$env:USERPROFILE '.local\\kepos-build';
+  \$root = Join-Path \$buildRoot '<run>\\dogfood';
   New-Item -ItemType Directory -Force \"\$root\\AppData\", \"\$root\\State\" | Out-Null;
   \$env:APPDATA = \"\$root\\AppData\";
   \$env:LOCALAPPDATA = \"\$root\\State\";
-  & 'C:\\Users\\white\\.local\\kepos-build\\<run>\\dist\\desktop\\Kepos\\App\\Kepos.exe' --config \"\$root\\AppData\\Kepos\\config.toml\"
+  & (Join-Path \$buildRoot '<run>\\dist\\desktop\\Kepos\\App\\Kepos.exe') --config \"\$root\\AppData\\Kepos\\config.toml\"
 "
 ```
 

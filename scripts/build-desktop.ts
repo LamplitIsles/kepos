@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 export type DesktopTarget = "darwin-arm64" | "win32-x64";
 
+const desktopTargets: readonly DesktopTarget[] = ["darwin-arm64", "win32-x64"];
+
 export interface DesktopBuildCommand {
   command: string;
   arguments: string[];
@@ -91,7 +93,6 @@ function commonBareBuild(
       "io.github.ttalab.kepos",
       ...(isWindows
         ? [
-            "--package",
             "--icon",
             path.join(repository, "apps", "desktop", "assets", "Kepos.ico"),
             "--name",
@@ -244,17 +245,30 @@ function windowsPlan(
   ];
 }
 
-export function desktopBuildPlan(target: DesktopTarget): DesktopBuildPlan {
-  if (target === "darwin-arm64") {
+function validateDesktopTarget(target: unknown): DesktopTarget {
+  if (
+    typeof target !== "string" ||
+    !desktopTargets.includes(target as DesktopTarget)
+  ) {
+    throw new Error(
+      `unsupported desktop build target: ${String(target)}; expected ${desktopTargets.join(" or ")}`,
+    );
+  }
+  return target as DesktopTarget;
+}
+
+export function desktopBuildPlan(target: unknown): DesktopBuildPlan {
+  const validatedTarget = validateDesktopTarget(target);
+  if (validatedTarget === "darwin-arm64") {
     return {
-      target,
+      target: validatedTarget,
       outputDirectory: desktopAppBundle,
       commands: darwinPlan,
       validate: validateDarwinOutput,
     };
   }
   return {
-    target,
+    target: validatedTarget,
     outputDirectory: desktopWindowsApp,
     commands: windowsPlan,
     validate: validateWindowsOutput,
@@ -376,11 +390,20 @@ async function run(
   });
 }
 
-function requestedTarget(arguments_: readonly string[]): DesktopTarget | undefined {
-  const value = arguments_.find((argument) => argument.startsWith("--target="));
-  if (value) return value.slice("--target=".length) as DesktopTarget;
+export function requestedTarget(
+  arguments_: readonly string[],
+): DesktopTarget | undefined {
+  const inline = arguments_.find((argument) => argument.startsWith("--target="));
+  if (inline) return validateDesktopTarget(inline.slice("--target=".length));
+
   const index = arguments_.indexOf("--target");
-  return index === -1 ? undefined : (arguments_[index + 1] as DesktopTarget | undefined);
+  if (index === -1) return undefined;
+
+  const value = arguments_[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error("missing value for --target; expected darwin-arm64 or win32-x64");
+  }
+  return validateDesktopTarget(value);
 }
 
 const repository = fileURLToPath(new URL("..", import.meta.url));

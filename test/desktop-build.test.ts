@@ -14,6 +14,7 @@ import {
   desktopAppBundle,
   desktopBuildCommands,
   desktopBuildPlan,
+  requestedTarget,
 } from "../scripts/build-desktop.js";
 import {
   desktopInstallPath,
@@ -226,9 +227,10 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
   ]);
 });
 
-test("desktop Windows plan builds WinUI, embeds metadata, and links native shims", () => {
+test("desktop Windows plan builds an unpackaged WinUI directory and links native shims", () => {
   const repository = "/checkout";
-  const commands = desktopBuildPlan("win32-x64").commands(repository, {
+  const plan = desktopBuildPlan("win32-x64");
+  const commands = plan.commands(repository, {
     node: "C:\\tools\\node.exe",
     npm: "C:\\tools\\npm.cmd",
   });
@@ -243,13 +245,22 @@ test("desktop Windows plan builds WinUI, embeds metadata, and links native shims
   assert.ok(makeGenerate?.arguments.includes("win32"));
   assert.ok(makeGenerate?.arguments.includes("--arch"));
   assert.ok(makeGenerate?.arguments.includes("x64"));
+  assert.equal(
+    plan.outputDirectory(repository),
+    path.join(repository, "dist", "desktop", "Kepos"),
+  );
   assert.ok(
     bareBuild?.arguments.includes(
       path.join(repository, "apps", "desktop", "assets", "Kepos.ico"),
     ),
   );
-  assert.ok(bareBuild?.arguments.includes("--package"));
+  assert.equal(bareBuild?.arguments.includes("--package"), false);
   assert.ok(bareBuild?.arguments.includes("--description"));
+  assert.ok(
+    links.every(({ arguments: arguments_ }) =>
+      arguments_.includes(path.join(repository, "dist", "desktop", "Kepos", "App")),
+    ),
+  );
   assert.ok(
     links.some(({ arguments: arguments_ }) =>
       arguments_.some((argument) => argument.endsWith("bare-win-ui")),
@@ -259,6 +270,16 @@ test("desktop Windows plan builds WinUI, embeds metadata, and links native shims
     links.some(({ arguments: arguments_ }) =>
       arguments_.some((argument) => argument.endsWith("bare-process")),
     ),
+  );
+});
+
+test("desktop target parsing and planning reject missing or unknown targets", () => {
+  assert.equal(requestedTarget(["--target", "win32-x64"]), "win32-x64");
+  assert.throws(() => requestedTarget(["--target"]), /missing value/);
+  assert.throws(() => requestedTarget(["--target=win32"]), /unsupported desktop build target/);
+  assert.throws(
+    () => desktopBuildPlan("win32"),
+    /unsupported desktop build target/,
   );
 });
 
