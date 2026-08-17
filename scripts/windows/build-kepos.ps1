@@ -61,7 +61,7 @@ $ownedRuns | Select-Object -Skip 3 | Remove-Item -Recurse -Force
 foreach ($ownedOutput in @($Logs, (Join-Path $RunDirectory 'dist'), (Join-Path $RunDirectory 'native-check'))) {
   if (Test-Path -LiteralPath $ownedOutput) { Remove-Item -LiteralPath $ownedOutput -Recurse -Force }
 }
-New-Item -ItemType Directory -LiteralPath $Logs -Force | Out-Null
+New-Item -ItemType Directory -Path $Logs -Force | Out-Null
 Start-Transcript -LiteralPath (Join-Path $Logs 'orchestrator.log') -Force | Out-Null
 
 function Invoke-LoggedNative {
