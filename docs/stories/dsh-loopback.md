@@ -1,6 +1,6 @@
 # Making a remote service look local
 
-I wrote Kepos as a general-purpose P2P tunnel. The publisher shares a TCP service, and the subscriber receives it as a `*.localhost` hostname or an explicit local port. Browsers, SSH clients, and CLIs all behave as if the service were on the same machine.
+I wrote Kepos as a general-purpose, end-to-end encrypted P2P tunnel. The publisher shares a TCP service, and the subscriber receives it as a `*.localhost` hostname or an explicit local port. Browsers, SSH clients, and CLIs all behave as if the service were on the same machine.
 
 The first things I wanted to reach were ordinary self-hosted services: music and SSH, without opening public ports or putting every device on a virtual network. Kepos uses HyperDHT and UDX for the peer connection. Peer keys authenticate an end-to-end encrypted outer connection, and Protomux carries the registry, heartbeat, pairing, and one channel per service over that single connection.
 
