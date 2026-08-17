@@ -73,12 +73,24 @@ function Remove-OwnedSubst {
   Write-Host 'Removed temporary K: mapping'
 }
 
+function Test-OwnedRunDirectory {
+  param([Parameter(Mandatory = $true)] [System.IO.DirectoryInfo]$Directory)
+  $marker = Join-Path $Directory.FullName '.kepos-windows-workflow-run'
+  if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { return $false }
+  try {
+    return ((Get-Content -LiteralPath $marker -Raw).Trim() -eq "kepos-windows-workflow-run:$($Directory.Name)")
+  } catch {
+    return $false
+  }
+}
+
 $TranscriptStarted = $false
 $DriveCreated = $false
 $CleanupFailed = $false
 $ExitCode = 0
 $OriginalLocation = (Get-Location).Path
 $Logs = $null
+$RunMarker = $null
 
 try {
   $WorkspaceRoot = Get-CanonicalPath $WorkspaceRoot
@@ -94,16 +106,24 @@ try {
   $Artifact = Join-Path $RunDirectory 'dist\desktop'
   $RepositoryArtifact = Join-Path $Repository 'dist\desktop'
   $RevisionFile = Join-Path $RunDirectory 'build-revisions.txt'
+  $RunMarker = Join-Path $RunDirectory '.kepos-windows-workflow-run'
   Assert-OwnedPath $Repository $RepositoryArtifact 'Repository artifact'
   Assert-OwnedPath $RunDirectory $Artifact 'staged artifact'
+  Assert-OwnedPath $RunDirectory $Logs 'logs'
+  Assert-OwnedPath $RunDirectory $RevisionFile 'revision file'
+  Assert-OwnedPath $WorkspaceRoot $RunMarker 'run marker'
 
   if (-not (Test-Path -LiteralPath $WorkspaceRoot -PathType Container)) { throw "Workspace root is missing: $WorkspaceRoot" }
   if (-not (Test-Path -LiteralPath $Repository -PathType Container)) { throw "Repository snapshot is missing: $Repository" }
 
+  # Mark this run only after containment checks. A timestamp-shaped directory
+  # without this exact workflow marker is never eligible for retention.
+  New-Item -ItemType Directory -Path $RunDirectory -Force | Out-Null
+  "kepos-windows-workflow-run:$RunId" | Set-Content -LiteralPath $RunMarker -Encoding utf8
   $ownedRuns = Get-ChildItem -LiteralPath $WorkspaceRoot -Directory -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match '^[0-9TZ-]+$' -and $_.Name -ne $RunId } |
+    Where-Object { $_.Name -match '^[0-9TZ-]+$' -and $_.Name -ne $RunId -and (Test-OwnedRunDirectory $_) } |
     Sort-Object LastWriteTime -Descending
-  $ownedRuns | Select-Object -Skip 3 | Remove-Item -Recurse -Force
+  $ownedRuns | Select-Object -Skip 3 | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
   New-Item -ItemType Directory -Path $Logs -Force | Out-Null
   Start-Transcript -LiteralPath (Join-Path $Logs 'orchestrator.log') -Force | Out-Null
   $TranscriptStarted = $true
@@ -127,18 +147,14 @@ try {
     if ((Get-CanonicalPath $existingSubst) -ne $WorkspaceRoot) {
       throw "K: is already mapped to a different path: $existingSubst"
     }
-    # An exact pre-existing mapping is safe to use and to remove in finally;
-    # conflicting mappings are rejected before this flag is set.
-    $DriveCreated = $true
+    # Reusing an exact pre-existing mapping does not transfer ownership to
+    # this invocation, so cleanup must leave it in place.
     Write-Host "Reusing existing K: mapping for $WorkspaceRoot"
   } else {
     $existingDrive = Get-PSDrive -Name K -ErrorAction SilentlyContinue
     if ($null -ne $existingDrive) {
       throw 'K: is already in use and is not a subst mapping to this repository'
     }
-    # Mark this before invoking subst so a partially successful command is
-    # still inspected and cleaned up by finally.
-    $DriveCreated = $true
     $mountOutput = @(& subst.exe K: $WorkspaceRoot 2>&1)
     $mountCode = $LASTEXITCODE
     if ($mountCode -ne 0) {
@@ -148,6 +164,8 @@ try {
       }
       throw "Failed to map K: to $Repository with exit code ${mountCode}: $details"
     }
+    # Only a successful mapping command makes this invocation the owner.
+    $DriveCreated = $true
     $mappedAfterMount = Get-SubstTarget
     if ($null -eq $mappedAfterMount -or (Get-CanonicalPath $mappedAfterMount) -ne $WorkspaceRoot) {
       throw "K: did not resolve to the owned repository after mapping"
@@ -241,8 +259,10 @@ try {
   Invoke-LoggedNative $BareBuild 'bare-win-ui-build' @('--base', $WinUi, '--host', 'win32-x64', '--runtime', (Join-Path $WinUi 'runtime.js'), '--out', $NativeCheck, (Join-Path $WinUi 'sample.js'))
   $NativeExecutable = Get-ChildItem -LiteralPath $NativeCheck -Filter '*.exe' -Recurse | Select-Object -First 1
   if ($null -eq $NativeExecutable) { throw "bare-win-ui native check produced no executable under $NativeCheck" }
-  $NativeCheckStdout = Join-Path $Logs 'bare-win-ui-run.stdout.log'
-  $NativeCheckStderr = Join-Path $Logs 'bare-win-ui-run.stderr.log'
+  # Inherit both probe streams so a child filling either pipe cannot deadlock
+  # the bounded wait. Transcript captures console output; this result log is an
+  # explicit bounded outcome and is finalized after timeout cleanup.
+  $NativeCheckResult = Join-Path $Logs 'bare-win-ui-run.result.log'
   $WebViewData = Join-Path $RunDirectory 'webview2'
   Assert-OwnedPath $RunDirectory $WebViewData 'WebView2 test data'
   New-Item -ItemType Directory -Path $WebViewData -Force | Out-Null
@@ -250,18 +270,50 @@ try {
   $process = New-Object System.Diagnostics.Process
   $process.StartInfo.FileName = $NativeExecutable.FullName
   $process.StartInfo.UseShellExecute = $false
-  $process.StartInfo.RedirectStandardOutput = $true
-  $process.StartInfo.RedirectStandardError = $true
-  if (-not $process.Start()) { throw 'bare-win-ui native check did not start' }
-  if (-not $process.WaitForExit(30000)) {
-    $process.Kill()
-    $process.WaitForExit()
-    throw "bare-win-ui native check timed out; see $NativeCheckStdout"
+  $process.StartInfo.RedirectStandardOutput = $false
+  $process.StartInfo.RedirectStandardError = $false
+  $probeStarted = $false
+  $probeStatus = 'not-started'
+  $nativeExitCode = $null
+  $probeFailure = $null
+  $probeCleanupFailure = $null
+  try {
+    if (-not $process.Start()) { throw 'bare-win-ui native check did not start' }
+    $probeStarted = $true
+    $probeStatus = 'running'
+    if (-not $process.WaitForExit(30000)) {
+      $probeStatus = 'timed-out'
+      throw "bare-win-ui native check timed out; see $NativeCheckResult"
+    }
+    $process.Refresh()
+    $nativeExitCode = $process.ExitCode
+    if ($nativeExitCode -ne 0) {
+      $probeStatus = 'failed'
+      throw "bare-win-ui native check failed with exit code $nativeExitCode; see $NativeCheckResult"
+    }
+    $probeStatus = 'passed'
+  } catch {
+    $probeFailure = $_.Exception.Message
+    throw
+  } finally {
+    if ($probeStarted) {
+      try {
+        if (-not $process.HasExited) {
+          & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-Null
+          if (-not $process.WaitForExit(5000)) { throw "Timed-out native check process $($process.Id) did not exit after taskkill" }
+          if ($probeStatus -eq 'running') { $probeStatus = 'killed' }
+        }
+      } catch {
+        $probeStatus = 'cleanup-failed'
+        $probeCleanupFailure = $_.Exception.Message
+        if ($null -eq $probeFailure) { $probeFailure = $_.Exception.Message }
+      }
+    }
+    @("status=$probeStatus", "exit-code=$nativeExitCode", "message=$probeFailure") |
+      Set-Content -LiteralPath $NativeCheckResult -Encoding utf8
+    $process.Dispose()
+    if ($null -ne $probeCleanupFailure) { throw $probeCleanupFailure }
   }
-  $process.StandardOutput.ReadToEnd() | Set-Content -LiteralPath $NativeCheckStdout -Encoding utf8
-  $process.StandardError.ReadToEnd() | Set-Content -LiteralPath $NativeCheckStderr -Encoding utf8
-  $nativeExitCode = $process.ExitCode
-  if ($nativeExitCode -ne 0) { throw "bare-win-ui native check failed with exit code $nativeExitCode; see $NativeCheckStdout" }
 
   # Keep the run directory as the sole transfer boundary: stage only the
   # already-validated desktop output, never the source checkout or native tree.
