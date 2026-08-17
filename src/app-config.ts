@@ -2,11 +2,9 @@ import {
   mkdir,
   mkdtemp,
   readFile,
-  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import { parse, stringify } from "smol-toml";
@@ -27,6 +25,10 @@ import {
   parseBootstrapValues,
   parseSubscriberService,
 } from "./cli/options.js";
+import { defaultKeposConfigPath } from "./platform/paths.js";
+import { replaceFileAtomically } from "./state/files.js";
+
+export { defaultKeposConfigPath } from "./platform/paths.js";
 
 export interface KeposConfig {
   network?: {
@@ -41,15 +43,6 @@ export interface KeposConfig {
     route?: Route;
     services?: SubscriberService[];
   };
-}
-
-export function defaultKeposConfigPath(
-  environment: NodeJS.ProcessEnv = process.env,
-  homeDirectory = os.homedir(),
-): string {
-  const configHome =
-    environment.XDG_CONFIG_HOME || path.join(homeDirectory, ".config");
-  return path.join(configHome, "kepos", "config.toml");
 }
 
 export async function loadKeposConfig(
@@ -195,7 +188,7 @@ export async function saveKeposConfig(
   const temporaryPath = path.join(temporaryDirectory, "config.toml");
   try {
     await writeFile(temporaryPath, source, { flag: "wx", mode: 0o600 });
-    await rename(temporaryPath, configPath);
+    await replaceFileAtomically(temporaryPath, configPath);
   } finally {
     await rm(temporaryDirectory, { force: true, recursive: true });
   }

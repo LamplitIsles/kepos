@@ -9,6 +9,7 @@ import {
   loadKeposConfig,
   parseKeposConfig,
 } from "../src/app-config.js";
+import { defaultKeposStateRoot } from "../src/platform/paths.js";
 
 test("shared config parses network bootstrap endpoints", () => {
   assert.deepEqual(
@@ -161,6 +162,25 @@ test("shared config rejects unknown fields and malformed endpoints", () => {
   assert.throws(
     () => parseKeposConfig('[network]\nbootstrap = ["bootstrap.example"]'),
     /network\.bootstrap.*host:port/,
+  );
+});
+
+test("Windows defaults use AppData while explicit paths remain unchanged", () => {
+  assert.equal(
+    defaultKeposConfigPath(
+      { APPDATA: "C:\\Users\\kepos\\AppData\\Roaming" },
+      "C:\\Users\\kepos",
+      "win32",
+    ),
+    "C:\\Users\\kepos\\AppData\\Roaming\\kepos\\config.toml",
+  );
+  assert.equal(
+    defaultKeposStateRoot(
+      { LOCALAPPDATA: "C:\\Users\\kepos\\AppData\\Local" },
+      "C:\\Users\\kepos",
+      "win32",
+    ),
+    "C:\\Users\\kepos\\AppData\\Local\\Kepos\\state",
   );
 });
 

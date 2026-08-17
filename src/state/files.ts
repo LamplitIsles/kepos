@@ -24,6 +24,15 @@ export async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+function hasCode(error: unknown, code: string): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: unknown }).code === code
+  );
+}
+
 function requireOwnerOnly(mode: number, subject: string): void {
   if (!isWindows && (mode & 0o777) !== 0o600) {
     throw new Error(`${subject} must have owner-only permissions`);
@@ -69,6 +78,53 @@ export async function readStateJson(filePath: string): Promise<unknown> {
   }
 }
 
+export async function replaceFileAtomically(
+  sourcePath: string,
+  destinationPath: string,
+  platform: NodeJS.Platform = isWindows ? "win32" : "darwin",
+): Promise<void> {
+  if (platform !== "win32") {
+    await rename(sourcePath, destinationPath);
+    return;
+  }
+
+  // Windows rename does not replace an existing file. Move the old complete
+  // file into a private sibling first, then restore it if installing the next
+  // complete file fails. The caller's temporary directory owns sourcePath;
+  // this helper owns and removes only its backup directory.
+  const replacementDirectory = await mkdtemp(
+    path.join(path.dirname(destinationPath), ".replace-"),
+  );
+  const backupPath = path.join(
+    replacementDirectory,
+    path.basename(destinationPath),
+  );
+  let movedPrevious = false;
+  try {
+    try {
+      await rename(destinationPath, backupPath);
+      movedPrevious = true;
+    } catch (error) {
+      if (!hasCode(error, "ENOENT")) throw error;
+    }
+
+    try {
+      await rename(sourcePath, destinationPath);
+    } catch (error) {
+      if (movedPrevious) {
+        await rename(backupPath, destinationPath);
+      }
+      throw error;
+    }
+
+    if (movedPrevious) {
+      await rm(backupPath, { force: true });
+    }
+  } finally {
+    await rm(replacementDirectory, { force: true, recursive: true });
+  }
+}
+
 export async function writeStateDirectoryAtomically(
   stateDir: string,
   files: ReadonlyMap<string, string>,
@@ -100,7 +156,7 @@ export async function writeStateFileAtomically(
   const finalPath = path.join(stateDir, fileName);
   try {
     await writeFile(temporaryPath, contents, { mode: 0o600 });
-    await rename(temporaryPath, finalPath);
+    await replaceFileAtomically(temporaryPath, finalPath);
     return finalPath;
   } finally {
     await rm(temporaryDir, { recursive: true, force: true });

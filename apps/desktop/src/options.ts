@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { defaultKeposStateRoot } from "../../../src/platform/paths.js";
 import {
   defaultKeposConfigPath,
   loadKeposConfig,
@@ -141,10 +142,10 @@ export function parseDesktopOptions(
 }
 
 function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
-  const stateHome =
-    context.environment?.XDG_STATE_HOME ||
-    path.join(context.homeDirectory, ".local", "state");
-  const stateRoot = path.join(stateHome, "kepos-neo");
+  const stateRoot = defaultKeposStateRoot(
+    context.environment,
+    context.homeDirectory,
+  );
   const bootstrap = context.config?.network?.bootstrap;
   const publisherConfig = context.config?.publisher;
   const subscriberConfig = context.config?.subscriber;
