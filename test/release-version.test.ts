@@ -85,14 +85,31 @@ test("formal releases require a clean exact-tagged worktree", async () => {
     mode: "release",
     runGit: async (arguments_) => {
       calls.push(arguments_);
-      if (arguments_[0] === "status") return "";
-      return "v1.2.3\n";
+      if (arguments_[0] === "status" || arguments_[0] === "submodule") return "";
+      if (arguments_[0] === "describe") return "v1.2.3\n";
+      if (arguments_[0] === "cat-file") return "tag\n";
+      return `${"a".repeat(40)}\n`;
     },
   });
 
   assert.deepEqual(calls, [
-    ["status", "--porcelain"],
+    [
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all",
+      "--ignore-submodules=none",
+    ],
+    ["submodule", "status", "--recursive"],
+    [
+      "submodule",
+      "foreach",
+      "--recursive",
+      'test "$(git rev-parse HEAD)" = "$sha1" && test -z "$(git status --porcelain=v1 --untracked-files=all --ignore-submodules=none)"',
+    ],
     ["describe", "--tags", "--exact-match", "HEAD"],
+    ["cat-file", "-t", "refs/tags/v1.2.3"],
+    ["rev-parse", "v1.2.3^{commit}"],
+    ["rev-parse", "HEAD"],
   ]);
 });
 
@@ -107,7 +124,21 @@ test("rehearsals require a clean worktree without requiring a tag", async () => 
     },
   });
 
-  assert.deepEqual(calls, [["status", "--porcelain"]]);
+  assert.deepEqual(calls, [
+    [
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all",
+      "--ignore-submodules=none",
+    ],
+    ["submodule", "status", "--recursive"],
+    [
+      "submodule",
+      "foreach",
+      "--recursive",
+      'test "$(git rev-parse HEAD)" = "$sha1" && test -z "$(git status --porcelain=v1 --untracked-files=all --ignore-submodules=none)"',
+    ],
+  ]);
 });
 
 test("release git gate rejects dirty and mismatched states", async () => {
@@ -125,7 +156,9 @@ test("release git gate rejects dirty and mismatched states", async () => {
       tag: "v1.2.3",
       mode: "release",
       runGit: async (arguments_) =>
-        arguments_[0] === "status" ? "" : "v1.2.4\n",
+        arguments_[0] === "status" || arguments_[0] === "submodule"
+          ? ""
+          : "v1.2.4\n",
     }),
     /exact tag v1\.2\.3/i,
   );

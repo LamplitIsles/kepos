@@ -42,6 +42,7 @@ export interface StartDesktopHostOptions {
   bootstrap?: StartDesktopRuntimeOptions["bootstrap"];
   publisher?: Omit<StartDesktopPublisherOptions, "lock">;
   subscriber?: Omit<StartDesktopSubscriberOptions, "lock">;
+  onSnapshot?: (snapshot: DesktopSnapshot) => void;
 }
 
 export interface DesktopHostDependencies {
@@ -281,6 +282,7 @@ export async function startDesktopHost(
       onSnapshot: (snapshot) => {
         if (liveTray) updateDesktopTray(liveTray, snapshot);
         controller.publish(snapshot);
+        options.onSnapshot?.(snapshot);
       },
     });
     startedRuntime = await runtimeStartTask;

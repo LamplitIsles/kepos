@@ -43,6 +43,19 @@ function Assert-OwnedPath {
   }
 }
 
+function Get-ContainedReleaseArtifactPath {
+  param(
+    [Parameter(Mandatory = $true)] [string]$RunDirectory,
+    [Parameter(Mandatory = $true)] [string]$ArtifactName
+  )
+  if ($ArtifactName -notmatch '^kepos-windows-x64-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.zip$') {
+    throw "invalid Windows artifact name: $ArtifactName"
+  }
+  $artifact = Join-Path $RunDirectory $ArtifactName
+  Assert-OwnedPath $RunDirectory $artifact 'release artifact'
+  return $artifact
+}
+
 function Get-SubstTarget {
   $lines = @(& subst.exe 2>&1)
   $code = $LASTEXITCODE
@@ -92,7 +105,7 @@ function Test-OwnedRunDirectory {
 function Get-PortableRelativePath {
   param(
     [Parameter(Mandatory = $true)] [string]$Root,
-    [Parameter(Mandatory = $true)] [System.IO.FileInfo]$File
+    [Parameter(Mandatory = $true)] [System.IO.FileSystemInfo]$File
   )
   $prefix = (Get-CanonicalPath $Root) + '\'
   return $File.FullName.Substring($prefix.Length).Replace('/', '\')
@@ -112,23 +125,44 @@ function Assert-Pe64 {
 }
 
 function Get-PortableFileSet {
-  param([Parameter(Mandatory = $true)] [string]$AppDirectory)
-  $files = @(Get-ChildItem -LiteralPath $AppDirectory -File -Recurse)
-  if ($files.Count -eq 0) { throw "Windows portable app has no files: $AppDirectory" }
-  $relative = @($files | ForEach-Object { Get-PortableRelativePath $AppDirectory $_ } | Sort-Object)
+  param([Parameter(Mandatory = $true)] [string]$PackageRoot)
+  $items = @(Get-ChildItem -LiteralPath $PackageRoot -Force -Recurse)
+  if ($items.Count -eq 0) { throw "Windows portable app has no files: $PackageRoot" }
+
+  # This is deliberately an allowlist, not a catch-all DLL rule. Native
+  # dependency versions may change, but only the named runtime families may
+  # cross the release boundary.
+  $runtimeDll = '\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?'
+  $allowedEntries = @(
+    '^App$',
+    '^Assets$',
+    '^AppxManifest\.xml$',
+    '^Assets\\Logo\.ico$',
+    '^App\\Kepos\.exe$',
+    '^App\\app\.bundle$',
+    '^App\\Microsoft\.Web\.WebView2\.Core\.dll$',
+    '^App\\Microsoft\.WindowsAppRuntime\.Bootstrap\.dll$',
+    "^App\\bare-(abort|buffer|crypto|dns|fs|hrtime|inspect|lief|module-lexer|os|path|pipe|signals|stdio|structured-clone|subprocess|tcp|tty|type|url|win-ui)-$runtimeDll\.dll$",
+    "^App\\(sodium-native|udx-native)-$runtimeDll\.dll$"
+  )
+  $relative = @($items | ForEach-Object {
+      if ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw "Windows portable app contains a link: $($_.FullName)"
+      }
+      Get-PortableRelativePath $PackageRoot $_
+    } | Sort-Object)
   foreach ($name in $relative) {
-    if ($name -notmatch '^(Kepos\.exe|AppxManifest\.xml|[^\\]+\.dll|Assets\\Logo\.ico)$') {
-      throw "Windows portable app contains an unexpected file: $name"
+    if (-not ($allowedEntries | Where-Object { $name -match $_ })) {
+      throw "Windows portable app contains an unexpected entry: $name"
     }
   }
-  $required = @('Kepos.exe', 'AppxManifest.xml', 'Assets\Logo.ico')
-  foreach ($name in $required) {
+  foreach ($name in @('AppxManifest.xml', 'Assets\Logo.ico', 'App\Kepos.exe', 'App\app.bundle', 'App\Microsoft.Web.WebView2.Core.dll', 'App\Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
     if (-not $relative.Contains($name)) { throw "Windows portable app is missing $name" }
   }
-  if (-not ($relative | Where-Object { $_ -match '^bare-win-ui-[^\\]+\.dll$' })) { throw 'Windows portable app is missing the bare-win-ui runtime' }
-  if (-not $relative.Contains('Microsoft.Web.WebView2.Core.dll')) { throw 'Windows portable app is missing WebView2' }
-  if (-not $relative.Contains('Microsoft.WindowsAppRuntime.Bootstrap.dll')) { throw 'Windows portable app is missing Windows App Runtime' }
-  Assert-Pe64 (Join-Path $AppDirectory 'Kepos.exe')
+  if (-not ($relative | Where-Object { $_ -match '^App\\bare-win-ui-' })) {
+    throw 'Windows portable app is missing the bare-win-ui runtime'
+  }
+  Assert-Pe64 (Join-Path $PackageRoot 'App\Kepos.exe')
   return $relative
 }
 
@@ -146,6 +180,12 @@ function Invoke-PortableSmoke {
   $ready = Join-Path $SmokeRoot 'ready.marker'
   $quit = Join-Path $SmokeRoot 'quit.marker'
   New-Item -ItemType Directory -Path $state, $home, $appData, $localAppData, $webViewData, $Logs -Force | Out-Null
+  $utf8 = New-Object System.Text.UTF8Encoding($false)
+  $publisherManifest = @{ displayName = 'Kepos release smoke'; publisherConfig = 'publisher.json'; services = @() } |
+    ConvertTo-Json -Depth 5
+  $publisherConfig = @{ seed = (('00' * 32) -join ''); allow = @() } | ConvertTo-Json -Depth 5
+  [System.IO.File]::WriteAllText((Join-Path $state 'publisher.manifest.json'), $publisherManifest, $utf8)
+  [System.IO.File]::WriteAllText((Join-Path $state 'publisher.json'), $publisherConfig, $utf8)
   $env:APPDATA = $appData
   $env:LOCALAPPDATA = $localAppData
   $env:WEBVIEW2_USER_DATA_FOLDER = $webViewData
@@ -166,6 +206,14 @@ function Invoke-PortableSmoke {
     }
     if ($process.ExitCode -ne 0) { throw "Windows portable smoke exited with code $($process.ExitCode)" }
     if (-not (Test-Path -LiteralPath $ready -PathType Leaf)) { throw 'Windows portable smoke never reached ready' }
+    try {
+      $snapshot = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
+      if ($snapshot.appPhase -ne 'running' -or $null -eq $snapshot.publisher -or $snapshot.publisher.phase -ne 'running') {
+        throw 'ready marker did not contain a healthy publisher/runtime snapshot'
+      }
+    } catch {
+      throw "Windows portable smoke health proof is invalid: $($_.Exception.Message)"
+    }
     if (-not (Test-Path -LiteralPath $quit -PathType Leaf)) { throw 'Windows portable smoke did not complete clean Quit' }
   } finally {
     if (-not $process.HasExited) {
@@ -187,8 +235,8 @@ function Invoke-PortableRelease {
   if ($ArtifactName -notmatch '^kepos-windows-x64-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.zip$') { throw "invalid Windows artifact name: $ArtifactName" }
   $artifact = Join-Path $RunDirectory $ArtifactName
   if (Test-Path -LiteralPath $artifact) { throw "release output already exists: $artifact" }
-  $appDirectory = Join-Path $RunDirectory 'dist\desktop\Kepos\App'
-  $fileSet = @(Get-PortableFileSet $appDirectory)
+  $sourceRoot = Join-Path $RunDirectory 'dist\desktop\Kepos'
+  $fileSet = @(Get-PortableFileSet $sourceRoot)
   $packageRoot = Join-Path $RunDirectory 'package'
   $packageApp = Join-Path $packageRoot 'Kepos'
   $extracted = Join-Path $RunDirectory 'extracted'
@@ -197,8 +245,12 @@ function Invoke-PortableRelease {
   }
   New-Item -ItemType Directory -Path $packageApp -Force | Out-Null
   foreach ($relative in $fileSet) {
-    $source = Join-Path $appDirectory $relative
+    $source = Join-Path $sourceRoot $relative
     $target = Join-Path $packageApp $relative
+    if ((Get-Item -LiteralPath $source) -is [System.IO.DirectoryInfo]) {
+      New-Item -ItemType Directory -Path $target -Force | Out-Null
+      continue
+    }
     $targetDirectory = Split-Path -Parent $target
     New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
     Copy-Item -LiteralPath $source -Destination $target
@@ -209,7 +261,7 @@ function Invoke-PortableRelease {
   $extractedApp = Join-Path $extracted 'Kepos'
   $extractedSet = @(Get-PortableFileSet $extractedApp)
   if (($fileSet -join "`n") -ne ($extractedSet -join "`n")) { throw 'Windows ZIP changed the validated portable file set' }
-  Invoke-PortableSmoke (Join-Path $extractedApp 'Kepos.exe') $extracted (Join-Path $Logs 'smoke')
+  Invoke-PortableSmoke (Join-Path $extractedApp 'App\Kepos.exe') $extracted (Join-Path $Logs 'smoke')
   Get-FileHash -Algorithm SHA256 -LiteralPath $artifact | Format-List | Out-File (Join-Path $Logs 'release-artifact.sha256')
   Write-Host "Windows ZIP verified: $artifact"
 }
@@ -221,6 +273,7 @@ $ExitCode = 0
 $OriginalLocation = (Get-Location).Path
 $Logs = $null
 $RunMarker = $null
+$ReleaseArtifactPath = $null
 
 try {
   $WorkspaceRoot = Get-CanonicalPath $WorkspaceRoot
@@ -229,6 +282,11 @@ try {
   $ToolsDirectory = Get-CanonicalPath $ToolsDirectory
   Assert-OwnedPath $WorkspaceRoot $RunDirectory 'RunDirectory'
   Assert-OwnedPath $WorkspaceRoot $Repository 'Repository'
+  if ($Workflow -eq 'release') {
+    if ([string]::IsNullOrWhiteSpace($ReleaseArtifactName)) { throw 'release workflow requires an artifact name' }
+    # Validate and contain this value before any catch-path cleanup can use it.
+    $ReleaseArtifactPath = Get-ContainedReleaseArtifactPath $RunDirectory $ReleaseArtifactName
+  }
 
   $Node = Join-Path $ToolsDirectory 'node-v24.18.1-win-x64\node.exe'
   $Npm = Join-Path $ToolsDirectory 'node-v24.18.1-win-x64\npm.cmd'
@@ -368,17 +426,19 @@ try {
       throw 'release workflow requires tag, mode, origin, and artifact name'
     }
     if ($ReleaseTag -notmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw "invalid release tag: $ReleaseTag" }
-    $remoteLines = @(& git.exe ls-remote --tags $RemoteOrigin "refs/tags/$ReleaseTag" "refs/tags/$ReleaseTag^{}" 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw "remote tag lookup failed; see $Logs\remote-tag.log" }
-    $remoteLines | Set-Content -LiteralPath (Join-Path $Logs 'remote-tag.log') -Encoding utf8
-    $refs = @{}
-    foreach ($line in $remoteLines) {
-      if ([string]$line -match '^([0-9a-f]{40,64})\s+(.+)$') { $refs[$matches[2]] = $matches[1] }
+    if ($ReleaseMode -eq 'release') {
+      $remoteLines = @(& git.exe ls-remote --tags $RemoteOrigin "refs/tags/$ReleaseTag" "refs/tags/$ReleaseTag^{}" 2>&1)
+      if ($LASTEXITCODE -ne 0) { throw "remote tag lookup failed; see $Logs\remote-tag.log" }
+      $remoteLines | Set-Content -LiteralPath (Join-Path $Logs 'remote-tag.log') -Encoding utf8
+      $refs = @{}
+      foreach ($line in $remoteLines) {
+        if ([string]$line -match '^([0-9a-f]{40,64})\s+(.+)$') { $refs[$matches[2]] = $matches[1] }
+      }
+      $directRef = "refs/tags/$ReleaseTag"
+      $peeledRef = "$directRef^{}"
+      if (-not $refs.ContainsKey($directRef) -or -not $refs.ContainsKey($peeledRef)) { throw "remote $ReleaseTag is not an annotated tag; see $Logs\remote-tag.log" }
+      if ($refs[$peeledRef] -ne $RootRevision) { throw "remote $ReleaseTag does not resolve to release commit $RootRevision" }
     }
-    $directRef = "refs/tags/$ReleaseTag"
-    $peeledRef = "$directRef^{}"
-    if (-not $refs.ContainsKey($directRef) -or -not $refs.ContainsKey($peeledRef)) { throw "remote $ReleaseTag is not an annotated tag; see $Logs\remote-tag.log" }
-    if ($refs[$peeledRef] -ne $RootRevision) { throw "remote $ReleaseTag does not resolve to release commit $RootRevision" }
   }
   Require-Version $Node 'Node' '^v24\.'
   Require-Version $Npm 'npm' '^11\.'
@@ -476,8 +536,8 @@ try {
   Write-Host "Windows desktop build complete: $Artifact"
 } catch {
   $ExitCode = 1
-  if ($Workflow -eq 'release' -and -not [string]::IsNullOrWhiteSpace($ReleaseArtifactName)) {
-    Remove-Item -LiteralPath (Join-Path $RunDirectory $ReleaseArtifactName) -Force -ErrorAction SilentlyContinue
+  if ($null -ne $ReleaseArtifactPath) {
+    Remove-Item -LiteralPath $ReleaseArtifactPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $RunDirectory 'package') -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $RunDirectory 'extracted') -Recurse -Force -ErrorAction SilentlyContinue
   }

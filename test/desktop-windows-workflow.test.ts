@@ -99,6 +99,50 @@ test("Windows transfer manifest includes tracked submodule files and no live sta
   }
 });
 
+test("Windows workflow rejects dirty recursive submodules before transfer", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "kepos-windows-dirty-submodule-"));
+  const submodule = path.join(root, "submodule-source");
+  const checkout = path.join(root, "checkout");
+  mkdirSync(submodule);
+  mkdirSync(checkout);
+  try {
+    runGit(submodule, ["init", "--quiet"]);
+    runGit(submodule, ["config", "user.email", "test@example.invalid"]);
+    runGit(submodule, ["config", "user.name", "Workflow Test"]);
+    writeFileSync(path.join(submodule, "tracked.txt"), "clean\\n");
+    runGit(submodule, ["add", "tracked.txt"]);
+    runGit(submodule, ["commit", "--quiet", "-m", "fixture"]);
+    runGit(checkout, ["init", "--quiet"]);
+    runGit(checkout, ["config", "user.email", "test@example.invalid"]);
+    runGit(checkout, ["config", "user.name", "Workflow Test"]);
+    writeFileSync(path.join(checkout, ".gitignore"), "dist/\\n");
+    runGit(checkout, ["add", ".gitignore"]);
+    runGit(checkout, ["commit", "--quiet", "-m", "root"]);
+    const addSubmodule = spawnSync(
+      "git",
+      ["-c", "protocol.file.allow=always", "submodule", "add", submodule, "vendor/sample"],
+      { cwd: checkout, encoding: "utf8", env: isolatedGitEnvironment },
+    );
+    assert.equal(addSubmodule.status, 0, addSubmodule.stderr || addSubmodule.stdout);
+    runGit(checkout, ["commit", "--quiet", "-am", "submodule"]);
+    writeFileSync(path.join(checkout, "vendor/sample", "tracked.txt"), "dirty\\n");
+    mkdirSync(path.join(checkout, "scripts", "windows"), { recursive: true });
+    writeFileSync(
+      path.join(checkout, "scripts", "windows", "nuc-kep.sh"),
+      readFileSync(controlScript),
+    );
+    const result = spawnSync("bash", ["scripts/windows/nuc-kep.sh"], {
+      cwd: checkout,
+      encoding: "utf8",
+      env: { ...isolatedGitEnvironment, WINDOWS_USER: "test" },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}\\n${result.stderr}`, /dirty/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Windows build PowerShell parses with the supported Windows PowerShell", (t) => {
   const script = windowsPath(buildScript);
   if (!script) {

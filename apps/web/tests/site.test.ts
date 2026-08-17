@@ -86,7 +86,7 @@ describe("Kepos landing page", () => {
     expect(html).toMatch(/<a\b[^>]*href="https:\/\/github\.com\/LamplitIsles\/kepos"/);
   });
 
-  it("puts direct Android, macOS, and Windows downloads in the hero", () => {
+  it("puts accessible direct downloads on every intended surface", () => {
     const html = readProjectFile("index.html");
     const css = readProjectFile("src/styles.css");
 
@@ -96,21 +96,21 @@ describe("Kepos landing page", () => {
 
     const heroDownloads = html.indexOf('class="hero-downloads"');
     const heroProof = html.indexOf('class="hero-proof"');
-
     expect(heroDownloads).toBeGreaterThan(-1);
     expect(heroDownloads).toBeLessThan(heroProof);
-    expect(html).toContain(
-      'href="https://github.com/LamplitIsles/kepos/releases/download/v0.1.0/kepos-android-arm64-v0.1.0.apk"',
-    );
-    expect(html).toContain(
-      'href="https://github.com/LamplitIsles/kepos/releases/download/v0.1.0/kepos-macos-arm64-v0.1.0.zip"',
-    );
-    expect(html).toContain(
-      'href="https://github.com/LamplitIsles/kepos/releases/download/v0.1.0/kepos-windows-x64-v0.1.0.zip"',
-    );
-    expect(html).toContain("<strong>DOWNLOAD FOR WINDOWS</strong>");
-    expect(html).toContain("<strong>DOWNLOAD FOR ANDROID</strong>");
-    expect(html).toContain("<strong>DOWNLOAD FOR MAC</strong>");
+
+    const downloads = [
+      ["kepos-android-arm64-v0.1.0.apk", "Android"],
+      ["kepos-macos-arm64-v0.1.0.zip", "Mac(?:OS)?"],
+      ["kepos-windows-x64-v0.1.0.zip", "Windows"],
+    ] as const;
+    for (const [artifact, platform] of downloads) {
+      const anchors = [...html.matchAll(new RegExp(`<a\\b[^>]*href="[^"]*${artifact}"[^>]*>`, "g"))];
+      expect(anchors.length).toBeGreaterThanOrEqual(2);
+      for (const [anchor] of anchors) {
+        expect(anchor).toMatch(new RegExp(`aria-label="Download Kepos for ${platform}"`, "i"));
+      }
+    }
     expect(html).not.toContain("ANDROID / ARM64");
     expect(html).not.toContain("APPLE SILICON");
     expect(css).not.toContain('content: "SIGNED RELEASE"');

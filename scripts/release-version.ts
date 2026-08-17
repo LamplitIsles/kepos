@@ -100,8 +100,31 @@ export async function assertReleaseGitState(options: {
   mode: ReleaseMode;
   runGit: GitRunner;
 }): Promise<void> {
-  const status = await options.runGit(["status", "--porcelain"]);
+  const status = await options.runGit([
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+    "--ignore-submodules=none",
+  ]);
   if (status.trim()) throw new Error("release worktree must be clean");
+
+  const submoduleStatus = await options.runGit(["submodule", "status", "--recursive"]);
+  for (const line of submoduleStatus.split("\n")) {
+    if (line && line[0] !== " ") {
+      throw new Error(`release submodule is not cleanly checked out: ${line}`);
+    }
+  }
+  try {
+    await options.runGit([
+      "submodule",
+      "foreach",
+      "--recursive",
+      'test "$(git rev-parse HEAD)" = "$sha1" && test -z "$(git status --porcelain=v1 --untracked-files=all --ignore-submodules=none)"',
+    ]);
+  } catch {
+    throw new Error("release submodule worktree or gitlink is dirty");
+  }
+
   if (options.mode === "rehearsal") return;
 
   let exactTag: string;
@@ -117,5 +140,31 @@ export async function assertReleaseGitState(options: {
   }
   if (exactTag.trim() !== options.tag) {
     throw new Error(`release HEAD must have exact tag ${options.tag}`);
+  }
+
+  let tagType: string;
+  try {
+    tagType = await options.runGit(["cat-file", "-t", `refs/tags/${options.tag}`]);
+  } catch {
+    throw new Error(`release tag ${options.tag} must be annotated`);
+  }
+  if (tagType.trim() !== "tag") {
+    throw new Error(`release tag ${options.tag} must be annotated`);
+  }
+
+  let taggedCommit: string;
+  try {
+    taggedCommit = await options.runGit(["rev-parse", `${options.tag}^{commit}`]);
+  } catch {
+    throw new Error(`release tag ${options.tag} does not resolve to a commit`);
+  }
+  let head: string;
+  try {
+    head = await options.runGit(["rev-parse", "HEAD"]);
+  } catch {
+    throw new Error("release HEAD cannot be resolved");
+  }
+  if (taggedCommit.trim() !== head.trim()) {
+    throw new Error(`release tag ${options.tag} does not resolve to HEAD`);
   }
 }

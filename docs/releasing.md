@@ -55,12 +55,14 @@ unset KEPOS_ANDROID_KEYSTORE KEPOS_ANDROID_KEY_ALIAS KEPOS_ANDROID_KEY_PASSWORD
 `release:windows` transfers only the tracked source snapshot to `nuc-kep`,
 invokes `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`,
 builds in the NTFS `C:\kb` workspace, and copies back only the verified
-`kepos-windows-x64-v0.1.0.zip`. The remote side resolves the annotated tag
-against the release Mac `HEAD`, validates x64 PE architecture and the explicit
-portable file set, extracts into fresh test-owned directories, and launches
-with test-owned state for a bounded readiness/clean-Quit smoke. Failed runs
-retain logs under `dist/windows/<run-id>/logs` but remove partial publishable
-ZIPs.
+`kepos-windows-x64-v0.1.0.zip`. The ZIP has one top-level `Kepos` directory:
+`AppxManifest.xml` and `Assets\Logo.ico` are beside `App\Kepos.exe` and its
+explicitly allowlisted runtime files. The remote side resolves the annotated
+tag against the release Mac `HEAD`, validates the exact layout and x64 PE
+architecture, extracts into fresh test-owned directories, provisions valid
+publisher state, and launches with test-owned state for a bounded healthy
+role/runtime snapshot followed by clean Quit. Failed runs retain logs under
+`dist/windows/<run-id>/logs` but remove partial publishable ZIPs.
 
 For a no-tag local rehearsal, use the isolated path:
 

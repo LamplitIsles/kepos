@@ -46,9 +46,23 @@ if [[ -n $RELEASE_TAG ]]; then
   fi
   readonly RELEASE_DIRECTORY
   readonly RELEASE_ARTIFACT_NAME="kepos-windows-x64-${RELEASE_TAG}.zip"
+  if [[ ! $RELEASE_ARTIFACT_NAME =~ ^kepos-windows-x64-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.zip$ ]]; then
+    printf 'invalid contained release artifact name: %s\n' "$RELEASE_ARTIFACT_NAME" >&2
+    exit 2
+  fi
 else
   RELEASE_DIRECTORY=""
   RELEASE_ARTIFACT_NAME=""
+fi
+
+# shellcheck disable=SC2329 # Invoked indirectly by INT/TERM traps.
+cleanup_interrupted_release() {
+  if [[ -n $RELEASE_TAG ]]; then
+    rm -f -- "$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}.partial" "$RELEASE_DIRECTORY/$RELEASE_ARTIFACT_NAME"
+  fi
+}
+if [[ -n $RELEASE_TAG ]]; then
+  trap cleanup_interrupted_release INT TERM
 fi
 
 shell_quote() {
@@ -63,30 +77,42 @@ cleanup_transfer_archive() {
 }
 trap cleanup_transfer_archive EXIT
 
-require_initialized_submodules() {
-  local record mode path submodule status_line
-  while IFS= read -r -d '' record; do
-    mode=${record%%$'\t'*}
-    path=${record#*$'\t'}
-    if [[ ${mode%% *} != 160000 ]]; then continue; fi
-    submodule="${LOCAL_ROOT}/${path}"
-    if [[ ! -d "$submodule" ]] || ! git -C "$submodule" rev-parse --verify 'HEAD^{commit}' >/dev/null 2>&1; then
-      printf 'Required submodule content is absent: %s\n' "$path" >&2
-      return 1
-    fi
-  done < <(git -C "$LOCAL_ROOT" ls-files --stage -z)
+require_clean_repository_tree() {
+  local status_line
+  while IFS= read -r status_line; do
+    [[ -z "$status_line" ]] && continue
+    printf 'root or submodule worktree is dirty (including second-column dirt): %s\n' "$status_line" >&2
+    return 1
+  done < <(git -C "$LOCAL_ROOT" status --porcelain=v1 --untracked-files=all --ignore-submodules=none)
 
   while IFS= read -r status_line; do
     [[ -z "$status_line" ]] && continue
     if [[ ${status_line:0:1} != " " ]]; then
-      printf 'Required submodule is not at an available checked-out revision: %s\n' "$status_line" >&2
+      printf 'required submodule is not cleanly initialized: %s\n' "$status_line" >&2
       return 1
     fi
   done < <(git -C "$LOCAL_ROOT" submodule status --recursive)
+
+  # foreach supplies the gitlink SHA as $sha1. This catches both a checked-out
+  # nested commit that differs from the superproject index and dirty nested
+  # indexes/worktrees, which a root-only status can otherwise summarize poorly.
+  # shellcheck disable=SC2016 # $sha1 and $displaypath are git-submodule variables.
+  if ! git -C "$LOCAL_ROOT" submodule foreach --recursive '
+    if [[ "$(git rev-parse HEAD)" != "$sha1" ]]; then
+      printf "cached/worktree submodule mismatch: %s (expected %s, got %s)\\n" "$displaypath" "$sha1" "$(git rev-parse HEAD)" >&2
+      exit 1
+    fi
+    if [[ -n "$(git status --porcelain=v1 --untracked-files=all --ignore-submodules=none)" ]]; then
+      printf "nested submodule worktree is dirty: %s\\n" "$displaypath" >&2
+      exit 1
+    fi
+  '; then
+    return 1
+  fi
 }
 
 mkdir -p "$LOCAL_OUTPUT"
-require_initialized_submodules
+require_clean_repository_tree
 if [[ -n $RELEASE_TAG ]]; then
   if [[ -e "$RELEASE_DIRECTORY/$RELEASE_ARTIFACT_NAME" ]]; then
     printf 'release output already exists: %s\n' "$RELEASE_DIRECTORY/$RELEASE_ARTIFACT_NAME" >&2
@@ -176,14 +202,26 @@ set -e
 scp -r "$HOST:${REMOTE_RUN}/logs" "$LOCAL_OUTPUT/" 2>/dev/null || true
 if [[ $status -eq 0 ]]; then
   if [[ -n $RELEASE_TAG ]]; then
-    scp "$HOST:${REMOTE_RUN}/${RELEASE_ARTIFACT_NAME}" "$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}.partial"
-    if ! unzip -tq "$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}.partial" >/dev/null; then
-      rm -f -- "$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}.partial"
+    # The name was validated when the release mode was parsed; keep the
+    # cleanup paths derived from that contained value only.
+    partial_artifact="$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}.partial"
+    final_artifact="$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}"
+    set +e
+    scp "$HOST:${REMOTE_RUN}/${RELEASE_ARTIFACT_NAME}" "$partial_artifact"
+    transfer_status=$?
+    set -e
+    if [[ $transfer_status -ne 0 ]]; then
+      rm -f -- "$partial_artifact" "$final_artifact"
+      printf 'Windows artifact transfer failed; removed partial output\n' >&2
+      exit "$transfer_status"
+    fi
+    if ! unzip -tq "$partial_artifact" >/dev/null; then
+      rm -f -- "$partial_artifact" "$final_artifact"
       printf '%s\n' 'remote Windows ZIP failed local archive verification' >&2
       exit 1
     fi
-    mv -- "$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}.partial" "$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}"
-    printf 'Windows release artifact: %s\n' "$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}"
+    mv -- "$partial_artifact" "$final_artifact"
+    printf 'Windows release artifact: %s\n' "$final_artifact"
   else
     scp -r "$HOST:${REMOTE_RUN}/dist/desktop" "$LOCAL_OUTPUT/"
     printf 'Windows artifact: %s\n' "$LOCAL_OUTPUT/desktop"

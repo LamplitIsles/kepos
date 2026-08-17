@@ -13,6 +13,8 @@ import {
 import type { DesktopTray } from "./tray.js";
 import { loadDesktopOptions } from "./options.js";
 import { desktopLaunchArguments } from "./process.js";
+import type { DesktopSnapshot } from "./protocol.js";
+import { isHealthySmokeSnapshot } from "./smoke.js";
 
 async function main(): Promise<void> {
   const arguments_ = desktopLaunchArguments(process.argv);
@@ -40,8 +42,15 @@ async function main(): Promise<void> {
 
   const smokeReadyFile = process.env.KEPOS_WINDOWS_SMOKE_READY_FILE;
   const smokeQuitFile = process.env.KEPOS_WINDOWS_SMOKE_QUIT_FILE;
+  let smokeSnapshot: DesktopSnapshot | undefined;
   const running = await startDesktopHost(
-    { homeDirectory, ...options },
+    {
+      homeDirectory,
+      ...options,
+      onSnapshot: (snapshot) => {
+        smokeSnapshot = snapshot;
+      },
+    },
     {
       ...defaultDesktopHostDependencies,
       createWindow: (width, height) =>
@@ -67,8 +76,20 @@ async function main(): Promise<void> {
       },
     },
   );
+  if (smokeTest) {
+    try {
+      if (!isHealthySmokeSnapshot(smokeSnapshot)) {
+        throw new Error("desktop smoke did not observe a healthy role/runtime snapshot");
+      }
+      if (smokeReadyFile) {
+        await writeFile(smokeReadyFile, `${JSON.stringify(smokeSnapshot)}\n`);
+      }
+    } catch (error) {
+      await running.shutdown().catch(() => undefined);
+      throw error;
+    }
+  }
   console.log("KEPOS_DESKTOP_READY");
-  if (smokeReadyFile) await writeFile(smokeReadyFile, "KEPOS_DESKTOP_READY\n");
   if (smokeTest) {
     setTimeout(() => void running.shutdown(), 100);
   }
