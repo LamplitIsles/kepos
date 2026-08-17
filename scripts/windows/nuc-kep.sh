@@ -8,8 +8,9 @@ readonly POWERSHELL="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.e
 readonly WINDOWS_USER="${WINDOWS_USER:?set WINDOWS_USER to the Windows account used for dogfood}"
 readonly WINDOWS_HOME="/mnt/c/Users/${WINDOWS_USER}"
 readonly WINDOWS_TOOLS="${WINDOWS_HOME}/.local/kepos-tools"
-readonly WINDOWS_BUILDS="${WINDOWS_HOME}/.local/kepos-build"
+readonly WINDOWS_BUILDS="/mnt/c/kb"
 readonly WINDOWS_ROOT="C:\\Users\\${WINDOWS_USER}"
+readonly WINDOWS_BUILD_ROOT="C:\\kb"
 readonly SCRIPT_NAME="build-kepos.ps1"
 readonly LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -48,9 +49,9 @@ bare_app_kit_revision=$(git -C "$LOCAL_ROOT/vendor/holepunch/bare-app-kit" rev-p
 
 remote_command=(
   "$POWERSHELL" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$WINDOWS_SCRIPT"
-  -Repository "${WINDOWS_ROOT}\\.local\\kepos-build\\${RUN_ID}\\source"
-  -RunDirectory "${WINDOWS_ROOT}\\.local\\kepos-build\\${RUN_ID}"
-  -WorkspaceRoot "${WINDOWS_ROOT}\\.local\\kepos-build"
+  -Repository "${WINDOWS_BUILD_ROOT}\\${RUN_ID}\\source"
+  -RunDirectory "${WINDOWS_BUILD_ROOT}\\${RUN_ID}"
+  -WorkspaceRoot "$WINDOWS_BUILD_ROOT"
   -ToolsDirectory "${WINDOWS_ROOT}\\.local\\kepos-tools"
   -RunId "$RUN_ID"
   -RootRevision "$root_revision"

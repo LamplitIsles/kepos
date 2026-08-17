@@ -31,7 +31,7 @@ run directory:
 
 ```sh
 /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -NonInteractive -Command "
-  \$buildRoot = Join-Path \$env:USERPROFILE '.local\\kepos-build';
+  \$buildRoot = Join-Path \$env:SystemDrive 'kb';
   \$root = Join-Path \$buildRoot '<run>\\dogfood';
   New-Item -ItemType Directory -Force \"\$root\\AppData\", \"\$root\\State\" | Out-Null;
   \$env:APPDATA = \"\$root\\AppData\";
