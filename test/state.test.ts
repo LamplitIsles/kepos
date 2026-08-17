@@ -40,7 +40,7 @@ async function readJson(filePath: string): Promise<unknown> {
   return JSON.parse(await readFile(filePath, "utf8")) as unknown;
 }
 
-test("Windows file replacement keeps complete values and cleans failed attempts", async () => {
+test("file replacement keeps complete values and cleans failed attempts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-replace-"));
   try {
     const destination = path.join(root, "config.toml");
@@ -48,18 +48,27 @@ test("Windows file replacement keeps complete values and cleans failed attempts"
     await writeFile(destination, "previous");
     await writeFile(source, "next");
 
-    await replaceFileAtomically(source, destination, "win32");
+    await replaceFileAtomically(source, destination);
     assert.equal(await readFile(destination, "utf8"), "next");
+
+    assert.deepEqual(await readdir(root), ["config.toml"]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("failed replacement leaves the existing destination untouched", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-replace-failure-"));
+  try {
+    const destination = path.join(root, "config.toml");
+    await writeFile(destination, "previous");
 
     await assert.rejects(
       () =>
-        replaceFileAtomically(
-          path.join(root, "missing.toml"),
-          destination,
-          "win32",
-        ),
+        replaceFileAtomically(path.join(root, "missing.toml"), destination),
+      { code: "ENOENT" },
     );
-    assert.equal(await readFile(destination, "utf8"), "next");
+    assert.equal(await readFile(destination, "utf8"), "previous");
     assert.deepEqual(await readdir(root), ["config.toml"]);
   } finally {
     await rm(root, { force: true, recursive: true });

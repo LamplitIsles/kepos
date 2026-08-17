@@ -5,11 +5,13 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  defaultKeposConfigPath,
   loadKeposConfig,
   parseKeposConfig,
 } from "../src/app-config.js";
-import { defaultKeposStateRoot } from "../src/platform/paths.js";
+import {
+  defaultKeposConfigPath,
+  defaultKeposStateRoot,
+} from "../src/platform/paths.js";
 
 test("shared config parses network bootstrap endpoints", () => {
   assert.deepEqual(
@@ -172,7 +174,7 @@ test("Windows defaults use AppData while explicit paths remain unchanged", () =>
       "C:\\Users\\kepos",
       "win32",
     ),
-    "C:\\Users\\kepos\\AppData\\Roaming\\kepos\\config.toml",
+    "C:\\Users\\kepos\\AppData\\Roaming\\Kepos\\config.toml",
   );
   assert.equal(
     defaultKeposStateRoot(

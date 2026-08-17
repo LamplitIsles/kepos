@@ -21,7 +21,11 @@ export function defaultKeposConfigPath(
         pathApi.join(homeDirectory, "AppData", "Roaming"))
       : (environment.XDG_CONFIG_HOME ||
         pathApi.join(homeDirectory, ".config"));
-  return pathApi.join(configHome, "kepos", "config.toml");
+  return pathApi.join(
+    configHome,
+    platform === "win32" ? "Kepos" : "kepos",
+    "config.toml",
+  );
 }
 
 export function defaultKeposStateRoot(

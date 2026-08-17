@@ -15,10 +15,12 @@ mise exec -- node --import tsx --test test/app-config.test.ts test/state.test.ts
 mise exec -- npm run desktop:check
 ```
 
-All commands passed. The targeted suite passed 58 tests and the desktop suite
-passed 100 tests. The tests cover Windows AppData path resolution, complete-file
-replacement and cleanup, state identity/configuration updates, runtime-lock
-contention and stale-owner recovery, and CLI shutdown handling.
+All listed local commands passed. The targeted suite passed 59 tests and the
+desktop suite passed 100 tests. The tests cover Windows AppData path resolution,
+complete-file replacement and failure preservation, state
+identity/configuration updates, runtime-lock contention and stale-owner recovery,
+and CLI shutdown handling.
+These local results are not Windows-native acceptance evidence.
 
 ## Designated host preflight
 

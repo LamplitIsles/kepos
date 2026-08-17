@@ -1,11 +1,13 @@
 import path from "node:path";
 
-import { defaultKeposStateRoot } from "../../../src/platform/paths.js";
 import {
-  defaultKeposConfigPath,
   loadKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
+import {
+  defaultKeposConfigPath,
+  defaultKeposStateRoot,
+} from "../../../src/platform/paths.js";
 import type { DhtAddress } from "../../../src/mux/hyperdht.js";
 import type { Route } from "../../../src/mux/route.js";
 import type { PublisherRuntimePolicy } from "../../../src/runtime/publisher.js";

@@ -28,8 +28,6 @@ import {
 import { defaultKeposConfigPath } from "./platform/paths.js";
 import { replaceFileAtomically } from "./state/files.js";
 
-export { defaultKeposConfigPath } from "./platform/paths.js";
-
 export interface KeposConfig {
   network?: {
     bootstrap?: DhtAddress[];

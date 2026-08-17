@@ -1,9 +1,9 @@
 import {
-  defaultKeposConfigPath,
   loadKeposConfig,
   saveKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
+import { defaultKeposConfigPath } from "../../../src/platform/paths.js";
 import type { DesktopRuntimeConfiguration } from "./runtime.js";
 import {
   parseDesktopOptions,
