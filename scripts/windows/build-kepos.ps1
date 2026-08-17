@@ -175,8 +175,17 @@ try {
     )
     $log = Join-Path $Logs "$Name.log"
     Write-Host "> $File $($Arguments -join ' ')"
-    & $File @Arguments 2>&1 | Tee-Object -FilePath $log
-    $code = $LASTEXITCODE
+    $previousErrorPreference = $ErrorActionPreference
+    try {
+      # Windows PowerShell 5.1 wraps every native stderr line as a non-terminating
+      # error. Git and CMake use stderr for normal progress, so trust the exit
+      # code while retaining the merged stream in the bounded command log.
+      $ErrorActionPreference = 'Continue'
+      & $File @Arguments 2>&1 | Tee-Object -FilePath $log
+      $code = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $previousErrorPreference
+    }
     if ($code -ne 0) { throw "$Name failed with exit code $code; see $log" }
   }
 
