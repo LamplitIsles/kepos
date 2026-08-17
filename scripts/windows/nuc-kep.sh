@@ -19,7 +19,7 @@ readonly RUN_ID
 readonly LOCAL_OUTPUT="${LOCAL_ROOT}/dist/windows/${RUN_ID}"
 readonly REMOTE_RUN="${WINDOWS_BUILDS}/${RUN_ID}"
 readonly REMOTE_SOURCE="${WINDOWS_BUILDS}/source"
-TRANSFER_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/kepos-windows-transfer.XXXXXX.tar")"
+TRANSFER_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/kepos-windows-transfer.XXXXXX")"
 readonly TRANSFER_ARCHIVE
 PARTIAL_ARTIFACT=""
 
