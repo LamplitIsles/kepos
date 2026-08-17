@@ -21,6 +21,7 @@ readonly REMOTE_RUN="${WINDOWS_BUILDS}/${RUN_ID}"
 readonly REMOTE_SOURCE="${WINDOWS_BUILDS}/source"
 TRANSFER_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/kepos-windows-transfer.XXXXXX.tar")"
 readonly TRANSFER_ARCHIVE
+PARTIAL_ARTIFACT=""
 
 RELEASE_MODE="dogfood"
 RELEASE_TAG=""
@@ -50,6 +51,14 @@ if [[ -n $RELEASE_TAG ]]; then
     printf 'invalid contained release artifact name: %s\n' "$RELEASE_ARTIFACT_NAME" >&2
     exit 2
   fi
+  if ! (
+    cd "$LOCAL_ROOT"
+    node --import tsx --input-type=module -e 'import { parseReleaseTag } from "./scripts/release-version.ts"; parseReleaseTag(process.argv[1], process.argv[2]);' "$RELEASE_TAG" "$RELEASE_MODE"
+  ); then
+    printf 'release tag is outside the shared artifact contract: %s\n' "$RELEASE_TAG" >&2
+    exit 2
+  fi
+  PARTIAL_ARTIFACT="$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}.partial"
 else
   RELEASE_DIRECTORY=""
   RELEASE_ARTIFACT_NAME=""
@@ -72,10 +81,11 @@ shell_quote() {
 }
 
 # shellcheck disable=SC2329 # Invoked indirectly by EXIT trap.
-cleanup_transfer_archive() {
+cleanup_local_temporary_files() {
   rm -f -- "$TRANSFER_ARCHIVE"
+  if [[ -n $PARTIAL_ARTIFACT ]]; then rm -f -- "$PARTIAL_ARTIFACT"; fi
 }
-trap cleanup_transfer_archive EXIT
+trap cleanup_local_temporary_files EXIT
 
 require_clean_repository_tree() {
   local status_line
@@ -199,7 +209,15 @@ ssh "$HOST" "bash -c $(shell_quote "$remote_payload")" < "$TRANSFER_ARCHIVE"
 status=$?
 set -e
 
-scp -r "$HOST:${REMOTE_RUN}/logs" "$LOCAL_OUTPUT/" 2>/dev/null || true
+log_transfer_status=0
+if ! scp -r "$HOST:${REMOTE_RUN}/logs" "$LOCAL_OUTPUT/" 2>/dev/null; then
+  sleep 1
+  if ! scp -r "$HOST:${REMOTE_RUN}/logs" "$LOCAL_OUTPUT/" 2>/dev/null; then
+    log_transfer_status=1
+    printf 'Windows log retrieval failed; remote diagnostics remain at %s/logs\n' "$REMOTE_RUN" >&2
+  fi
+fi
+if [[ $status -eq 0 && $log_transfer_status -ne 0 ]]; then status=1; fi
 if [[ $status -eq 0 ]]; then
   if [[ -n $RELEASE_TAG ]]; then
     # The name was validated when the release mode was parsed; keep the

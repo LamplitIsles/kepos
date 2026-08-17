@@ -104,7 +104,17 @@ xattr -dr com.apple.quarantine /Applications/Kepos.app
 Run the Windows extraction and tray lifecycle smoke from
 [the Windows guide](platforms/windows.md). Install the Android APK on a clean
 test device and repeat with `adb install -r`; do not uninstall a real app or
-erase pairing state.
+erase pairing state. Before installation, compare its signing certificate with
+the recorded public fingerprint:
+
+```sh
+actual=$(apksigner verify --verbose --print-certs \
+  dist/release/v0.1.0/kepos-android-arm64-v0.1.0.apk | \
+  awk -F: '/Signer #1 certificate SHA-256 digest/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }')
+test "$actual" = "$(cat release/android-certificate.sha256)"
+```
+
+Stop if the digest differs.
 
 The draft must contain exactly five assets: the Android APK, macOS ZIP, Windows
 ZIP, `SHA256SUMS`, and `SHA256SUMS.minisig`.

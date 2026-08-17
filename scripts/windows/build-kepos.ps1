@@ -426,6 +426,12 @@ try {
       throw 'release workflow requires tag, mode, origin, and artifact name'
     }
     if ($ReleaseTag -notmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw "invalid release tag: $ReleaseTag" }
+    $major = [System.Numerics.BigInteger]::Parse($matches[1])
+    $minor = [System.Numerics.BigInteger]::Parse($matches[2])
+    $patch = [System.Numerics.BigInteger]::Parse($matches[3])
+    if ($minor -ge 1000 -or $patch -ge 1000) { throw "invalid release tag components: $ReleaseTag" }
+    $versionCode = ($major * 1000000) + ($minor * 1000) + $patch
+    if ($versionCode -le 0 -or $versionCode -gt 2100000000) { throw "release tag is outside Android versionCode range: $ReleaseTag" }
     if ($ReleaseMode -eq 'release') {
       $remoteLines = @(& git.exe ls-remote --tags $RemoteOrigin "refs/tags/$ReleaseTag" "refs/tags/$ReleaseTag^{}" 2>&1)
       if ($LASTEXITCODE -ne 0) { throw "remote tag lookup failed; see $Logs\remote-tag.log" }
