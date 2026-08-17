@@ -243,7 +243,16 @@ try {
   if ($null -eq $NativeExecutable) { throw "bare-win-ui native check produced no executable under $NativeCheck" }
   $NativeCheckStdout = Join-Path $Logs 'bare-win-ui-run.stdout.log'
   $NativeCheckStderr = Join-Path $Logs 'bare-win-ui-run.stderr.log'
-  $process = Start-Process -FilePath $NativeExecutable.FullName -Wait -PassThru -RedirectStandardOutput $NativeCheckStdout -RedirectStandardError $NativeCheckStderr
+  $WebViewData = Join-Path $RunDirectory 'webview2'
+  Assert-OwnedPath $RunDirectory $WebViewData 'WebView2 test data'
+  New-Item -ItemType Directory -Path $WebViewData -Force | Out-Null
+  $env:WEBVIEW2_USER_DATA_FOLDER = $WebViewData
+  $process = Start-Process -FilePath $NativeExecutable.FullName -PassThru -RedirectStandardOutput $NativeCheckStdout -RedirectStandardError $NativeCheckStderr
+  if (-not $process.WaitForExit(30000)) {
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    throw "bare-win-ui native check timed out; see $NativeCheckStdout"
+  }
+  $process.Refresh()
   if ($process.ExitCode -ne 0) { throw "bare-win-ui native check failed with exit code $($process.ExitCode); see $NativeCheckStdout" }
 
   # Keep the run directory as the sole transfer boundary: stage only the
