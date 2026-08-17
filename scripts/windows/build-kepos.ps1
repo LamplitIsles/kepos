@@ -112,6 +112,16 @@ try {
     if (Test-Path -LiteralPath $ownedOutput) { Remove-Item -LiteralPath $ownedOutput -Recurse -Force }
   }
 
+  # npm workspace discovery must use the canonical checkout path. npm resolves
+  # substituted-drive workspaces as unrelated roots, while CMake needs the
+  # short alias only after dependencies are installed.
+  Set-Location -LiteralPath $Repository
+  $NpmInstallLog = Join-Path $Logs 'npm-ci.log'
+  Write-Host "> $Npm ci --ignore-scripts --no-audit --no-fund"
+  & $Npm ci --ignore-scripts --no-audit --no-fund 2>&1 | Tee-Object -FilePath $NpmInstallLog
+  $npmInstallCode = $LASTEXITCODE
+  if ($npmInstallCode -ne 0) { throw "npm-ci failed with exit code $npmInstallCode; see $NpmInstallLog" }
+
   $existingSubst = Get-SubstTarget
   if ($null -ne $existingSubst) {
     if ((Get-CanonicalPath $existingSubst) -ne $Repository) {
@@ -196,7 +206,6 @@ try {
   Require-Version $Npm 'npm' '^11\.'
   if (-not (Get-Command cmake.exe -ErrorAction SilentlyContinue)) { throw 'CMake is missing from PATH' }
 
-  Invoke-LoggedNative $Npm 'npm-ci' @('ci', '--ignore-scripts', '--no-audit', '--no-fund')
   $BareMake = Join-Path $BuildRepository 'node_modules\.bin\bare-make.cmd'
   $BareBuild = Join-Path $BuildRepository 'node_modules\.bin\bare-build.cmd'
   $BareLink = Join-Path $BuildRepository 'node_modules\.bin\bare-link.cmd'
