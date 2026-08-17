@@ -395,17 +395,33 @@ function commandPath(repository: string, command: string, target: DesktopTarget)
   return base;
 }
 
+function quoteWindowsCommandArgument(value: string): string {
+  return `"${value.replaceAll(`"`, `""`)}"`;
+}
+
 async function run(
   repository: string,
   build: DesktopBuildCommand,
   target: DesktopTarget,
 ): Promise<void> {
   const executable = commandPath(repository, build.command, target);
+  const windows = target === "win32-x64";
+  const command = windows ? (process.env.ComSpec ?? "cmd.exe") : executable;
+  const arguments_ = windows
+    ? [
+        "/d",
+        "/s",
+        "/c",
+        [executable, ...build.arguments]
+          .map(quoteWindowsCommandArgument)
+          .join(" "),
+      ]
+    : build.arguments;
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(executable, build.arguments, {
+    const child = spawn(command, arguments_, {
       cwd: repository,
       stdio: "inherit",
-      shell: target === "win32-x64",
+      shell: false,
     });
     child.once("error", reject);
     child.once("exit", (code, signal) => {
