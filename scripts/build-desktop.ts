@@ -242,7 +242,10 @@ function windowsPlan(
         `npm:FILEPATH=${tools.npm}`,
       ],
     },
-    { command: "bare-make", arguments: ["build", "--build", winUiBuild] },
+    {
+      command: "bare-make",
+      arguments: ["build", "--build", winUiBuild, "--clean"],
+    },
     {
       command: "bare-make",
       arguments: [

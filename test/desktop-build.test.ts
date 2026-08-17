@@ -257,6 +257,10 @@ test("desktop Windows plan builds an unpackaged WinUI directory and links native
     ({ command, arguments: arguments_ }) =>
       command === "bare-make" && arguments_.includes("generate"),
   );
+  const makeBuild = commands.find(
+    ({ command, arguments: arguments_ }) =>
+      command === "bare-make" && arguments_[0] === "build",
+  );
   const bareBuild = commands.find(({ command }) => command === "bare-build");
   const links = commands.filter(({ command }) => command === "bare-link");
   if (previousBuildRoot === undefined) {
@@ -274,6 +278,7 @@ test("desktop Windows plan builds an unpackaged WinUI directory and links native
   assert.ok(makeGenerate?.arguments.includes("win32"));
   assert.ok(makeGenerate?.arguments.includes("--arch"));
   assert.ok(makeGenerate?.arguments.includes("x64"));
+  assert.ok(makeBuild?.arguments.includes("--clean"));
   assert.equal(
     plan.outputDirectory(repository),
     path.join(repository, "dist", "desktop", "Kepos"),
