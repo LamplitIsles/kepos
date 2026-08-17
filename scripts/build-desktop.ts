@@ -422,6 +422,7 @@ async function run(
       cwd: repository,
       stdio: "inherit",
       shell: false,
+      windowsVerbatimArguments: windows,
     });
     child.once("error", reject);
     child.once("exit", (code, signal) => {
