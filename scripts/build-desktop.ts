@@ -388,41 +388,36 @@ async function requireFile(file: string): Promise<void> {
   }
 }
 
-function commandPath(repository: string, command: string, target: DesktopTarget): string {
-  const bin = path.join(repository, "node_modules", ".bin");
-  const base = path.join(bin, command);
-  if (target === "win32-x64") return `${base}.cmd`;
-  return base;
+function commandPath(repository: string, command: string): string {
+  return path.join(repository, "node_modules", ".bin", command);
 }
 
-function quoteWindowsCommandArgument(value: string): string {
-  return `"${value.replaceAll(`"`, `""`)}"`;
-}
+const windowsCommandEntrypoints: Readonly<Record<string, string>> = {
+  tsc: "typescript/bin/tsc",
+  "bare-make": "bare-make/bin.js",
+  "bare-build": "bare-build/bin.js",
+  "bare-link": "bare-link/bin.js",
+};
 
 async function run(
   repository: string,
   build: DesktopBuildCommand,
   target: DesktopTarget,
 ): Promise<void> {
-  const executable = commandPath(repository, build.command, target);
   const windows = target === "win32-x64";
-  const command = windows ? (process.env.ComSpec ?? "cmd.exe") : executable;
+  const windowsEntrypoint = windowsCommandEntrypoints[build.command];
+  if (windows && windowsEntrypoint === undefined) {
+    throw new Error(`unsupported Windows desktop build command: ${build.command}`);
+  }
+  const command = windows ? process.execPath : commandPath(repository, build.command);
   const arguments_ = windows
-    ? [
-        "/d",
-        "/s",
-        "/c",
-        [executable, ...build.arguments]
-          .map(quoteWindowsCommandArgument)
-          .join(" "),
-      ]
+    ? [path.join(repository, "node_modules", windowsEntrypoint), ...build.arguments]
     : build.arguments;
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, arguments_, {
       cwd: repository,
       stdio: "inherit",
       shell: false,
-      windowsVerbatimArguments: windows,
     });
     child.once("error", reject);
     child.once("exit", (code, signal) => {
