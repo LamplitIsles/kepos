@@ -30,7 +30,10 @@ export interface DesktopBuildPlan {
 const defaultTools = (): DesktopBuildTools => ({
   node: process.execPath,
   npm:
-    process.env.npm_execpath ?? path.join(path.dirname(process.execPath), "npm"),
+    process.platform === "win32"
+      ? path.join(path.dirname(process.execPath), "npm.cmd")
+      : (process.env.npm_execpath ??
+        path.join(path.dirname(process.execPath), "npm")),
 });
 
 export function desktopTargetForPlatform(
