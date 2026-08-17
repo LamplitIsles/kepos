@@ -252,8 +252,12 @@ try {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     throw "bare-win-ui native check timed out; see $NativeCheckStdout"
   }
+  # Complete redirected stream draining before Windows PowerShell 5.1 reads
+  # ExitCode; otherwise the property can remain unset after timed WaitForExit.
+  $process.WaitForExit()
   $process.Refresh()
-  if ($process.ExitCode -ne 0) { throw "bare-win-ui native check failed with exit code $($process.ExitCode); see $NativeCheckStdout" }
+  $nativeExitCode = $process.ExitCode
+  if ($nativeExitCode -ne 0) { throw "bare-win-ui native check failed with exit code $nativeExitCode; see $NativeCheckStdout" }
 
   # Keep the run directory as the sole transfer boundary: stage only the
   # already-validated desktop output, never the source checkout or native tree.
