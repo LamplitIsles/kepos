@@ -460,9 +460,10 @@ try {
 
   Invoke-LoggedNative $Npm 'desktop-build' @('run', 'desktop:build', '--', '--target', 'win32-x64')
 
-  # bare-win-ui's real sample is the stable native seam: WebView bridge, close
-  # cancellation/reuse, tray selection, TaskbarCreated, and explicit teardown.
-  $WinUi = Join-Path $BuildRepository 'vendor\holepunch\bare-win-ui'
+  if ($Workflow -eq 'dogfood') {
+    # The dogfood build proves primitive lifecycle directly. Release uses the
+    # stronger extracted-app healthy-role and clean-Quit smoke below.
+    $WinUi = Join-Path $BuildRepository 'vendor\holepunch\bare-win-ui'
   Invoke-LoggedNative $BareBuild 'bare-win-ui-build' @('--base', $WinUi, '--host', 'win32-x64', '--runtime', (Join-Path $WinUi 'runtime.js'), '--out', $NativeCheck, (Join-Path $WinUi 'sample.js'))
   $NativeExecutable = Get-ChildItem -LiteralPath $NativeCheck -Filter '*.exe' -Recurse | Select-Object -First 1
   if ($null -eq $NativeExecutable) { throw "bare-win-ui native check produced no executable under $NativeCheck" }
@@ -520,6 +521,7 @@ try {
       Set-Content -LiteralPath $NativeCheckResult -Encoding utf8
     $process.Dispose()
     if ($null -ne $probeCleanupFailure) { throw $probeCleanupFailure }
+  }
   }
 
   # Keep the run directory as the sole transfer boundary: stage only the
