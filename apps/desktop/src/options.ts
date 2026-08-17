@@ -39,12 +39,14 @@ export interface DesktopConfigContext {
   config?: KeposConfig;
   environment?: Record<string, string | undefined>;
   configPath?: string;
+  platform?: NodeJS.Platform;
 }
 
 export interface LoadDesktopOptionsContext {
   homeDirectory: string;
   environment?: NodeJS.ProcessEnv;
   loadConfig?: typeof loadKeposConfig;
+  platform?: NodeJS.Platform;
 }
 
 export async function loadDesktopOptions(
@@ -70,7 +72,12 @@ export async function loadDesktopOptions(
     config,
     configPath:
       configPath ??
-      defaultKeposConfigPath(context.environment, context.homeDirectory),
+      defaultKeposConfigPath(
+        context.environment,
+        context.homeDirectory,
+        context.platform,
+      ),
+    platform: context.platform,
   });
 }
 
@@ -147,6 +154,7 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
   const stateRoot = defaultKeposStateRoot(
     context.environment,
     context.homeDirectory,
+    context.platform,
   );
   const bootstrap = context.config?.network?.bootstrap;
   const publisherConfig = context.config?.publisher;

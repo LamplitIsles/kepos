@@ -9,6 +9,7 @@ test("desktop derives enabled roles from shared config and fixed state paths", (
     parseDesktopOptions([], {
       homeDirectory: "/Users/neil",
       environment: { XDG_STATE_HOME: "" },
+      platform: "linux",
       config: {
         network: { bootstrap: [{ host: "bootstrap.example", port: 49_737 }] },
         publisher: {
@@ -56,6 +57,7 @@ test("desktop loads the shared config when no role flags are given", async () =>
   const options = await loadDesktopOptions([], {
     homeDirectory: "/Users/neil",
     environment: {},
+    platform: "linux",
     loadConfig: async (configPath?: string, _environment?: unknown, home?: string) => {
       loadedPaths.push(configPath);
       loadedHomes.push(home);

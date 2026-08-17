@@ -254,7 +254,7 @@ test("desktop native forks are submodules without install-time patches", async (
 
   assert.match(
     gitmodules,
-    /path = vendor\/holepunch\/bare-app-kit\n\s+url = https:\/\/github\.com\/LamplitIsles\/bare-app-kit\.git/,
+    /path = vendor\/holepunch\/bare-app-kit\r?\n\s+url = https:\/\/github\.com\/LamplitIsles\/bare-app-kit\.git/,
   );
   assert.equal(packageJson.scripts?.postinstall, undefined);
   assert.equal(packageJson.devDependencies?.["patch-package"], undefined);
