@@ -186,14 +186,19 @@ test("Windows defaults use AppData while explicit paths remain unchanged", () =>
   );
 });
 
-test("shared config follows XDG and distinguishes default from explicit files", async () => {
+test("shared config follows the platform config home and distinguishes explicit files", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "kepos-config-"));
-  const configPath = path.join(root, "kepos", "config.toml");
-  assert.equal(defaultKeposConfigPath({ XDG_CONFIG_HOME: root }), configPath);
-  assert.equal(
-    await loadKeposConfig(undefined, { XDG_CONFIG_HOME: root }),
-    undefined,
+  const environment =
+    process.platform === "win32"
+      ? { APPDATA: root }
+      : { XDG_CONFIG_HOME: root };
+  const configPath = path.join(
+    root,
+    process.platform === "win32" ? "Kepos" : "kepos",
+    "config.toml",
   );
+  assert.equal(defaultKeposConfigPath(environment), configPath);
+  assert.equal(await loadKeposConfig(undefined, environment), undefined);
   await assert.rejects(
     () => loadKeposConfig(path.join(root, "missing.toml")),
     /Cannot read Kepos config/,
@@ -204,7 +209,7 @@ test("shared config follows XDG and distinguishes default from explicit files", 
     configPath,
     '[network]\nbootstrap = ["bootstrap.example:49737"]\n',
   );
-  assert.deepEqual(await loadKeposConfig(undefined, { XDG_CONFIG_HOME: root }), {
+  assert.deepEqual(await loadKeposConfig(undefined, environment), {
     network: { bootstrap: [{ host: "bootstrap.example", port: 49_737 }] },
   });
 });
@@ -254,5 +259,7 @@ test("shared config atomically persists the validated desktop shape", async () =
   const configPath = path.join(root, "kepos", "config.toml");
   await saveKeposConfig(config, configPath);
   assert.equal(await readFile(configPath, "utf8"), source);
-  assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+  }
 });
