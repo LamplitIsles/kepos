@@ -7,9 +7,7 @@ DNS rebinding. Requests from a LAN address or ordinary tunnel hostname can
 therefore receive an API `403` or use non-persistent settings unless that host
 is explicitly configured with `--trusted-host`.
 
-This is a deliberate security boundary, not a dsh defect. Kepos preserves that
-boundary while making dsh available from another device. For the path that led
-to this integration, read [Making a remote service look local](../stories/dsh-loopback.md).
+This is a deliberate security boundary, not a dsh defect. Kepos preserves that boundary while making dsh available from another device. For the path that led to this integration, read [Making a remote service look local](../stories/dsh-loopback.md).
 
 ## Why Kepos works
 
