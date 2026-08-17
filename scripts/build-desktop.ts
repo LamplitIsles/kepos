@@ -117,6 +117,15 @@ function typescriptBuildCommands(): DesktopBuildCommand[] {
       command: "tsc",
       arguments: [
         "-b",
+        "--clean",
+        "packages/bare-host-protocol",
+        "packages/kepos-android-worklet",
+      ],
+    },
+    {
+      command: "tsc",
+      arguments: [
+        "-b",
         "packages/bare-host-protocol",
         "packages/kepos-android-worklet",
       ],
