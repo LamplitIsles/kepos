@@ -15,7 +15,8 @@ readonly LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 readonly LOCAL_OUTPUT="${LOCAL_ROOT}/dist/windows/${RUN_ID}"
 readonly REMOTE_RUN="${WINDOWS_BUILDS}/${RUN_ID}"
-readonly WINDOWS_SCRIPT="${WINDOWS_TOOLS}/${SCRIPT_NAME}"
+readonly WINDOWS_SCRIPT_WSL="${WINDOWS_TOOLS}/${SCRIPT_NAME}"
+readonly WINDOWS_SCRIPT="${WINDOWS_ROOT}\\.local\\kepos-tools\\${SCRIPT_NAME}"
 
 shell_quote() {
   local value=$1
@@ -27,7 +28,7 @@ mkdir -p "$LOCAL_OUTPUT"
 
 # Keep the transfer bounded to source and checked-in native submodules. Build
 # output, caches, credentials, and live state never cross the SSH boundary.
-tar \
+COPYFILE_DISABLE=1 tar --no-xattrs \
   --exclude='./.git' \
   --exclude='./node_modules' \
   --exclude='./dist' \
@@ -38,7 +39,7 @@ tar \
   ssh "$HOST" "rm -rf '$REMOTE_RUN/source' && mkdir -p '$REMOTE_RUN/source' && tar -xf - -C '$REMOTE_RUN/source'"
 
 scp "$LOCAL_ROOT/scripts/windows/$SCRIPT_NAME" \
-  "$HOST:$WINDOWS_SCRIPT"
+  "$HOST:$WINDOWS_SCRIPT_WSL"
 
 root_revision=$(git -C "$LOCAL_ROOT" rev-parse HEAD)
 bare_native_revision=$(git -C "$LOCAL_ROOT/vendor/holepunch/bare-native" rev-parse HEAD)

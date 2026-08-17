@@ -10,7 +10,7 @@ keys, invitation URIs, or personal paths into this document.
 Run from the Kepos checkout on the Mac:
 
 ```sh
-scripts/windows/nuc-kep.sh
+WINDOWS_USER=<windows-account> scripts/windows/nuc-kep.sh
 ```
 
 Record the returned run ID, root revision, and the three native submodule
