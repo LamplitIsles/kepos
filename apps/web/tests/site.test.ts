@@ -86,7 +86,7 @@ describe("Kepos landing page", () => {
     expect(html).toMatch(/<a\b[^>]*href="https:\/\/github\.com\/LamplitIsles\/kepos"/);
   });
 
-  it("puts direct Android and macOS downloads in the hero", () => {
+  it("puts direct Android, macOS, and Windows downloads in the hero", () => {
     const html = readProjectFile("index.html");
     const css = readProjectFile("src/styles.css");
 
@@ -105,6 +105,10 @@ describe("Kepos landing page", () => {
     expect(html).toContain(
       'href="https://github.com/LamplitIsles/kepos/releases/download/v0.1.0/kepos-macos-arm64-v0.1.0.zip"',
     );
+    expect(html).toContain(
+      'href="https://github.com/LamplitIsles/kepos/releases/download/v0.1.0/kepos-windows-x64-v0.1.0.zip"',
+    );
+    expect(html).toContain("<strong>DOWNLOAD FOR WINDOWS</strong>");
     expect(html).toContain("<strong>DOWNLOAD FOR ANDROID</strong>");
     expect(html).toContain("<strong>DOWNLOAD FOR MAC</strong>");
     expect(html).not.toContain("ANDROID / ARM64");

@@ -146,7 +146,7 @@ test("builds before enumeration and validates the archive round trip", async () 
     },
   );
 
-  assert.equal(result.zip, path.join(
+  assert.equal(result.macosZip, path.join(
     repository,
     "dist/release/rehearsal-v1.2.3/kepos-macos-arm64-v1.2.3.zip",
   ));

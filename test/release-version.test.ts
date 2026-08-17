@@ -19,6 +19,7 @@ test("maps a release tag to the shared version and artifact contract", () => {
     artifactDirectory: "dist/release/v1.2.3",
     androidArtifactName: "kepos-android-arm64-v1.2.3.apk",
     macosArtifactName: "kepos-macos-arm64-v1.2.3.zip",
+    windowsArtifactName: "kepos-windows-x64-v1.2.3.zip",
     checksumName: "SHA256SUMS",
     checksumSignatureName: "SHA256SUMS.minisig",
     mode: "release",

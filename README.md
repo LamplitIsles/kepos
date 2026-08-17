@@ -14,9 +14,11 @@ There is no Kepos account and no Kepos-operated control plane. Device keys stay
 on the devices that created them. The publisher decides who may connect and can
 apply a narrower allowlist to each service.
 
-> Kepos is a developer preview. Android APKs and Apple Silicon macOS ZIPs
-> are published for direct download with minisign verification. They are not
-> app-store releases; the macOS app is ad-hoc signed and not notarized.
+> Kepos is a developer preview. Android APKs, Apple Silicon macOS ZIPs, and
+> Windows 11 x64 portable ZIPs are published for direct download with minisign
+> verification. They are not app-store releases; the macOS app is ad-hoc signed
+> and not notarized, and the Windows app is not Authenticode-signed and may
+> trigger SmartScreen.
 
 ## Why Kepos exists
 
@@ -59,7 +61,14 @@ The implementation follows four rules:
 | Container | Publisher and subscriber | Non-root `linux/amd64` image published to GHCR from `main` |
 | Kubernetes path | Subscriber gateway | Pod-facing hostname routing exists; reusable manifests are not yet shipped here |
 | Android | Subscriber | Android 12+, `arm64-v8a`, sideload-only; one persistent Bare Worklet |
-| macOS | Publisher, subscriber, or both | Apple Silicon, ad-hoc-signed local build, native tray app |
+| macOS | Publisher, subscriber, or both | Apple Silicon, ad-hoc-signed direct-download ZIP, native tray app |
+| Windows | Publisher, subscriber, or both | Windows 11 x64, unsigned portable ZIP, notification-area app |
+
+The direct-download release includes `kepos-android-arm64-vX.Y.Z.apk`,
+`kepos-macos-arm64-vX.Y.Z.zip`, and
+`kepos-windows-x64-vX.Y.Z.zip`. Verify `SHA256SUMS` with the repository's
+minisign key before opening any archive; the [latest release](https://github.com/LamplitIsles/kepos/releases/latest)
+contains the five release assets.
 
 The container and Pod-facing gateway have also been exercised in a private
 Kubernetes deployment. That proves the path, not a supported cluster product:
@@ -200,6 +209,7 @@ or remove the installed Kepos app.
 - [CLI, identity, and configuration](docs/cli.md)
 - [Android subscriber](docs/platforms/android.md)
 - [macOS desktop](docs/platforms/macos.md)
+- [Windows desktop](docs/platforms/windows.md)
 - [Release and artifact verification](docs/releasing.md)
 - [Nix, container, and Kubernetes deployment](docs/deployment.md)
 - [DeepSeek Harness integration](docs/integrations/deepseek-harness.md)

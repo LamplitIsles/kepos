@@ -10,6 +10,7 @@ export interface ReleaseVersion {
   artifactDirectory: string;
   androidArtifactName: string;
   macosArtifactName: string;
+  windowsArtifactName: string;
   checksumName: "SHA256SUMS";
   checksumSignatureName: "SHA256SUMS.minisig";
   mode: ReleaseMode;
@@ -87,6 +88,7 @@ export function parseReleaseTag(
     artifactDirectory: `dist/release/${directoryName}`,
     androidArtifactName: `kepos-android-arm64-${tag}.apk`,
     macosArtifactName: `kepos-macos-arm64-${tag}.zip`,
+    windowsArtifactName: `kepos-windows-x64-${tag}.zip`,
     checksumName: "SHA256SUMS",
     checksumSignatureName: "SHA256SUMS.minisig",
     mode,

@@ -1,5 +1,7 @@
 import process from "node:process";
 import os from "node:os";
+import { writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { Tray, WebView, Window } from "bare-native";
 
 import {
@@ -13,16 +15,32 @@ import { loadDesktopOptions } from "./options.js";
 import { desktopLaunchArguments } from "./process.js";
 
 async function main(): Promise<void> {
-  const homeDirectory = os.homedir();
-  const options = await loadDesktopOptions(
-    desktopLaunchArguments(process.argv),
-    {
-      homeDirectory,
-      environment: process.env,
-    },
+  const arguments_ = desktopLaunchArguments(process.argv);
+  const smokeTest = arguments_.includes("--smoke-test");
+  const smokeHomeIndex = arguments_.indexOf("--smoke-home");
+  if (
+    smokeHomeIndex !== -1 &&
+    (!arguments_[smokeHomeIndex + 1] ||
+      arguments_[smokeHomeIndex + 1].startsWith("--"))
+  ) {
+    throw new Error("--smoke-home requires a path");
+  }
+  const smokeHome = smokeHomeIndex === -1 ? undefined : arguments_[smokeHomeIndex + 1];
+  const launchArguments = arguments_.filter(
+    (_, index) =>
+      index !== smokeHomeIndex &&
+      index !== smokeHomeIndex + 1 &&
+      arguments_[index] !== "--smoke-test",
   );
+  const homeDirectory = smokeHome ?? os.homedir();
+  const options = await loadDesktopOptions(launchArguments, {
+    homeDirectory,
+    environment: process.env,
+  });
 
-  await startDesktopHost(
+  const smokeReadyFile = process.env.KEPOS_WINDOWS_SMOKE_READY_FILE;
+  const smokeQuitFile = process.env.KEPOS_WINDOWS_SMOKE_QUIT_FILE;
+  const running = await startDesktopHost(
     { homeDirectory, ...options },
     {
       ...defaultDesktopHostDependencies,
@@ -37,10 +55,23 @@ async function main(): Promise<void> {
         const timer = setInterval(callback, 500);
         return () => clearInterval(timer);
       },
-      exit: (code) => Bare.exit(code),
+      exit: (code) => {
+        if (smokeQuitFile) {
+          try {
+            writeFileSync(smokeQuitFile, "KEPOS_DESKTOP_QUIT\n");
+          } catch {
+            // The process exit code remains the authoritative smoke result.
+          }
+        }
+        Bare.exit(code);
+      },
     },
   );
   console.log("KEPOS_DESKTOP_READY");
+  if (smokeReadyFile) await writeFile(smokeReadyFile, "KEPOS_DESKTOP_READY\n");
+  if (smokeTest) {
+    setTimeout(() => void running.shutdown(), 100);
+  }
 }
 
 try {

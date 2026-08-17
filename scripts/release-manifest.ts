@@ -19,7 +19,8 @@ export interface ReleaseArtifactPaths {
   repository: string;
   directory: string;
   apk: string;
-  zip: string;
+  macosZip: string;
+  windowsZip: string;
   manifest: string;
   signature: string;
   publicKey: string;
@@ -57,7 +58,8 @@ export function releaseArtifactPaths(options: {
     repository: options.repository,
     directory,
     apk: path.join(directory, version.androidArtifactName),
-    zip: path.join(directory, version.macosArtifactName),
+    macosZip: path.join(directory, version.macosArtifactName),
+    windowsZip: path.join(directory, version.windowsArtifactName),
     manifest: path.join(directory, version.checksumName),
     signature: path.join(directory, version.checksumSignatureName),
     publicKey: path.join(options.repository, "release/minisign.pub"),
@@ -70,8 +72,8 @@ export async function validateReleaseArtifacts(
 ): Promise<void> {
   const expected =
     phase === "source"
-      ? [paths.apk, paths.zip]
-      : [paths.apk, paths.zip, paths.manifest, paths.signature];
+      ? [paths.apk, paths.macosZip, paths.windowsZip]
+      : [paths.apk, paths.macosZip, paths.windowsZip, paths.manifest, paths.signature];
   let entries: string[];
   try {
     entries = await readdir(paths.directory);
@@ -113,7 +115,7 @@ export async function createReleaseManifest(
   ]);
 
   try {
-    const artifacts = [paths.apk, paths.zip].sort((left, right) =>
+    const artifacts = [paths.apk, paths.macosZip, paths.windowsZip].sort((left, right) =>
       path.basename(left).localeCompare(path.basename(right), "en"),
     );
     const checksums = await Promise.all(
@@ -167,11 +169,12 @@ export async function verifyChecksumManifest(
   const manifest = await readFile(paths.manifest, "utf8");
   const expected = new Map([
     [path.basename(paths.apk), paths.apk],
-    [path.basename(paths.zip), paths.zip],
+    [path.basename(paths.macosZip), paths.macosZip],
+    [path.basename(paths.windowsZip), paths.windowsZip],
   ]);
   const lines = manifest.trimEnd().split("\n");
   if (lines.length !== expected.size) {
-    throw new Error("SHA256SUMS must cover exactly the APK and ZIP");
+    throw new Error("SHA256SUMS must cover exactly the three platform artifacts");
   }
   for (const line of lines) {
     const match = /^([0-9a-f]{64})  ([^/]+)$/.exec(line);
