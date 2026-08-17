@@ -1,4 +1,5 @@
 import process from "node:process";
+import os from "node:os";
 import { Tray, WebView, Window } from "bare-native";
 
 import {
@@ -9,14 +10,10 @@ import {
 } from "./host.js";
 import type { DesktopTray } from "./tray.js";
 import { loadDesktopOptions } from "./options.js";
-import {
-  desktopLaunchArguments,
-  terminateDesktopBeforeWindow,
-} from "./process.js";
+import { desktopLaunchArguments } from "./process.js";
 
 async function main(): Promise<void> {
-  const homeDirectory = process.env.HOME;
-  if (!homeDirectory) throw new Error("HOME is required to run Kepos desktop");
+  const homeDirectory = os.homedir();
   const options = await loadDesktopOptions(
     desktopLaunchArguments(process.argv),
     {
@@ -35,10 +32,7 @@ async function main(): Promise<void> {
         }) as DesktopNativeWindow,
       createWebView: () => new WebView() as DesktopNativeWebView,
       createTray: () =>
-        new Tray({
-          systemImageName: "network",
-          accessibilityDescription: "Kepos",
-        }) as DesktopTray,
+        new Tray({ accessibilityDescription: "Kepos" }) as DesktopTray,
       schedulePoll: (callback) => {
         const timer = setInterval(callback, 500);
         return () => clearInterval(timer);
@@ -53,5 +47,5 @@ try {
   await main();
 } catch (error) {
   console.error(error);
-  terminateDesktopBeforeWindow(process);
+  Bare.exit(1);
 }

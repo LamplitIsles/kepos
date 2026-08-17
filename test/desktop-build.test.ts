@@ -10,7 +10,11 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { desktopAppBundle, desktopBuildCommands } from "../scripts/build-desktop.js";
+import {
+  desktopAppBundle,
+  desktopBuildCommands,
+  desktopBuildPlan,
+} from "../scripts/build-desktop.js";
 import {
   desktopInstallPath,
   quitRunningDesktop,
@@ -220,6 +224,42 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
       ],
     },
   ]);
+});
+
+test("desktop Windows plan builds WinUI, embeds metadata, and links native shims", () => {
+  const repository = "/checkout";
+  const commands = desktopBuildPlan("win32-x64").commands(repository, {
+    node: "C:\\tools\\node.exe",
+    npm: "C:\\tools\\npm.cmd",
+  });
+  const makeGenerate = commands.find(
+    ({ command, arguments: arguments_ }) =>
+      command === "bare-make" && arguments_.includes("generate"),
+  );
+  const bareBuild = commands.find(({ command }) => command === "bare-build");
+  const links = commands.filter(({ command }) => command === "bare-link");
+
+  assert.ok(makeGenerate?.arguments.includes("--platform"));
+  assert.ok(makeGenerate?.arguments.includes("win32"));
+  assert.ok(makeGenerate?.arguments.includes("--arch"));
+  assert.ok(makeGenerate?.arguments.includes("x64"));
+  assert.ok(
+    bareBuild?.arguments.includes(
+      path.join(repository, "apps", "desktop", "assets", "Kepos.ico"),
+    ),
+  );
+  assert.ok(bareBuild?.arguments.includes("--package"));
+  assert.ok(bareBuild?.arguments.includes("--description"));
+  assert.ok(
+    links.some(({ arguments: arguments_ }) =>
+      arguments_.some((argument) => argument.endsWith("bare-win-ui")),
+    ),
+  );
+  assert.ok(
+    links.some(({ arguments: arguments_ }) =>
+      arguments_.some((argument) => argument.endsWith("bare-process")),
+    ),
+  );
 });
 
 test("desktop output is ignored without ignoring desktop source", async () => {

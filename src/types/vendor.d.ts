@@ -60,10 +60,7 @@ declare module "bare-native" {
   }
 
   export class Tray extends EventEmitter {
-    constructor(options: {
-      systemImageName: string;
-      accessibilityDescription?: string;
-    });
+    constructor(options?: { accessibilityDescription?: string });
     addItem(id: string, title: string, options?: { enabled?: boolean }): this;
     addSeparator(): this;
     updateItem(

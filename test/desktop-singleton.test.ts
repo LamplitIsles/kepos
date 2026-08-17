@@ -9,6 +9,17 @@ import {
   desktopSingletonLockPath,
 } from "../apps/desktop/src/singleton.js";
 
+test("desktop singleton follows Windows local application state", () => {
+  assert.equal(
+    desktopSingletonLockPath(
+      "C:\\Users\\test",
+      { LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local" },
+      "win32",
+    ),
+    "C:\\Users\\test\\AppData\\Local\\Kepos\\state\\desktop.runtime.lock",
+  );
+});
+
 test("desktop singleton uses one machine-local lock independent of subscriber state", async () => {
   const homeDirectory = await mkdtemp(
     path.join(tmpdir(), "kepos-desktop-home-"),
