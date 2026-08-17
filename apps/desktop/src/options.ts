@@ -6,7 +6,7 @@ import {
 } from "../../../src/app-config.js";
 import {
   defaultKeposConfigPath,
-  defaultKeposStateRoot,
+  defaultKeposRoleStatePath,
 } from "../../../src/platform/paths.js";
 import type { DhtAddress } from "../../../src/mux/hyperdht.js";
 import type { Route } from "../../../src/mux/route.js";
@@ -151,11 +151,6 @@ export function parseDesktopOptions(
 }
 
 function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
-  const stateRoot = defaultKeposStateRoot(
-    context.environment,
-    context.homeDirectory,
-    context.platform,
-  );
   const bootstrap = context.config?.network?.bootstrap;
   const publisherConfig = context.config?.publisher;
   const subscriberConfig = context.config?.subscriber;
@@ -164,7 +159,12 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
     ...(publisherConfig?.enabled === true
       ? {
           publisher: {
-            stateDir: path.join(stateRoot, "publisher"),
+            stateDir: defaultKeposRoleStatePath(
+              "publisher",
+              context.environment,
+              context.homeDirectory,
+              context.platform,
+            ),
             ...(context.configPath ? { configPath: context.configPath } : {}),
             policy: {
               displayName: publisherConfig.displayName,
@@ -177,7 +177,12 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
     ...(subscriberConfig?.enabled === true
       ? {
           subscriber: {
-            stateDir: path.join(stateRoot, "subscriber"),
+            stateDir: defaultKeposRoleStatePath(
+              "subscriber",
+              context.environment,
+              context.homeDirectory,
+              context.platform,
+            ),
             gatewayPort: subscriberConfig.gatewayPort ?? 17_480,
             ...(subscriberConfig.gatewayHost
               ? { gatewayHost: subscriberConfig.gatewayHost }
