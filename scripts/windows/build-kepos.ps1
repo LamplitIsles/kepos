@@ -124,13 +124,13 @@ try {
 
   $existingSubst = Get-SubstTarget
   if ($null -ne $existingSubst) {
-    if ((Get-CanonicalPath $existingSubst) -ne $Repository) {
+    if ((Get-CanonicalPath $existingSubst) -ne $RunDirectory) {
       throw "K: is already mapped to a different path: $existingSubst"
     }
     # An exact pre-existing mapping is safe to use and to remove in finally;
     # conflicting mappings are rejected before this flag is set.
     $DriveCreated = $true
-    Write-Host "Reusing existing K: mapping for $Repository"
+    Write-Host "Reusing existing K: mapping for $RunDirectory"
   } else {
     $existingDrive = Get-PSDrive -Name K -ErrorAction SilentlyContinue
     if ($null -ne $existingDrive) {
@@ -139,7 +139,7 @@ try {
     # Mark this before invoking subst so a partially successful command is
     # still inspected and cleaned up by finally.
     $DriveCreated = $true
-    $mountOutput = @(& subst.exe K: $Repository 2>&1)
+    $mountOutput = @(& subst.exe K: $RunDirectory 2>&1)
     $mountCode = $LASTEXITCODE
     if ($mountCode -ne 0) {
       $details = ($mountOutput -join ' ').Trim()
@@ -149,22 +149,22 @@ try {
       throw "Failed to map K: to $Repository with exit code ${mountCode}: $details"
     }
     $mappedAfterMount = Get-SubstTarget
-    if ($null -eq $mappedAfterMount -or (Get-CanonicalPath $mappedAfterMount) -ne $Repository) {
+    if ($null -eq $mappedAfterMount -or (Get-CanonicalPath $mappedAfterMount) -ne $RunDirectory) {
       throw "K: did not resolve to the owned repository after mapping"
     }
-    Write-Host "Mapped K: to $Repository"
+    Write-Host "Mapped K: to $RunDirectory"
   }
 
   # All npm, CMake, Bare, and native sample paths below use this short alias.
-  $BuildRepository = 'K:\'
+  $BuildRepository = 'K:\source'
   Set-Location -LiteralPath $BuildRepository
   $NativeCheck = Join-Path $BuildRepository '.build\windows-native-check'
   $CanonicalNativeCheck = Join-Path $Repository '.build\windows-native-check'
-  $NativeBuildRoot = Join-Path $RunDirectory 'b'
-  Assert-OwnedPath $RunDirectory $NativeBuildRoot 'native build root'
-  if (Test-Path -LiteralPath $NativeBuildRoot) { Remove-Item -LiteralPath $NativeBuildRoot -Recurse -Force }
-  New-Item -ItemType Directory -Path $NativeBuildRoot -Force | Out-Null
-  $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT = $NativeBuildRoot
+  $CanonicalNativeBuildRoot = Join-Path $RunDirectory 'b'
+  Assert-OwnedPath $RunDirectory $CanonicalNativeBuildRoot 'native build root'
+  if (Test-Path -LiteralPath $CanonicalNativeBuildRoot) { Remove-Item -LiteralPath $CanonicalNativeBuildRoot -Recurse -Force }
+  New-Item -ItemType Directory -Path $CanonicalNativeBuildRoot -Force | Out-Null
+  $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT = 'K:\b'
   Assert-OwnedPath $Repository $CanonicalNativeCheck 'native check output'
   if (Test-Path -LiteralPath $NativeCheck) { Remove-Item -LiteralPath $NativeCheck -Recurse -Force }
 
@@ -266,7 +266,7 @@ try {
 
   if ($DriveCreated) {
     try {
-      Remove-OwnedSubst $Repository
+      Remove-OwnedSubst $RunDirectory
     } catch {
       $CleanupFailed = $true
       [Console]::Error.WriteLine("K: cleanup failed: $($_.Exception.Message)")
