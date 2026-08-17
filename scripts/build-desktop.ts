@@ -111,6 +111,20 @@ function commonBareBuild(
   };
 }
 
+function typescriptBuildCommands(): DesktopBuildCommand[] {
+  return [
+    {
+      command: "tsc",
+      arguments: [
+        "-b",
+        "packages/bare-host-protocol",
+        "packages/kepos-android-worklet",
+      ],
+    },
+    { command: "tsc", arguments: ["-p", "tsconfig.desktop.json"] },
+  ];
+}
+
 function darwinPlan(
   repository: string,
   tools: DesktopBuildTools,
@@ -165,7 +179,7 @@ function darwinPlan(
     },
   ];
   return [
-    { command: "tsc", arguments: ["-p", "tsconfig.desktop.json"] },
+    ...typescriptBuildCommands(),
     ...make(appKit, appKitBuild, true),
     ...make(webKit, webKitBuild, true),
     commonBareBuild(repository, "darwin-arm64", tools),
@@ -187,7 +201,7 @@ function windowsPlan(
   const winUi = sourcePath(repository, "bare-win-ui");
   const winUiBuild = path.join(winUi, "build");
   return [
-    { command: "tsc", arguments: ["-p", "tsconfig.desktop.json"] },
+    ...typescriptBuildCommands(),
     {
       command: "bare-make",
       arguments: [
