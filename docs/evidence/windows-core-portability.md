@@ -1,55 +1,88 @@
 # Windows core portability evidence
 
 This document records Specification 1 verification. It contains no user state,
-credentials, identities, or private network addresses.
+credentials, identities, seeds, private keys, or public network addresses.
 
 ## Local checks
 
-From the Kepos repository, using test-owned temporary directories:
+The target worktree was checked with the repository's required Node toolchain:
 
 ```text
-mise exec -- npm run build:packages
-mise exec -- npm run typecheck
-mise exec -- npm run desktop:typecheck
-mise exec -- node --import tsx --test test/app-config.test.ts test/state.test.ts test/runtime-lock.test.ts test/cli.test.ts test/desktop-options.test.ts
-mise exec -- npm run desktop:check
+mise exec -- node --version  -> v24.18.1
+mise exec -- npm --version   -> 11.16.0
+mise exec -- npm run check   -> PASS
+mise exec -- node --import tsx --test test/app-config.test.ts test/state.test.ts test/runtime-lock.test.ts test/cli.test.ts
+  -> 49/49 passed
 ```
 
-All listed local commands passed. The targeted suite passed 59 tests and the
-desktop suite passed 100 tests. The tests cover Windows AppData path resolution,
-complete-file replacement and failure preservation, state
-identity/configuration updates, runtime-lock contention and stale-owner recovery,
-and CLI shutdown handling.
-These local results are not Windows-native acceptance evidence.
+`npm run check` passed package builds, TypeScript checks, desktop checks, core
+coverage/tests, and web verification. Its complete core suite passed 380/380.
+The web suite passed 16/16, and the web check and build passed. These checks
+were run from the LF-materialized checkout.
 
-## Designated host preflight
+## Windows-native acceptance
 
-The read-only version probe was run through the WSL control entrypoint:
+The designated Windows checkout was run with the pinned native binaries:
 
 ```text
-ssh nuc-kep '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command "node --version; npm --version"'
+C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\node.exe --version -> v24.18.1
+C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\node.exe C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\node_modules\npm\bin\npm-cli.js --version -> 11.16.0
 ```
 
-Observed output:
+The direct CLI tracer was created in a new test-owned directory under
+`%LOCALAPPDATA%\Temp`, executed with the native `win32` Node binary, and
+removed in its `finally` cleanup. The invocation used the equivalent of:
 
 ```text
-v22.20.0
-10.9.3
+cd C:\Users\white\.local\kepos-build\repo-final
+C:\Users\white\.local\kepos-tools\node-v24.18.1-win-x64\node.exe C:\Users\white\AppData\Local\Temp\<test-owned-script>\tracer.mjs
 ```
 
-The host was not provisioned or mutated. Specification 1 requires Windows Node
-24 and npm 11, so the native acceptance run was not started. A later read-only
-probe ended with the SSH connection closing, before MSVC/CMake availability
-could be recorded.
+Its generated publisher/subscriber state was
+also under a new tracer-owned temporary directory and was removed. The fixture
+and subscriber service used ephemeral loopback ports only.
 
-## Unmet native acceptance evidence
+The tracer exercised this sequence:
 
-The following Windows-host checks remain unverified because the designated host
-still has the wrong toolchain and no repository-authorized provisioning path was
-available:
+1. Created publisher and subscriber identities with the CLI, without recording
+   either identity.
+2. Exposed a loopback TCP fixture through a publisher `fixture` service and a
+   subscriber local service.
+3. Confirmed the deny-all publisher policy produced no transferred bytes.
+4. Confirmed publisher and subscriber conflicting runtime ownership failed with
+   the expected lock errors.
+5. Updated the publisher allowlist with `publisher set-allow`, terminated the
+   publisher, observed its stale lock, and restarted it.
+6. Confirmed the publisher identity stayed stable across restart and the
+   subscriber transferred 42 observable bytes with matching fixture response.
 
-- Node 24/npm 11 installation and dependency installation on Windows.
-- Windows-native targeted tests.
-- Publisher/subscriber identity creation and Windows-loopback TCP fixture.
-- Config and allowlist update followed by restart.
-- Bounded conflicting-owner failure, clean stop, restart, and stale-lock proof.
+Sanitized tracer result:
+
+```json
+{
+  "node": "v24.18.1",
+  "platform": "win32",
+  "fixture": "127.0.0.1",
+  "deniedBeforeAllowlistUpdate": true,
+  "publisherLockConflict": true,
+  "subscriberLockConflict": true,
+  "publisherIdentityStableAcrossRestart": true,
+  "stalePublisherLockObservedBeforeRestart": true,
+  "stalePublisherLockRecoveredOnRestart": true,
+  "transferredBytes": 42,
+  "requestDigest": "b9587ac2558f03c0",
+  "responseDigest": "1c5e114ded4ed9c6"
+}
+```
+
+The tracer temporary root was absent after the run. The Windows checkout had
+pre-existing unrelated working-tree entries; they were not changed or cleaned
+by this acceptance run.
+
+## Bounded limitations
+
+- This is a same-host Windows-loopback acceptance run. It does not establish
+  NAT traversal, relay behavior, restricted-network quality, or production
+  readiness.
+- The tracer validates CLI policy, runtime-lock ownership/recovery, and byte
+  transfer. It does not replace the full native test, web, or release checks.
