@@ -9,12 +9,14 @@ export async function waitForSignal(
       stopping.then(resolve, reject);
     };
   });
-  process.once("SIGINT", requestStop);
-  process.once("SIGTERM", requestStop);
+  const signals =
+    process.platform === "win32"
+      ? (["SIGINT", "SIGTERM", "SIGBREAK"] as const)
+      : (["SIGINT", "SIGTERM"] as const);
+  for (const signal of signals) process.once(signal, requestStop);
   try {
     await stopped;
   } finally {
-    process.off("SIGINT", requestStop);
-    process.off("SIGTERM", requestStop);
+    for (const signal of signals) process.off(signal, requestStop);
   }
 }

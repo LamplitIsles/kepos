@@ -1,18 +1,29 @@
 import path from "node:path";
 
 import {
-  defaultKeposConfigPath,
   loadKeposConfig,
+  saveKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
+import { ensureDesktopBootstrap } from "./bootstrap.js";
+import { defaultDesktopPaths } from "./paths.js";
+import { DEFAULT_GATEWAY_PORT } from "../../../src/home/gateway.js";
 import type { DhtAddress } from "../../../src/mux/hyperdht.js";
 import type { Route } from "../../../src/mux/route.js";
 import type { PublisherRuntimePolicy } from "../../../src/runtime/publisher.js";
 import type { SubscriberService } from "../../../src/runtime/subscriber.js";
+import { setupSubscriber } from "../../../src/state/subscriber.js";
+
+export interface DesktopSubscriberSetup {
+  configured: boolean;
+  publicKey: string;
+  error?: string;
+}
 
 export interface DesktopSubscriberOptions {
   stateDir: string;
   gatewayPort: number;
+  subscriberSetup?: DesktopSubscriberSetup;
   gatewayHost?: string;
   gatewayDomain?: string;
   route?: Route;
@@ -36,12 +47,16 @@ export interface DesktopConfigContext {
   config?: KeposConfig;
   environment?: Record<string, string | undefined>;
   configPath?: string;
+  platform?: NodeJS.Platform;
 }
 
 export interface LoadDesktopOptionsContext {
   homeDirectory: string;
   environment?: NodeJS.ProcessEnv;
   loadConfig?: typeof loadKeposConfig;
+  saveConfig?: typeof saveKeposConfig;
+  setupSubscriber?: typeof setupSubscriber;
+  platform?: NodeJS.Platform;
 }
 
 export async function loadDesktopOptions(
@@ -55,20 +70,41 @@ export async function loadDesktopOptions(
   if (configOption && arguments_.length !== 2) {
     throw new Error("--config requires exactly one path");
   }
-  const configPath = configOption ? arguments_[1] : undefined;
-  const config = await (context.loadConfig ?? loadKeposConfig)(
-    configPath,
-    context.environment,
-    context.homeDirectory,
-  );
-  return parseDesktopOptions([], {
+  if (configOption) {
+    const configPath = arguments_[1];
+    const config = await (context.loadConfig ?? loadKeposConfig)(
+      configPath,
+      context.environment,
+      context.homeDirectory,
+      context.platform,
+    );
+    return parseDesktopOptions([], {
+      homeDirectory: context.homeDirectory,
+      environment: context.environment,
+      config,
+      configPath,
+      platform: context.platform,
+    });
+  }
+
+  const bootstrapped = await ensureDesktopBootstrap(context);
+  const options = parseDesktopOptions([], {
     homeDirectory: context.homeDirectory,
     environment: context.environment,
-    config,
-    configPath:
-      configPath ??
-      defaultKeposConfigPath(context.environment, context.homeDirectory),
+    config: bootstrapped.config,
+    configPath: bootstrapped.configPath,
+    platform: context.platform,
   });
+  if (options.subscriber && bootstrapped.subscriber?.configured === false) {
+    options.subscriber = {
+      ...options.subscriber,
+      subscriberSetup: {
+        configured: false,
+        publicKey: bootstrapped.subscriber.publicKey,
+      },
+    };
+  }
+  return options;
 }
 
 export function parseDesktopOptions(
@@ -132,7 +168,7 @@ export function parseDesktopOptions(
       ? {
           subscriber: {
             stateDir: subscriberStateDir,
-            gatewayPort: 17_480,
+            gatewayPort: DEFAULT_GATEWAY_PORT,
             services,
           },
         }
@@ -141,10 +177,7 @@ export function parseDesktopOptions(
 }
 
 function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
-  const stateHome =
-    context.environment?.XDG_STATE_HOME ||
-    path.join(context.homeDirectory, ".local", "state");
-  const stateRoot = path.join(stateHome, "kepos-neo");
+  const paths = defaultDesktopPaths(context);
   const bootstrap = context.config?.network?.bootstrap;
   const publisherConfig = context.config?.publisher;
   const subscriberConfig = context.config?.subscriber;
@@ -153,7 +186,7 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
     ...(publisherConfig?.enabled === true
       ? {
           publisher: {
-            stateDir: path.join(stateRoot, "publisher"),
+            stateDir: paths.publisherStateDir,
             ...(context.configPath ? { configPath: context.configPath } : {}),
             policy: {
               displayName: publisherConfig.displayName,
@@ -166,8 +199,8 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
     ...(subscriberConfig?.enabled === true
       ? {
           subscriber: {
-            stateDir: path.join(stateRoot, "subscriber"),
-            gatewayPort: subscriberConfig.gatewayPort ?? 17_480,
+            stateDir: paths.subscriberStateDir,
+            gatewayPort: subscriberConfig.gatewayPort ?? DEFAULT_GATEWAY_PORT,
             ...(subscriberConfig.gatewayHost
               ? { gatewayHost: subscriberConfig.gatewayHost }
               : {}),

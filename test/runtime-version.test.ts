@@ -30,7 +30,7 @@ test("package metadata owns the supported runtime and canonical checks", async (
     },
   });
   assert.equal(packageJson.packageManager, "npm@11.16.0");
-  assert.equal(await readFile(".node-version", "utf8"), "24.18.1\n");
+  assert.equal((await readFile(".node-version", "utf8")).trim(), "24.18.1");
   assert.deepEqual(packageJson.allowScripts, {
     "esbuild@0.28.1": true,
     "lefthook@2.1.10": true,

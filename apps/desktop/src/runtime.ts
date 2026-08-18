@@ -37,6 +37,7 @@ import type {
   DesktopSubscriberRole,
 } from "./protocol.js";
 import { persistDesktopPublisherAllowlist } from "./config.js";
+import type { DesktopSubscriberSetup } from "./options.js";
 
 export interface StartDesktopPublisherOptions {
   stateDir: string;
@@ -53,6 +54,7 @@ export interface StartDesktopSubscriberOptions {
   services: StartSubscriberOptions["services"];
   lock?: RuntimeLock;
   route?: StartSubscriberOptions["route"];
+  subscriberSetup?: DesktopSubscriberSetup;
 }
 
 export interface StartDesktopRuntimeOptions {
@@ -240,6 +242,19 @@ export async function startDesktopRuntime(
       subscriberLock ??= await dependencies.acquireSubscriberLock(
         currentOptions.stateDir,
       );
+      if (currentOptions.subscriberSetup?.configured === false) {
+        preparedSubscriberRole = {
+          ...initialSubscriberRole(),
+          phase: "running",
+          connection: "unconfigured",
+          subscriberKey: currentOptions.subscriberSetup.publicKey,
+          gatewayPort: currentOptions.gatewayPort,
+          ...(currentOptions.subscriberSetup.error
+            ? { error: currentOptions.subscriberSetup.error }
+            : {}),
+        };
+        return;
+      }
       const { contact, identity } =
         await dependencies.loadSubscriberConnectionState(
           currentOptions.stateDir,
@@ -298,6 +313,9 @@ export async function startDesktopRuntime(
     try {
       await prepareSubscriberRole();
       subscriberRole = preparedSubscriberRole ?? subscriberRole;
+      if (subscriberOptions.subscriberSetup?.configured === false) {
+        return { ok: true };
+      }
       runningSubscriber = await dependencies.startSubscriber({
         stateDir: subscriberOptions.stateDir,
         gatewayPort: subscriberOptions.gatewayPort,

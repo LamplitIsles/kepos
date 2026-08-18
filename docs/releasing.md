@@ -1,128 +1,174 @@
 # Release and artifact verification
 
-Kepos publishes an arm64 Android APK and an Apple Silicon macOS ZIP outside
-the app stores. Android uses one long-lived release certificate. The macOS app
-is ad-hoc signed and **Not notarized** by Apple. A minisign signature over the
-checksum manifest authenticates both files.
+Kepos publishes three direct-download binaries for a release: an arm64
+Android APK, an Apple Silicon macOS ZIP, and a Windows 11 x64 portable ZIP.
+`SHA256SUMS` covers exactly those three files and
+`SHA256SUMS.minisig` authenticates that manifest. Android uses the long-lived
+release certificate. macOS is ad-hoc signed and **not notarized**. Windows is
+not Authenticode-signed.
 
 ## Maintainer runbook
 
-Release only from the designated release Mac. Keep the Android JKS and
-minisign secret key outside the repository. Keep their passwords in Keychain
-or a password manager, never in a command argument, tracked file, or shell
-history.
+Formal release work runs on the designated release Mac. Windows compilation
+runs manually on the designated NUC through `nuc-kep`; WSL is only the control
+plane. Keep the Android JKS and minisign secret key outside the repository and
+keep passwords in Keychain or a password manager.
 
-1. Start from a clean, current `main` and run all checks:
+### 1. Candidate and checks
 
-   ```sh
-   npm ci
-   npm run check
-   npm run android:check
-   npm run desktop:check
-   ```
+Start from a clean, current `main`. Normal synchronization uses `og pull`; do
+not use it for tags, release drafts, asset uploads, or publication.
 
-2. Create one annotated tag for the exact checked commit and push only that
-   tag. Do not move or delete a published tag.
+```sh
+npm ci
+npm run check
+npm run android:check
+npm run desktop:check
+```
 
-   ```sh
-   git tag -a v0.1.0 -m "v0.1.0"
-   git push origin v0.1.0
-   ```
+The candidate commit must remain clean for every release command. Confirm the
+requested version is new and that the local and remote tag do not already
+exist. Windows uses the exact command in the next section; it rejects a dirty
+worktree and, for a formal release, an unannotated or mismatched tag.
 
-3. Load the Android keystore path, alias, and password into the current shell
-   from local secret storage. Use absolute paths. Then build both artifacts.
-   The minisign command prompts for its key password in the terminal.
+### 2. Build the exact tagged artifacts
 
-   ```sh
-   npm run release:android -- v0.1.0
-   npm run release:macos -- v0.1.0
-   export KEPOS_MINISIGN_SECRET_KEY="/absolute/path/outside/the/repository/minisign.key"
-   npm run release:manifest -- v0.1.0
-   unset KEPOS_ANDROID_KEYSTORE KEPOS_ANDROID_KEY_ALIAS KEPOS_ANDROID_KEY_PASSWORD KEPOS_MINISIGN_SECRET_KEY
-   ```
+Create and inspect one annotated tag only after the checks pass:
 
-4. Install the APK on a clean Android device, then repeat with
-   `adb install -r`. Extract the Mac ZIP in a temporary directory, run the
-   verification commands below, launch Kepos, and check the tray plus basic
-   publisher/subscriber behavior.
+```sh
+git tag -a v0.1.0 -m "v0.1.0"
+git show-ref --dereference refs/tags/v0.1.0
+git push origin v0.1.0
+```
 
-5. Create a draft from the four fixed assets. The script requires an existing
-   remote annotated tag that resolves to local `HEAD`; it cannot create a tag,
-   replace an asset, or publish the release.
+Load Android keystore path, alias, and password from local secret storage.
+Never put passwords in arguments, tracked files, logs, or shell history. Build
+Android and macOS, then run the Windows build from the release Mac:
 
-   ```sh
-   npm run release:draft -- v0.1.0
-   gh release view v0.1.0 --json tagName,targetCommitish,isDraft,assets
-   ```
+```sh
+npm run release:android -- v0.1.0
+npm run release:macos -- v0.1.0
+WINDOWS_USER=kepos npm run release:windows -- v0.1.0
+unset KEPOS_ANDROID_KEYSTORE KEPOS_ANDROID_KEY_ALIAS KEPOS_ANDROID_KEY_PASSWORD
+```
 
-6. Inspect the target commit, draft status, four names, and sizes. Publish only
-   after that check:
+`release:windows` transfers only the tracked source snapshot to `nuc-kep`,
+invokes `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`,
+builds in the NTFS `C:\kb` workspace, and copies back only the verified
+`kepos-windows-x64.zip`. The ZIP has one top-level `Kepos` directory:
+`AppxManifest.xml` and `Assets\Logo.ico` are beside `App\Kepos.exe` and its
+explicitly allowlisted runtime files. The remote side resolves the annotated
+tag against the release Mac `HEAD`, validates the exact layout and x64 PE
+architecture, extracts into fresh test-owned directories, provisions valid
+publisher state, and launches with test-owned state for a bounded healthy
+role/runtime snapshot followed by clean Quit. Failed runs retain logs under
+`dist/windows/<run-id>/logs` but remove partial publishable ZIPs.
 
-   ```sh
-   gh release edit v0.1.0 --draft=false --verify-tag
-   ```
+For a no-tag local rehearsal, use the isolated path:
 
-If any formal build or verification fails after the tag is pushed, fix it in a
-new pull request and release a new version. Do not replace the tag or assets.
+```sh
+WINDOWS_USER=kepos npm run release:windows -- v0.1.0 --rehearsal
+```
 
-Pull-request checks use `--rehearsal`. Rehearsal files live under
-`dist/release/rehearsal-vX.Y.Z/` and the publisher always rejects them.
+Rehearsal files are under `dist/release/rehearsal-v0.1.0/`; they are never
+accepted by the publisher.
+
+### 3. Manifest and independent verification
+
+After `kepos-android-arm64.apk`, `kepos-macos-arm64.zip`, and
+`kepos-windows-x64.zip` exist in the same formal or rehearsal directory:
+
+```sh
+export KEPOS_MINISIGN_SECRET_KEY="/absolute/path/outside/repository/minisign.key"
+npm run release:manifest -- v0.1.0
+unset KEPOS_MINISIGN_SECRET_KEY
+```
+
+The command refuses missing, extra, empty, symlinked, or pre-existing output;
+writes exactly the three binary names to `SHA256SUMS`; verifies every digest;
+and verifies the minisign signature before returning success. It must run on
+the designated release Mac. Never copy a signature from another rehearsal.
+
+### 4. Smoke and draft gate
+
+Verify downloaded-style copies before drafting. On macOS:
+
+```sh
+minisign -Vm dist/release/v0.1.0/SHA256SUMS \
+  -x dist/release/v0.1.0/SHA256SUMS.minisig -p release/minisign.pub
+shasum -a 256 -c dist/release/v0.1.0/SHA256SUMS
+codesign --verify --deep --strict --verbose=4 /path/to/extracted/Kepos.app
+# Only for this exact verified app if macOS applies quarantine:
+xattr -dr com.apple.quarantine /Applications/Kepos.app
+```
+
+Run the Windows extraction and tray lifecycle smoke from
+[the Windows guide](platforms/windows.md). Install the Android APK on a clean
+test device and repeat with `adb install -r`; do not uninstall a real app or
+erase pairing state. Before installation, compare its signing certificate with
+the recorded public fingerprint:
+
+```sh
+actual=$(apksigner verify --verbose --print-certs \
+  dist/release/v0.1.0/kepos-android-arm64.apk | \
+  awk -F: '/Signer #1 certificate SHA-256 digest/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }')
+test "$actual" = "$(cat release/android-certificate.sha256)"
+```
+
+Stop if the digest differs.
+
+The draft must contain exactly these five assets: `kepos-android-arm64.apk`,
+`kepos-macos-arm64.zip`, `kepos-windows-x64.zip`, `SHA256SUMS`, and
+`SHA256SUMS.minisig`.
+
+```sh
+npm run release:draft -- v0.1.0
+gh release view v0.1.0 --json tagName,targetCommitish,isDraft,assets
+```
+
+The script requires the existing remote annotated tag to peel to local `HEAD`,
+verifies the minisign signature and all three checksums, rejects rehearsal
+paths, existing releases, replacement flags, and publication. Inspect names,
+sizes, and digests before publishing. A draft is not a publication.
+
+### 5. Publication
+
+Only after the candidate, host, checks, artifact, manifest, smoke, and draft
+gates pass:
+
+```sh
+gh release edit v0.1.0 --draft=false --verify-tag
+gh release view v0.1.0 --json tagName,targetCommitish,isDraft,publishedAt,assets
+```
+
+Confirm `isDraft=false`, the tagged target commit, and five public download
+URLs. Merging a pull request, creating a tag, or making a draft does not
+deploy or publish a release.
 
 ## Verify a downloaded release
 
-Download the APK, ZIP, `SHA256SUMS`, and `SHA256SUMS.minisig` from one release.
-Get `release/minisign.pub` from the same Kepos source tag. In that download
-directory, verify the publisher signature before trusting the checksums:
+Download all five assets from one release and get `release/minisign.pub` from
+the same source tag. Verify the publisher signature before trusting checksums:
 
 ```sh
 minisign -Vm SHA256SUMS -x SHA256SUMS.minisig -p /path/to/minisign.pub
 shasum -a 256 -c SHA256SUMS
 ```
 
-Stop if either command fails.
+Stop if either command fails. Then use the platform-specific install and
+lifecycle guidance in `docs/platforms/android.md`, `docs/platforms/macos.md`,
+and `docs/platforms/windows.md`.
 
-### Android
+## Recovery and failure
 
-The APK supports Android 12 or newer on `arm64-v8a`. Its signing certificate
-SHA-256 fingerprint is recorded in `release/android-certificate.sha256`. You
-can compare it with:
-
-```sh
-apksigner verify --verbose --print-certs kepos-android-arm64-v0.1.0.apk
-```
-
-Install by sideloading the verified APK. Future Kepos APKs must use the same
-certificate to update this installation.
-
-### macOS
-
-The ZIP contains an Apple Silicon app. It is ad-hoc signed, which checks bundle
-integrity but does not give Gatekeeper an Apple-trusted publisher identity.
-It is **Not notarized**.
-
-After minisign and checksum verification, unzip it, move it to
-`/Applications/Kepos.app`, and check its structure:
-
-```sh
-codesign --verify --deep --strict --verbose=4 /Applications/Kepos.app
-codesign -dvvv /Applications/Kepos.app
-```
-
-If macOS blocks the verified app because it was downloaded from the internet,
-remove quarantine only from this exact app and launch it again:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/Kepos.app
-```
-
-## Key recovery
+If a formal build fails after its tag is pushed, leave that tag and any assets
+unchanged. Fix the cause in a new pull request and restart from a new patch
+version; never move, delete, force-update, or reuse a published tag. Keep
+failure logs for diagnosis, but do not record credentials or private-key
+material.
 
 The release Mac holds the working JKS and minisign secret key. The remote NUC
-holds only an age-encrypted recovery bundle; it is not an offline backup. Keep
-the age passphrase somewhere else.
-
-To recover, download the encrypted bundle to a fresh temporary directory on a
-trusted Mac, compare its recorded SHA-256, decrypt it there, and verify the
-Android certificate fingerprint and minisign public key before restoring the
-working files. Delete the temporary plaintext after the drill. Do not record
-the NUC hostname, passphrase, or real private-key paths in this repository.
+holds only an age-encrypted recovery bundle, not an offline backup. During a
+recovery drill, decrypt into a fresh temporary directory, compare the recorded
+SHA-256, verify the Android certificate fingerprint and minisign public key,
+restore only after those checks, and delete plaintext temporary files.

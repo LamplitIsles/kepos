@@ -17,6 +17,7 @@ test("desktop config writes desired state before applying it in memory", async (
 
   const options = await applyDesktopConfig(config, {
     homeDirectory: "/Users/neil",
+    platform: "linux",
     configPath: "/Users/neil/.config/kepos/config.toml",
     saveConfig: async (saved: unknown, configPath: string) => {
       assert.equal(saved, config);

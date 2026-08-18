@@ -69,6 +69,18 @@ export async function readStateJson(filePath: string): Promise<unknown> {
   }
 }
 
+export async function replaceFileAtomically(
+  sourcePath: string,
+  destinationPath: string,
+): Promise<void> {
+  // Node delegates rename to libuv. On Windows libuv uses
+  // MoveFileExW(..., MOVEFILE_REPLACE_EXISTING), so this single operation
+  // keeps the destination at either the old or the new complete file. Do not
+  // move the destination aside first: that creates a window with no final
+  // path and makes failure cleanup unsafe.
+  await rename(sourcePath, destinationPath);
+}
+
 export async function writeStateDirectoryAtomically(
   stateDir: string,
   files: ReadonlyMap<string, string>,
@@ -100,7 +112,7 @@ export async function writeStateFileAtomically(
   const finalPath = path.join(stateDir, fileName);
   try {
     await writeFile(temporaryPath, contents, { mode: 0o600 });
-    await rename(temporaryPath, finalPath);
+    await replaceFileAtomically(temporaryPath, finalPath);
     return finalPath;
   } finally {
     await rm(temporaryDir, { recursive: true, force: true });

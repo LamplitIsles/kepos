@@ -20,14 +20,16 @@ async function fixture(): Promise<{
   const directory = path.join(repository, "dist/release/v1.2.3");
   await mkdir(path.join(repository, "release"), { recursive: true });
   await mkdir(directory, { recursive: true });
-  const apkName = "kepos-android-arm64-v1.2.3.apk";
-  const zipName = "kepos-macos-arm64-v1.2.3.zip";
+  const apkName = "kepos-android-arm64.apk";
+  const zipName = "kepos-macos-arm64.zip";
+  const windowsZipName = "kepos-windows-x64.zip";
   await writeFile(path.join(directory, apkName), "apk");
   await writeFile(path.join(directory, zipName), "zip");
+  await writeFile(path.join(directory, windowsZipName), "windows zip");
   const hash = (value: string) => createHash("sha256").update(value).digest("hex");
   await writeFile(
     path.join(directory, "SHA256SUMS"),
-    `${hash("apk")}  ${apkName}\n${hash("zip")}  ${zipName}\n`,
+    `${hash("apk")}  ${apkName}\n${hash("zip")}  ${zipName}\n${hash("windows zip")}  ${windowsZipName}\n`,
   );
   await writeFile(path.join(directory, "SHA256SUMS.minisig"), "signature");
   await writeFile(path.join(repository, "release/minisign.pub"), "public key");
@@ -37,6 +39,7 @@ async function fixture(): Promise<{
     assets: [
       path.join(directory, apkName),
       path.join(directory, zipName),
+      path.join(directory, windowsZipName),
       path.join(directory, "SHA256SUMS"),
       path.join(directory, "SHA256SUMS.minisig"),
     ],
@@ -60,7 +63,7 @@ test("resolves only the dereferenced commit of an annotated remote tag", () => {
   );
 });
 
-test("verifies four fixed assets and creates only a GitHub draft", async () => {
+test("verifies five fixed assets and creates only a GitHub draft", async () => {
   const files = await fixture();
   const head = "a".repeat(40);
   const commands: Array<{ command: string; arguments: string[] }> = [];

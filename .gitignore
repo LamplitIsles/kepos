@@ -18,6 +18,7 @@ lcov.info
 *.local.json
 .build/
 dist/desktop/
+dist/windows/
 dist/release/
 apps/web/dist/
 apps/web/.wrangler/

@@ -2,11 +2,9 @@ import {
   mkdir,
   mkdtemp,
   readFile,
-  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import { parse, stringify } from "smol-toml";
@@ -27,6 +25,8 @@ import {
   parseBootstrapValues,
   parseSubscriberService,
 } from "./cli/options.js";
+import { defaultKeposConfigPath } from "./platform/paths.js";
+import { replaceFileAtomically } from "./state/files.js";
 
 export interface KeposConfig {
   network?: {
@@ -43,24 +43,17 @@ export interface KeposConfig {
   };
 }
 
-export function defaultKeposConfigPath(
-  environment: NodeJS.ProcessEnv = process.env,
-  homeDirectory = os.homedir(),
-): string {
-  const configHome =
-    environment.XDG_CONFIG_HOME || path.join(homeDirectory, ".config");
-  return path.join(configHome, "kepos", "config.toml");
-}
-
 export async function loadKeposConfig(
   configPath?: string,
   environment?: NodeJS.ProcessEnv,
   homeDirectory?: string,
+  platform?: NodeJS.Platform,
 ): Promise<KeposConfig | undefined> {
   const source = await readKeposConfigSource(
     configPath,
     environment,
     homeDirectory,
+    platform,
   );
   return source === undefined ? undefined : parseKeposConfig(source);
 }
@@ -86,9 +79,10 @@ async function readKeposConfigSource(
   configPath: string | undefined,
   environment: NodeJS.ProcessEnv | undefined,
   homeDirectory: string | undefined,
+  platform?: NodeJS.Platform,
 ): Promise<string | undefined> {
   const resolvedPath =
-    configPath ?? defaultKeposConfigPath(environment, homeDirectory);
+    configPath ?? defaultKeposConfigPath(environment, homeDirectory, platform);
   try {
     return await readFile(resolvedPath, "utf8");
   } catch (error) {
@@ -195,7 +189,7 @@ export async function saveKeposConfig(
   const temporaryPath = path.join(temporaryDirectory, "config.toml");
   try {
     await writeFile(temporaryPath, source, { flag: "wx", mode: 0o600 });
-    await rename(temporaryPath, configPath);
+    await replaceFileAtomically(temporaryPath, configPath);
   } finally {
     await rm(temporaryDirectory, { force: true, recursive: true });
   }

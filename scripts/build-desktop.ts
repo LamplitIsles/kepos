@@ -1,7 +1,11 @@
-import { readdir, rm } from "node:fs/promises";
+import { readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
+export type DesktopTarget = "darwin-arm64" | "win32-x64";
+
+const desktopTargets: readonly DesktopTarget[] = ["darwin-arm64", "win32-x64"];
 
 export interface DesktopBuildCommand {
   command: string;
@@ -13,38 +17,221 @@ export interface DesktopBuildTools {
   npm: string;
 }
 
+export interface DesktopBuildPlan {
+  readonly target: DesktopTarget;
+  readonly outputDirectory: (repository: string) => string;
+  readonly commands: (
+    repository: string,
+    tools: DesktopBuildTools,
+  ) => DesktopBuildCommand[];
+  readonly validate: (repository: string) => Promise<void>;
+}
+
+const defaultTools = (): DesktopBuildTools => ({
+  node: process.execPath,
+  npm:
+    process.platform === "win32"
+      ? path.join(path.dirname(process.execPath), "npm.cmd")
+      : (process.env.npm_execpath ??
+        path.join(path.dirname(process.execPath), "npm")),
+});
+
+export function desktopTargetForPlatform(
+  platform: NodeJS.Platform = process.platform,
+  architecture = process.arch,
+): DesktopTarget {
+  if (platform === "darwin" && architecture === "arm64") return "darwin-arm64";
+  if (platform === "win32" && architecture === "x64") return "win32-x64";
+  throw new Error(
+    `unsupported desktop build host: ${platform}-${architecture}; expected darwin-arm64 or win32-x64`,
+  );
+}
+
 export function desktopAppBundle(repository: string): string {
   return path.join(repository, "dist", "desktop", "Kepos.app");
 }
 
-export function desktopBuildCommands(
+export function desktopWindowsOutput(repository: string): string {
+  return path.join(repository, "dist", "desktop");
+}
+
+function desktopWindowsApp(repository: string): string {
+  return path.join(desktopWindowsOutput(repository), "Kepos");
+}
+
+function sourcePath(repository: string, packageName: string): string {
+  return path.join(repository, "vendor", "holepunch", packageName);
+}
+
+function compiledEntry(repository: string): string {
+  return path.join(
+    repository,
+    ".build",
+    "desktop",
+    "apps",
+    "desktop",
+    "src",
+    "main.js",
+  );
+}
+
+function commonBareBuild(
   repository: string,
-  tools: DesktopBuildTools = {
-    node: process.execPath,
-    npm:
-      process.env.npm_execpath ?? path.join(path.dirname(process.execPath), "npm"),
-  },
-): DesktopBuildCommand[] {
-  const app = desktopAppBundle(repository);
-  const frameworks = path.join(app, "Contents", "Frameworks");
-  const appKit = path.join(repository, "vendor", "holepunch", "bare-app-kit");
-  const appKitBuild = path.join(appKit, "build");
-  const webKit = path.join(repository, "vendor", "holepunch", "bare-web-kit");
-  const webKitBuild = path.join(webKit, "build");
+  target: DesktopTarget,
+  tools: DesktopBuildTools,
+): DesktopBuildCommand {
+  const isWindows = target === "win32-x64";
+  return {
+    command: "bare-build",
+    arguments: [
+      "--base",
+      repository,
+      "--host",
+      target,
+      "--out",
+      desktopWindowsOutput(repository),
+      "--runtime",
+      "bare-native/runtime",
+      "--identifier",
+      "io.github.ttalab.kepos",
+      ...(isWindows
+        ? [
+            "--icon",
+            path.join(repository, "apps", "desktop", "assets", "Kepos.ico"),
+            "--name",
+            "Kepos",
+            "--description",
+            "Kepos private services, directly connected",
+          ]
+        : [
+            "--icon",
+            path.join(repository, "apps", "desktop", "assets", "Kepos.icns"),
+            "--name",
+            "Kepos",
+          ]),
+      compiledEntry(repository),
+    ],
+  };
+}
+
+function typescriptBuildCommands(): DesktopBuildCommand[] {
   return [
+    {
+      command: "tsc",
+      arguments: [
+        "-b",
+        "--clean",
+        "packages/bare-host-protocol",
+        "packages/kepos-android-worklet",
+      ],
+    },
+    {
+      command: "tsc",
+      arguments: [
+        "-b",
+        "packages/bare-host-protocol",
+        "packages/kepos-android-worklet",
+      ],
+    },
     { command: "tsc", arguments: ["-p", "tsconfig.desktop.json"] },
+  ];
+}
+
+function darwinPlan(
+  repository: string,
+  tools: DesktopBuildTools,
+): DesktopBuildCommand[] {
+  const appKit = sourcePath(repository, "bare-app-kit");
+  const webKit = sourcePath(repository, "bare-web-kit");
+  const appKitBuild = path.join(appKit, "build");
+  const webKitBuild = path.join(webKit, "build");
+  const frameworks = path.join(
+    desktopAppBundle(repository),
+    "Contents",
+    "Frameworks",
+  );
+  const make = (
+    source: string,
+    build: string,
+    npm: boolean,
+  ): DesktopBuildCommand[] => [
     {
       command: "bare-make",
       arguments: [
         "generate",
         "--source",
-        appKit,
+        source,
         "--build",
-        appKitBuild,
+        build,
         "--platform",
         "darwin",
         "--arch",
         "arm64",
+        "--define",
+        `CMAKE_PREFIX_PATH:PATH=${path.join(repository, "node_modules")}`,
+        ...(source === appKit
+          ? ["--define", "FETCHCONTENT_UPDATES_DISCONNECTED:BOOL=ON"]
+          : []),
+        ...(source === appKit
+          ? ["--define", `node:FILEPATH=${tools.node}`]
+          : []),
+        ...(npm ? ["--define", `npm:FILEPATH=${tools.npm}`] : []),
+      ],
+    },
+    { command: "bare-make", arguments: ["build", "--build", build] },
+    {
+      command: "bare-make",
+      arguments: [
+        "install",
+        "--build",
+        build,
+        "--prefix",
+        path.join(source, "prebuilds"),
+      ],
+    },
+  ];
+  return [
+    ...typescriptBuildCommands(),
+    ...make(appKit, appKitBuild, true),
+    ...make(webKit, webKitBuild, true),
+    commonBareBuild(repository, "darwin-arm64", tools),
+    ...[
+      path.join(repository, "node_modules", "bare-process"),
+      appKit,
+      webKit,
+    ].map((entry) => ({
+      command: "bare-link",
+      arguments: ["--host", "darwin-arm64", "--out", frameworks, entry],
+    })),
+  ];
+}
+
+function windowsPlan(
+  repository: string,
+  tools: DesktopBuildTools,
+): DesktopBuildCommand[] {
+  const winUi = sourcePath(repository, "bare-win-ui");
+  const nativeBuildRoot = process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT;
+  if (nativeBuildRoot && !path.isAbsolute(nativeBuildRoot)) {
+    throw new Error("KEPOS_WINDOWS_NATIVE_BUILD_ROOT must be absolute");
+  }
+  const winUiBuild = nativeBuildRoot
+    ? path.join(nativeBuildRoot, "winui")
+    : path.join(winUi, "build");
+  return [
+    ...typescriptBuildCommands(),
+    {
+      command: "bare-make",
+      arguments: [
+        "generate",
+        "--source",
+        winUi,
+        "--build",
+        winUiBuild,
+        "--platform",
+        "win32",
+        "--arch",
+        "x64",
         "--define",
         `CMAKE_PREFIX_PATH:PATH=${path.join(repository, "node_modules")}`,
         "--define",
@@ -55,87 +242,25 @@ export function desktopBuildCommands(
         `npm:FILEPATH=${tools.npm}`,
       ],
     },
-    {
-      command: "bare-make",
-      arguments: ["build", "--build", appKitBuild],
-    },
+    { command: "bare-make", arguments: ["build", "--build", winUiBuild] },
     {
       command: "bare-make",
       arguments: [
         "install",
         "--build",
-        appKitBuild,
+        winUiBuild,
         "--prefix",
-        path.join(appKit, "prebuilds"),
+        path.join(winUi, "prebuilds"),
       ],
     },
-    {
-      command: "bare-make",
-      arguments: [
-        "generate",
-        "--source",
-        webKit,
-        "--build",
-        webKitBuild,
-        "--platform",
-        "darwin",
-        "--arch",
-        "arm64",
-        "--define",
-        `CMAKE_PREFIX_PATH:PATH=${path.join(repository, "node_modules")}`,
-        "--define",
-        `npm:FILEPATH=${tools.npm}`,
-      ],
-    },
-    {
-      command: "bare-make",
-      arguments: ["build", "--build", webKitBuild],
-    },
-    {
-      command: "bare-make",
-      arguments: [
-        "install",
-        "--build",
-        webKitBuild,
-        "--prefix",
-        path.join(webKit, "prebuilds"),
-      ],
-    },
-    {
-      command: "bare-build",
-      arguments: [
-        "--base",
-        repository,
-        "--host",
-        "darwin-arm64",
-        "--out",
-        path.join(repository, "dist", "desktop"),
-        "--runtime",
-        "bare-native/runtime",
-        "--identifier",
-        "io.github.ttalab.kepos",
-        "--icon",
-        path.join(repository, "apps", "desktop", "assets", "Kepos.icns"),
-        "--name",
-        "Kepos",
-        path.join(
-          repository,
-          ".build",
-          "desktop",
-          "apps",
-          "desktop",
-          "src",
-          "main.js",
-        ),
-      ],
-    },
+    commonBareBuild(repository, "win32-x64", tools),
     {
       command: "bare-link",
       arguments: [
         "--host",
-        "darwin-arm64",
+        "win32-x64",
         "--out",
-        frameworks,
+        path.join(desktopWindowsApp(repository), "App"),
         path.join(repository, "node_modules", "bare-process"),
       ],
     },
@@ -143,26 +268,59 @@ export function desktopBuildCommands(
       command: "bare-link",
       arguments: [
         "--host",
-        "darwin-arm64",
+        "win32-x64",
         "--out",
-        frameworks,
-        appKit,
-      ],
-    },
-    {
-      command: "bare-link",
-      arguments: [
-        "--host",
-        "darwin-arm64",
-        "--out",
-        frameworks,
-        webKit,
+        path.join(desktopWindowsApp(repository), "App"),
+        winUi,
       ],
     },
   ];
 }
 
-export async function runDesktopBuild(repository: string): Promise<void> {
+function validateDesktopTarget(target: unknown): DesktopTarget {
+  if (
+    typeof target !== "string" ||
+    !desktopTargets.includes(target as DesktopTarget)
+  ) {
+    throw new Error(
+      `unsupported desktop build target: ${String(target)}; expected ${desktopTargets.join(" or ")}`,
+    );
+  }
+  return target as DesktopTarget;
+}
+
+export function desktopBuildPlan(target: unknown): DesktopBuildPlan {
+  const validatedTarget = validateDesktopTarget(target);
+  if (validatedTarget === "darwin-arm64") {
+    return {
+      target: validatedTarget,
+      outputDirectory: desktopAppBundle,
+      commands: darwinPlan,
+      validate: validateDarwinOutput,
+    };
+  }
+  return {
+    target: validatedTarget,
+    outputDirectory: desktopWindowsApp,
+    commands: windowsPlan,
+    validate: validateWindowsOutput,
+  };
+}
+
+export function desktopBuildCommands(
+  repository: string,
+  tools: DesktopBuildTools = defaultTools(),
+  target: DesktopTarget = "darwin-arm64",
+): DesktopBuildCommand[] {
+  return desktopBuildPlan(target).commands(repository, tools);
+}
+
+export async function runDesktopBuild(
+  repository: string,
+  target: DesktopTarget = desktopTargetForPlatform(),
+  tools: DesktopBuildTools = defaultTools(),
+): Promise<void> {
+  const plan = desktopBuildPlan(target);
   await rm(path.join(repository, "dist", "desktop"), {
     force: true,
     recursive: true,
@@ -171,15 +329,16 @@ export async function runDesktopBuild(repository: string): Promise<void> {
     force: true,
     recursive: true,
   });
-  const [compile, ...builds] = desktopBuildCommands(repository);
-  await run(repository, compile);
-  for (const build of builds) {
-    await run(repository, build);
+  for (const command of plan.commands(repository, tools)) {
+    await run(repository, command, target);
   }
+  await plan.validate(repository);
+}
 
-  const frameworks = await readdir(
-    path.join(desktopAppBundle(repository), "Contents", "Frameworks"),
-  );
+async function validateDarwinOutput(repository: string): Promise<void> {
+  const bundle = desktopAppBundle(repository);
+  await requireFile(path.join(bundle, "Contents", "MacOS", "Kepos"));
+  const frameworks = await readdir(path.join(bundle, "Contents", "Frameworks"));
   for (const required of [
     "bare-abort.",
     "bare-app-kit.",
@@ -196,15 +355,69 @@ export async function runDesktopBuild(repository: string): Promise<void> {
   }
 }
 
+async function validateWindowsOutput(repository: string): Promise<void> {
+  const app = desktopWindowsApp(repository);
+  const output = path.join(app, "App");
+  await requireFile(path.join(output, "Kepos.exe"));
+  await requireFile(path.join(app, "AppxManifest.xml"));
+  await requireFile(path.join(app, "Assets", "Logo.ico"));
+  for (const required of [
+    "bare-win-ui-",
+    "Microsoft.Web.WebView2.Core.dll",
+    "Microsoft.WindowsAppRuntime.Bootstrap.dll",
+  ]) {
+    const files = await readdir(output);
+    if (
+      !files.some((name) =>
+        required.endsWith(".dll")
+          ? name === required
+          : name.startsWith(required) && name.endsWith(".dll"),
+      )
+    ) {
+      throw new Error(`Windows desktop output is missing ${required}`);
+    }
+  }
+}
+
+async function requireFile(file: string): Promise<void> {
+  try {
+    const details = await stat(file);
+    if (!details.isFile()) throw new Error(`${file} is not a file`);
+  } catch (error) {
+    throw new Error(`desktop output is missing ${file}`, { cause: error });
+  }
+}
+
+function commandPath(repository: string, command: string): string {
+  return path.join(repository, "node_modules", ".bin", command);
+}
+
+const windowsCommandEntrypoints: Readonly<Record<string, string>> = {
+  tsc: "typescript/bin/tsc",
+  "bare-make": "bare-make/bin.js",
+  "bare-build": "bare-build/bin.js",
+  "bare-link": "bare-link/bin.js",
+};
+
 async function run(
   repository: string,
   build: DesktopBuildCommand,
+  target: DesktopTarget,
 ): Promise<void> {
-  const executable = path.join(repository, "node_modules", ".bin", build.command);
+  const windows = target === "win32-x64";
+  const windowsEntrypoint = windowsCommandEntrypoints[build.command];
+  if (windows && windowsEntrypoint === undefined) {
+    throw new Error(`unsupported Windows desktop build command: ${build.command}`);
+  }
+  const command = windows ? process.execPath : commandPath(repository, build.command);
+  const arguments_ = windows
+    ? [path.join(repository, "node_modules", windowsEntrypoint), ...build.arguments]
+    : build.arguments;
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(executable, build.arguments, {
+    const child = spawn(command, arguments_, {
       cwd: repository,
       stdio: "inherit",
+      shell: false,
     });
     child.once("error", reject);
     child.once("exit", (code, signal) => {
@@ -221,8 +434,25 @@ async function run(
   });
 }
 
+export function requestedTarget(
+  arguments_: readonly string[],
+): DesktopTarget | undefined {
+  const inline = arguments_.find((argument) => argument.startsWith("--target="));
+  if (inline) return validateDesktopTarget(inline.slice("--target=".length));
+
+  const index = arguments_.indexOf("--target");
+  if (index === -1) return undefined;
+
+  const value = arguments_[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error("missing value for --target; expected darwin-arm64 or win32-x64");
+  }
+  return validateDesktopTarget(value);
+}
+
 const repository = fileURLToPath(new URL("..", import.meta.url));
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await runDesktopBuild(repository);
-  process.stdout.write(`Desktop app ready: ${desktopAppBundle(repository)}\n`);
+  const target = requestedTarget(process.argv.slice(2)) ?? desktopTargetForPlatform();
+  await runDesktopBuild(repository, target);
+  process.stdout.write(`Desktop app ready: ${desktopBuildPlan(target).outputDirectory(repository)}\n`);
 }

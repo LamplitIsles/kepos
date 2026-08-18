@@ -51,7 +51,7 @@ declare module "bare-native" {
     constructor(
       width: number,
       height: number,
-      options?: { hidesOnClose?: boolean },
+      options?: { hidesOnClose?: boolean; title?: string },
     );
     content(view: WebView): this;
     close(): this;
@@ -60,10 +60,7 @@ declare module "bare-native" {
   }
 
   export class Tray extends EventEmitter {
-    constructor(options: {
-      systemImageName: string;
-      accessibilityDescription?: string;
-    });
+    constructor(options?: { accessibilityDescription?: string });
     addItem(id: string, title: string, options?: { enabled?: boolean }): this;
     addSeparator(): this;
     updateItem(

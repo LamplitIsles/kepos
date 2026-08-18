@@ -241,7 +241,10 @@ test("Android build embeds only bootstrap endpoints from the local Kepos config"
   const directory = await mkdtemp(path.join(tmpdir(), "kepos-android-bootstrap-"));
   try {
     const configHome = path.join(directory, "config");
-    const configDirectory = path.join(configHome, "kepos");
+    const configDirectory = path.join(
+      configHome,
+      process.platform === "win32" ? "Kepos" : "kepos",
+    );
     const outputPath = path.join(directory, "assets", "kepos-bootstrap.json");
     await mkdir(configDirectory, { recursive: true });
     await writeFile(
@@ -270,7 +273,10 @@ test("Android build embeds only bootstrap endpoints from the local Kepos config"
     assert.notEqual(builder, null, "missing Android bootstrap asset builder");
     await builder!.writeAndroidBootstrapAsset({
       outputPath,
-      environment: { XDG_CONFIG_HOME: configHome },
+      environment:
+        process.platform === "win32"
+          ? { APPDATA: configHome }
+          : { XDG_CONFIG_HOME: configHome },
     });
 
     assert.deepEqual(JSON.parse(await readFile(outputPath, "utf8")), [

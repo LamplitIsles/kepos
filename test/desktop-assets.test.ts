@@ -106,8 +106,8 @@ test("desktop UI presents publisher-rooted relationships with copyable identitie
     /showingRemote \? availableServices\.length/,
   );
   assert.match(html, /aria-label="Copy remote publisher public key"/);
-  assert.match(html, /aria-label="Copy this Mac subscriber public key"/);
-  assert.match(html, /aria-label="Copy this Mac publisher public key"/);
+  assert.match(html, /aria-label="Copy this device subscriber public key"/);
+  assert.match(html, /aria-label="Copy this device publisher public key"/);
   assert.match(
     html,
     /aria-label="Copy ' \+ label \+ ' public key"/,

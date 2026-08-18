@@ -17,6 +17,7 @@ export interface DesktopControllerOptions {
   cancelPairing(): Promise<void>;
   createPairingInvitation(): Promise<void>;
   denyPairing(): Promise<void>;
+  setSubscriberPublisher(publisherKey: string): Promise<void>;
   quit(): Promise<void>;
 }
 
@@ -63,6 +64,13 @@ export function createDesktopController(
     }
     if (command.type === "denyPairing") {
       await options.denyPairing();
+      return;
+    }
+    if (command.type === "setSubscriberPublisher") {
+      if (current.subscriber?.connection !== "unconfigured") {
+        throw new Error("subscriber is already configured");
+      }
+      await options.setSubscriberPublisher(command.publisherKey);
       return;
     }
 

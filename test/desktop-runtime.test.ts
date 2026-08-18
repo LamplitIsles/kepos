@@ -5,6 +5,7 @@ import {
   startDesktopRuntime,
   type DesktopRuntimeDependencies,
 } from "../apps/desktop/src/runtime.js";
+import { DEFAULT_GATEWAY_PORT } from "../src/home/gateway.js";
 import type { DesktopSnapshot } from "../apps/desktop/src/protocol.js";
 import type { HomeRegistry } from "../src/home/registry.js";
 import { derivePublisherHomeKey } from "../src/keys.js";
@@ -138,7 +139,7 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
     {
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         gatewayHost: "0.0.0.0",
         gatewayDomain: "kepos.internal",
         services: [
@@ -179,7 +180,7 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
       publisherKey: remotePublisherKey,
       keyFingerprint: remotePublisherKey.slice(0, 16),
     },
-    gatewayPort: 17_480,
+    gatewayPort: DEFAULT_GATEWAY_PORT,
     services: [
       {
         id: "ssh",
@@ -238,7 +239,7 @@ test("desktop exposes the pinned publisher relationship before Home is available
     {
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
@@ -264,7 +265,7 @@ test("desktop exposes the pinned publisher relationship before Home is available
       publisherKey: remotePublisherKey,
       keyFingerprint: remotePublisherKey.slice(0, 16),
     },
-    gatewayPort: 17_480,
+    gatewayPort: DEFAULT_GATEWAY_PORT,
     services: [],
   });
 
@@ -280,7 +281,7 @@ test("desktop runtime invalidates a connected generation after Home times out", 
     {
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
@@ -327,7 +328,7 @@ test("desktop runtime rate-limits Home-triggered resets across generations", asy
     {
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: () => undefined,
@@ -393,7 +394,7 @@ test("a healthy Home response re-arms immediate reset recovery", async () => {
     {
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: () => undefined,
@@ -438,7 +439,7 @@ test("desktop ignores a stale Home timeout from an older generation", async () =
     {
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: () => undefined,
@@ -483,7 +484,7 @@ test("desktop ignores a Home timeout that completes after stop begins", async ()
     {
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: () => undefined,
@@ -527,7 +528,7 @@ test("desktop backs off non-timeout registry errors and disables stale services"
     {
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [{ id: "ssh", localPort: 2222 }],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
@@ -584,7 +585,7 @@ test("desktop runtime starts both roles concurrently and polls publisher counter
       publisher: { stateDir: "/state/publisher" },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
@@ -769,7 +770,7 @@ test("desktop runtime applies shared network and role policy", async () => {
       },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         route: "public",
         services: [],
       },
@@ -822,7 +823,7 @@ test("desktop runtime reconfigures only the changed role", async () => {
   let dhtCreates = 0;
   const subscriber = {
     stateDir: "/state/subscriber",
-    gatewayPort: 17_480,
+    gatewayPort: DEFAULT_GATEWAY_PORT,
     services: [{ id: "ssh", localPort: 2_222 }],
   };
   const publisher = {
@@ -880,7 +881,7 @@ test("desktop transport reconfiguration replaces one node and restarts both role
   const publisher = { stateDir: "/state/publisher" };
   const subscriber = {
     stateDir: "/state/subscriber",
-    gatewayPort: 17_480,
+    gatewayPort: DEFAULT_GATEWAY_PORT,
     services: [],
   };
   const nodes: DhtNode[] = [];
@@ -958,7 +959,7 @@ test("desktop keeps the shared node when one role cannot start", async () => {
       publisher: { stateDir: "/state/publisher" },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: () => undefined,
@@ -1005,7 +1006,7 @@ test("desktop exposes an initial shared transport failure", async () => {
         },
         subscriber: {
           stateDir: "/state/subscriber",
-          gatewayPort: 17_480,
+          gatewayPort: DEFAULT_GATEWAY_PORT,
           services: [],
           lock: {
             release: async () => {
@@ -1055,7 +1056,7 @@ test("desktop transport replacement failure shows the target relationship", asyn
       publisher: { stateDir: "/state/publisher" },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
@@ -1138,7 +1139,7 @@ test("desktop reports transport replacement failure and can retry it", async () 
   const publisher = { stateDir: "/state/publisher" };
   const subscriber = {
     stateDir: "/state/subscriber",
-    gatewayPort: 17_480,
+    gatewayPort: DEFAULT_GATEWAY_PORT,
     services: [],
   };
   let creates = 0;
@@ -1186,7 +1187,7 @@ test("desktop recreates the original transport after a failed replacement is rol
   const publisher = { stateDir: "/state/publisher" };
   const subscriber = {
     stateDir: "/state/subscriber",
-    gatewayPort: 17_480,
+    gatewayPort: DEFAULT_GATEWAY_PORT,
     services: [],
   };
   const original = {
@@ -1230,7 +1231,7 @@ test("desktop retains a transport until its failed destruction succeeds", async 
   const publisher = { stateDir: "/state/publisher" };
   const subscriber = {
     stateDir: "/state/subscriber",
-    gatewayPort: 17_480,
+    gatewayPort: DEFAULT_GATEWAY_PORT,
     services: [],
   };
   let creates = 0;
@@ -1290,7 +1291,7 @@ test("desktop reconfiguration attempts both role cleanups after one fails", asyn
       publisher: { stateDir: "/state/publisher" },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: () => undefined,
@@ -1321,7 +1322,7 @@ test("desktop runtime isolates publisher startup failure from subscriber", async
       publisher: { stateDir: "/state/publisher" },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
@@ -1361,7 +1362,7 @@ test("desktop runtime isolates subscriber startup failure from publisher", async
       publisher: { stateDir: "/state/publisher" },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
@@ -1383,7 +1384,7 @@ test("desktop runtime isolates subscriber startup failure from publisher", async
       publisherKey: remotePublisherKey,
       keyFingerprint: remotePublisherKey.slice(0, 16),
     },
-    gatewayPort: 17_480,
+    gatewayPort: DEFAULT_GATEWAY_PORT,
     services: [],
     error: "subscriber unavailable",
   });
@@ -1402,7 +1403,7 @@ test("desktop runtime stops live roles before releasing locks after status failu
       publisher: { stateDir: "/state/publisher" },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
@@ -1483,7 +1484,7 @@ test("desktop runtime coalesces overlapping polls and suppresses late snapshots"
     {
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
@@ -1524,7 +1525,7 @@ test("desktop runtime attempts every cleanup step and preserves first failure", 
       publisher: { stateDir: "/state/publisher" },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: () => {},
@@ -1553,7 +1554,7 @@ test("desktop runtime cleans every role when the stopping snapshot fails", async
       publisher: { stateDir: "/state/publisher" },
       subscriber: {
         stateDir: "/state/subscriber",
-        gatewayPort: 17_480,
+        gatewayPort: DEFAULT_GATEWAY_PORT,
         services: [],
       },
       onSnapshot: (snapshot) => {
@@ -1570,6 +1571,91 @@ test("desktop runtime cleans every role when the stopping snapshot fails", async
   assert.equal(events.includes("publisher-lock:release"), true);
   assert.equal(events.includes("subscriber:stop"), true);
   assert.equal(events.includes("subscriber-lock:release"), true);
+});
+
+test("desktop runtime connects a bootstrapped subscriber without changing its identity", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  let connection: SubscriberRuntimeStatus["connection"] = "connecting";
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: DEFAULT_GATEWAY_PORT,
+        services: [],
+        subscriberSetup: {
+          configured: false,
+          publicKey: localSubscriberKey,
+        },
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      startSubscriber: async (options) => {
+        events.push(`subscriber:start:${options.stateDir}`);
+        return runningSubscriber(
+          () => subscriberStatus(connection, connection === "connected" ? 1 : 0),
+          events,
+        );
+      },
+    }),
+  );
+
+  await runtime.reconfigure({
+    subscriber: {
+      stateDir: "/state/subscriber",
+      gatewayPort: DEFAULT_GATEWAY_PORT,
+      services: [],
+    },
+  });
+
+  assert.equal(events.includes("subscriber:start:/state/subscriber"), true);
+  assert.equal(snapshots.some((snapshot) => snapshot.subscriber?.connection === "connecting"), true);
+  assert.equal(snapshots.at(-1)?.subscriber?.subscriberKey, localSubscriberKey);
+
+  connection = "connected";
+  await runtime.poll();
+  assert.equal(snapshots.at(-1)?.subscriber?.connection, "connected");
+  assert.equal(snapshots.at(-1)?.subscriber?.subscriberKey, localSubscriberKey);
+  await runtime.stop();
+});
+
+test("desktop keeps a freshly bootstrapped subscriber open while waiting for pairing", async () => {
+  const events: string[] = [];
+  const snapshots: DesktopSnapshot[] = [];
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: DEFAULT_GATEWAY_PORT,
+        services: [],
+        subscriberSetup: {
+          configured: false,
+          publicKey: localSubscriberKey,
+        },
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies(events, {
+      startSubscriber: async () => {
+        throw new Error("unpaired subscriber must not start");
+      },
+    }),
+  );
+
+  assert.deepEqual(snapshots.at(-1), {
+    type: "snapshot",
+    appPhase: "running",
+    subscriber: {
+      phase: "running",
+      connection: "unconfigured",
+      subscriberKey: localSubscriberKey,
+      gatewayPort: DEFAULT_GATEWAY_PORT,
+      services: [],
+    },
+  });
+  assert.equal(events.some((event) => event.startsWith("subscriber:start:")), false);
+  await runtime.stop();
 });
 
 function dependencies(
@@ -1675,7 +1761,7 @@ function runningSubscriber(
 ): RunningSubscriber {
   return {
     publisherKey: remotePublisherKey,
-    home: { port: 17_480, url: "http://home.localhost:17480" },
+    home: { port: DEFAULT_GATEWAY_PORT, url: "http://home.localhost:17480" },
     services: [{ id: "ssh", port: 2222 }],
     invalidateConnection,
     status,

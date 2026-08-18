@@ -3,7 +3,9 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,6 +16,7 @@ import {
   parsePublisherManifest,
   parseSubscriberContact,
 } from "../src/config.js";
+import { replaceFileAtomically } from "../src/state/files.js";
 import { parseClientIdentity } from "../src/keys.js";
 import {
   setPublisherAllowlist,
@@ -36,6 +39,41 @@ async function stateDirectory(name: string): Promise<string> {
 async function readJson(filePath: string): Promise<unknown> {
   return JSON.parse(await readFile(filePath, "utf8")) as unknown;
 }
+
+test("file replacement keeps complete values and cleans failed attempts", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-replace-"));
+  try {
+    const destination = path.join(root, "config.toml");
+    const source = path.join(root, "next.toml");
+    await writeFile(destination, "previous");
+    await writeFile(source, "next");
+
+    await replaceFileAtomically(source, destination);
+    assert.equal(await readFile(destination, "utf8"), "next");
+
+    assert.deepEqual(await readdir(root), ["config.toml"]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("failed replacement leaves the existing destination untouched", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-replace-failure-"));
+  try {
+    const destination = path.join(root, "config.toml");
+    await writeFile(destination, "previous");
+
+    await assert.rejects(
+      () =>
+        replaceFileAtomically(path.join(root, "missing.toml"), destination),
+      { code: "ENOENT" },
+    );
+    assert.equal(await readFile(destination, "utf8"), "previous");
+    assert.deepEqual(await readdir(root), ["config.toml"]);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
 
 test("subscriber state keeps the current identity file and replaces only its publisher contact", async () => {
   const stateDir = await stateDirectory("subscriber");

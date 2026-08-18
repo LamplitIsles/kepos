@@ -10,7 +10,12 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { desktopAppBundle, desktopBuildCommands } from "../scripts/build-desktop.js";
+import {
+  desktopAppBundle,
+  desktopBuildCommands,
+  desktopBuildPlan,
+  requestedTarget,
+} from "../scripts/build-desktop.js";
 import {
   desktopInstallPath,
   quitRunningDesktop,
@@ -30,6 +35,23 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
     path.join(repository, "dist", "desktop", "Kepos.app"),
   );
   assert.deepEqual(desktopBuildCommands(repository, tools), [
+    {
+      command: "tsc",
+      arguments: [
+        "-b",
+        "--clean",
+        "packages/bare-host-protocol",
+        "packages/kepos-android-worklet",
+      ],
+    },
+    {
+      command: "tsc",
+      arguments: [
+        "-b",
+        "packages/bare-host-protocol",
+        "packages/kepos-android-worklet",
+      ],
+    },
     {
       command: "tsc",
       arguments: ["-p", "tsconfig.desktop.json"],
@@ -222,6 +244,74 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
   ]);
 });
 
+test("desktop Windows plan builds an unpackaged WinUI directory and links native shims", () => {
+  const repository = "/checkout";
+  const plan = desktopBuildPlan("win32-x64");
+  const previousBuildRoot = process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT;
+  process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT = "/short-native-build";
+  const commands = plan.commands(repository, {
+    node: "C:\\tools\\node.exe",
+    npm: "C:\\tools\\npm.cmd",
+  });
+  const makeGenerate = commands.find(
+    ({ command, arguments: arguments_ }) =>
+      command === "bare-make" && arguments_.includes("generate"),
+  );
+  const bareBuild = commands.find(({ command }) => command === "bare-build");
+  const links = commands.filter(({ command }) => command === "bare-link");
+  if (previousBuildRoot === undefined) {
+    delete process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT;
+  } else {
+    process.env.KEPOS_WINDOWS_NATIVE_BUILD_ROOT = previousBuildRoot;
+  }
+
+  assert.ok(
+    makeGenerate?.arguments.includes(
+      path.join("/short-native-build", "winui"),
+    ),
+  );
+  assert.ok(makeGenerate?.arguments.includes("--platform"));
+  assert.ok(makeGenerate?.arguments.includes("win32"));
+  assert.ok(makeGenerate?.arguments.includes("--arch"));
+  assert.ok(makeGenerate?.arguments.includes("x64"));
+  assert.equal(
+    plan.outputDirectory(repository),
+    path.join(repository, "dist", "desktop", "Kepos"),
+  );
+  assert.ok(
+    bareBuild?.arguments.includes(
+      path.join(repository, "apps", "desktop", "assets", "Kepos.ico"),
+    ),
+  );
+  assert.equal(bareBuild?.arguments.includes("--package"), false);
+  assert.ok(bareBuild?.arguments.includes("--description"));
+  assert.ok(
+    links.every(({ arguments: arguments_ }) =>
+      arguments_.includes(path.join(repository, "dist", "desktop", "Kepos", "App")),
+    ),
+  );
+  assert.ok(
+    links.some(({ arguments: arguments_ }) =>
+      arguments_.some((argument) => argument.endsWith("bare-win-ui")),
+    ),
+  );
+  assert.ok(
+    links.some(({ arguments: arguments_ }) =>
+      arguments_.some((argument) => argument.endsWith("bare-process")),
+    ),
+  );
+});
+
+test("desktop target parsing and planning reject missing or unknown targets", () => {
+  assert.equal(requestedTarget(["--target", "win32-x64"]), "win32-x64");
+  assert.throws(() => requestedTarget(["--target"]), /missing value/);
+  assert.throws(() => requestedTarget(["--target=win32"]), /unsupported desktop build target/);
+  assert.throws(
+    () => desktopBuildPlan("win32"),
+    /unsupported desktop build target/,
+  );
+});
+
 test("desktop output is ignored without ignoring desktop source", async () => {
   const gitignore = await readFile(path.join(repository, ".gitignore"), "utf8");
 
@@ -254,7 +344,7 @@ test("desktop native forks are submodules without install-time patches", async (
 
   assert.match(
     gitmodules,
-    /path = vendor\/holepunch\/bare-app-kit\n\s+url = https:\/\/github\.com\/LamplitIsles\/bare-app-kit\.git/,
+    /path = vendor\/holepunch\/bare-app-kit\r?\n\s+url = https:\/\/github\.com\/LamplitIsles\/bare-app-kit\.git/,
   );
   assert.equal(packageJson.scripts?.postinstall, undefined);
   assert.equal(packageJson.devDependencies?.["patch-package"], undefined);

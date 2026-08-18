@@ -54,7 +54,7 @@ export interface MacosReleasePaths {
   executable: string;
   plist: string;
   frameworksDirectory: string;
-  zip: string;
+  macosZip: string;
   unpackDirectory: string;
   unpackedApp: string;
   unpackedExecutable: string;
@@ -103,7 +103,7 @@ export function createMacosReleasePaths(options: {
     executable: path.join(app, "Contents/MacOS/Kepos"),
     plist: path.join(app, "Contents/Info.plist"),
     frameworksDirectory: path.join(app, "Contents/Frameworks"),
-    zip: path.join(
+    macosZip: path.join(
       options.repository,
       version.artifactDirectory,
       version.macosArtifactName,
@@ -198,12 +198,12 @@ export function macosSigningCommands(
     {
       kind: "archive",
       command: "ditto",
-      arguments: ["-c", "-k", "--keepParent", paths.app, paths.zip],
+      arguments: ["-c", "-k", "--keepParent", paths.app, paths.macosZip],
     },
     {
       kind: "extract",
       command: "ditto",
-      arguments: ["-x", "-k", paths.zip, paths.unpackDirectory],
+      arguments: ["-x", "-k", paths.macosZip, paths.unpackDirectory],
     },
     {
       kind: "verify-archive",
@@ -263,7 +263,7 @@ export async function releaseMacos(
     await execution.removeTree(paths.unpackDirectory);
     return paths;
   } catch (error) {
-    await execution.removeFile(paths.zip).catch(() => undefined);
+    await execution.removeFile(paths.macosZip).catch(() => undefined);
     await execution.removeTree(paths.unpackDirectory).catch(() => undefined);
     throw error;
   }
@@ -360,7 +360,7 @@ async function main(): Promise<void> {
       removeTree: (directory) => rm(directory, { force: true, recursive: true }),
     },
   );
-  process.stdout.write(`macOS ZIP: ${result.zip}\n`);
+  process.stdout.write(`macOS ZIP: ${result.macosZip}\n`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

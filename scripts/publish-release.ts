@@ -113,7 +113,13 @@ export async function publishRelease(
     throw new Error(existing.stderr.trim() || "unable to check existing GitHub release");
   }
 
-  const assets = [paths.apk, paths.zip, paths.manifest, paths.signature];
+  const assets = [
+    paths.apk,
+    paths.macosZip,
+    paths.windowsZip,
+    paths.manifest,
+    paths.signature,
+  ];
   const createResult = await execution.run({
     command: "gh",
     arguments: [

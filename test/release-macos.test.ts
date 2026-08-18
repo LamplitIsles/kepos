@@ -146,9 +146,9 @@ test("builds before enumeration and validates the archive round trip", async () 
     },
   );
 
-  assert.equal(result.zip, path.join(
+  assert.equal(result.macosZip, path.join(
     repository,
-    "dist/release/rehearsal-v1.2.3/kepos-macos-arm64-v1.2.3.zip",
+    "dist/release/rehearsal-v1.2.3/kepos-macos-arm64.zip",
   ));
   assert.deepEqual(events.slice(0, 3), [
     "build",
@@ -188,7 +188,7 @@ test("rejects non-arm64 output and removes partial release files", async () => {
   assert.deepEqual(removed, [
     path.join(
       repository,
-      "dist/release/rehearsal-v1.2.3/kepos-macos-arm64-v1.2.3.zip",
+      "dist/release/rehearsal-v1.2.3/kepos-macos-arm64.zip",
     ),
     unpackDirectory,
   ]);

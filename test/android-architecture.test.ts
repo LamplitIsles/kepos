@@ -178,7 +178,7 @@ test("Android release build is optimized and signed only on the release Mac", as
   assert.match(consumerRules!, /-keep class to\.holepunch\.bare\.kit\.\*\*/);
   assert.doesNotMatch(checkWorkflow!, /assemble(?:Debug|Release)|android:release/);
   assert.equal(releaseWorkflow, null, "tag workflow must not publish unsigned APKs");
-  assert.match(certificateFingerprint!, /^[0-9a-f]{64}\n$/);
+  assert.match(certificateFingerprint!, /^[0-9a-f]{64}\r?\n$/);
   assert.notEqual(reporter, null, "missing Android APK size reporter");
   assert.equal(
     reporter!.formatApkSizeComparison(100 * 1024 * 1024, 70 * 1024 * 1024),

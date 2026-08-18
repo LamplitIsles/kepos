@@ -24,6 +24,22 @@ test("formats app lifecycle tray labels", () => {
   });
 });
 
+test("formats an unpaired subscriber as waiting for pairing", () => {
+  assert.deepEqual(
+    formatTraySnapshot({
+      type: "snapshot",
+      appPhase: "running",
+      subscriber: {
+        phase: "running",
+        connection: "unconfigured",
+        subscriberKey: "11".repeat(32),
+        services: [],
+      },
+    }),
+    { status: "Kepos — Waiting for pairing", detail: "Subscriber key ready" },
+  );
+});
+
 test("formats healthy role combinations", () => {
   assert.deepEqual(
     formatTraySnapshot({

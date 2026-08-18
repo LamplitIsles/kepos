@@ -55,6 +55,7 @@ const pairingActions = {
   cancelPairing: async (): Promise<void> => undefined,
   createPairingInvitation: async (): Promise<void> => undefined,
   denyPairing: async (): Promise<void> => undefined,
+  setSubscriberPublisher: async (): Promise<void> => undefined,
 };
 
 test("desktop controller sends the latest snapshot after page readiness", async () => {
@@ -170,6 +171,7 @@ test("desktop controller forwards pairing actions in command order", async () =>
     denyPairing: async () => {
       events.push("deny");
     },
+    setSubscriberPublisher: async () => undefined,
     quit: async () => undefined,
   });
 

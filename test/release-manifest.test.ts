@@ -22,20 +22,24 @@ async function fixture(): Promise<{
   directory: string;
   apk: string;
   zip: string;
+  windowsZip: string;
   cleanup(): Promise<void>;
 }> {
   const repository = await mkdtemp(path.join(os.tmpdir(), "kepos-manifest-test-"));
   const directory = path.join(repository, "dist/release/rehearsal-v1.2.3");
   await mkdir(directory, { recursive: true });
-  const apk = path.join(directory, "kepos-android-arm64-v1.2.3.apk");
-  const zip = path.join(directory, "kepos-macos-arm64-v1.2.3.zip");
+  const apk = path.join(directory, "kepos-android-arm64.apk");
+  const zip = path.join(directory, "kepos-macos-arm64.zip");
+  const windowsZip = path.join(directory, "kepos-windows-x64.zip");
   await writeFile(apk, "android artifact");
   await writeFile(zip, "macos artifact");
+  await writeFile(windowsZip, "windows artifact");
   return {
     repository,
     directory,
     apk,
     zip,
+    windowsZip,
     cleanup: () => rm(repository, { force: true, recursive: true }),
   };
 }
@@ -79,8 +83,9 @@ test("writes stable checksums, signs them, and verifies both layers", async () =
       createHash("sha256").update(value).digest("hex");
     assert.equal(
       await readFile(result.manifest, "utf8"),
-      `${digest("android artifact")}  kepos-android-arm64-v1.2.3.apk\n` +
-        `${digest("macos artifact")}  kepos-macos-arm64-v1.2.3.zip\n`,
+      `${digest("android artifact")}  kepos-android-arm64.apk\n` +
+        `${digest("macos artifact")}  kepos-macos-arm64.zip\n` +
+        `${digest("windows artifact")}  kepos-windows-x64.zip\n`,
     );
     assert.deepEqual(commands.map(({ arguments: commandArguments }) => commandArguments[0]), [
       "-S",
