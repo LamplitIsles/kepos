@@ -673,6 +673,13 @@ export function renderDesktopUi(): string {
         showToast(label + ' copied');
       };
 
+      for (const button of relationshipButtons) {
+        button.addEventListener('click', () =>
+          selectView(button.dataset.relationshipTab),
+        );
+      }
+      settingsButton.addEventListener('click', () => selectView('settings'));
+
       window.addEventListener("bare-native-message", (event) => {
         try {
           const next = JSON.parse(event.data);
@@ -683,8 +690,6 @@ export function renderDesktopUi(): string {
       document.addEventListener('click', async (event) => {
         const button = event.target.closest('button');
         if (!button || button.disabled) return;
-        if (button.dataset.relationshipTab) { selectView(button.dataset.relationshipTab); return; }
-        if (button.dataset.viewTab) { selectView(button.dataset.viewTab); return; }
         if (button.dataset.command === 'quit') { send({ type: "quit" }); return; }
         try {
           if (button.dataset.action === 'copy-remote-publisher-key') {
