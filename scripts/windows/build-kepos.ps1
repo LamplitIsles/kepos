@@ -99,7 +99,7 @@ function Get-ContainedReleaseArtifactPath {
     [Parameter(Mandatory = $true)] [string]$RunDirectory,
     [Parameter(Mandatory = $true)] [string]$ArtifactName
   )
-  if ($ArtifactName -notmatch '^kepos-windows-x64-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.zip$') {
+  if ($ArtifactName -ne 'kepos-windows-x64.zip') {
     throw "invalid Windows artifact name: $ArtifactName"
   }
   $artifact = Join-Path $RunDirectory $ArtifactName
@@ -284,7 +284,7 @@ function Invoke-PortableRelease {
     [Parameter(Mandatory = $true)] [string]$ArtifactName,
     [Parameter(Mandatory = $true)] [string]$Mode
   )
-  if ($ArtifactName -notmatch '^kepos-windows-x64-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.zip$') { throw "invalid Windows artifact name: $ArtifactName" }
+  if ($ArtifactName -ne 'kepos-windows-x64.zip') { throw "invalid Windows artifact name: $ArtifactName" }
   $artifact = Join-Path $RunDirectory $ArtifactName
   if (Test-Path -LiteralPath $artifact) { throw "release output already exists: $artifact" }
   $sourceRoot = Join-Path $RunDirectory 'dist\desktop\Kepos'

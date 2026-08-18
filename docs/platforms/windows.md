@@ -1,7 +1,7 @@
 # Windows desktop
 
 Kepos supports **Windows 11 x64** as a portable desktop application. Download
-`kepos-windows-x64-vX.Y.Z.zip`, verify it, extract it to a new directory, and
+`kepos-windows-x64.zip`, verify it, extract it to a new directory, and
 launch `Kepos\App\Kepos.exe`. The ZIP is unsigned by Authenticode: Windows
 SmartScreen may warn because the first release has no Microsoft publisher
 identity. Do not bypass a warning until the minisign and SHA-256 checks below
@@ -33,7 +33,7 @@ download directory, verify the manifest before trusting its checksums:
 
 ```powershell
 minisign.exe -Vm SHA256SUMS -x SHA256SUMS.minisig -p C:\path\to\minisign.pub
-Get-FileHash .\kepos-windows-x64-vX.Y.Z.zip -Algorithm SHA256
+Get-FileHash .\kepos-windows-x64.zip -Algorithm SHA256
 Get-Content .\SHA256SUMS
 ```
 
@@ -43,7 +43,7 @@ Kepos folder:
 
 ```powershell
 New-Item -ItemType Directory .\Kepos-vX.Y.Z
-Expand-Archive .\kepos-windows-x64-vX.Y.Z.zip -DestinationPath .\Kepos-vX.Y.Z
+Expand-Archive .\kepos-windows-x64.zip -DestinationPath .\Kepos-vX.Y.Z
 .\Kepos-vX.Y.Z\Kepos\App\Kepos.exe
 ```
 

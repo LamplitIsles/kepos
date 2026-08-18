@@ -255,7 +255,7 @@ test("Windows release preserves pre-existing output when it rejects the run", (t
   const repositorySnapshot = path.join(workspace, "repository");
   const runDirectory = path.join(workspace, "20260101T000001Z");
   const tools = path.join(root, "tools");
-  const artifactName = "kepos-windows-x64-v1.2.3.zip";
+  const artifactName = "kepos-windows-x64.zip";
   const artifact = path.join(runDirectory, artifactName);
   const toWindowsPath = (value: string): string => {
     const converted = windowsPath(value);

@@ -20,9 +20,9 @@ async function fixture(): Promise<{
   const directory = path.join(repository, "dist/release/v1.2.3");
   await mkdir(path.join(repository, "release"), { recursive: true });
   await mkdir(directory, { recursive: true });
-  const apkName = "kepos-android-arm64-v1.2.3.apk";
-  const zipName = "kepos-macos-arm64-v1.2.3.zip";
-  const windowsZipName = "kepos-windows-x64-v1.2.3.zip";
+  const apkName = "kepos-android-arm64.apk";
+  const zipName = "kepos-macos-arm64.zip";
+  const windowsZipName = "kepos-windows-x64.zip";
   await writeFile(path.join(directory, apkName), "apk");
   await writeFile(path.join(directory, zipName), "zip");
   await writeFile(path.join(directory, windowsZipName), "windows zip");

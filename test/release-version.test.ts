@@ -17,13 +17,24 @@ test("maps a release tag to the shared version and artifact contract", () => {
     versionName: "1.2.3",
     androidVersionCode: 1_002_003,
     artifactDirectory: "dist/release/v1.2.3",
-    androidArtifactName: "kepos-android-arm64-v1.2.3.apk",
-    macosArtifactName: "kepos-macos-arm64-v1.2.3.zip",
-    windowsArtifactName: "kepos-windows-x64-v1.2.3.zip",
+    androidArtifactName: "kepos-android-arm64.apk",
+    macosArtifactName: "kepos-macos-arm64.zip",
+    windowsArtifactName: "kepos-windows-x64.zip",
     checksumName: "SHA256SUMS",
     checksumSignatureName: "SHA256SUMS.minisig",
     mode: "release",
   });
+});
+
+test("keeps v0.3.0 metadata tag-derived while asset names stay stable", () => {
+  const version = parseReleaseTag("v0.3.0", "release");
+
+  assert.equal(version.versionName, "0.3.0");
+  assert.equal(version.androidVersionCode, 3_000);
+  assert.equal(version.artifactDirectory, "dist/release/v0.3.0");
+  assert.equal(version.androidArtifactName, "kepos-android-arm64.apk");
+  assert.equal(version.macosArtifactName, "kepos-macos-arm64.zip");
+  assert.equal(version.windowsArtifactName, "kepos-windows-x64.zip");
 });
 
 test("isolates rehearsal artifacts from formal release artifacts", () => {
@@ -40,7 +51,7 @@ test("reuses an empty artifact directory without overwriting an output", async (
   const root = await mkdtemp(path.join(os.tmpdir(), "kepos-release-version-"));
   context.after(() => rm(root, { force: true, recursive: true }));
   const directory = path.join(root, "v0.1.0");
-  const apk = path.join(directory, "kepos-android-arm64-v0.1.0.apk");
+  const apk = path.join(directory, "kepos-android-arm64.apk");
 
   await prepareReleaseArtifactDirectory(directory, [apk]);
   await prepareReleaseArtifactDirectory(directory, [apk]);
@@ -48,7 +59,7 @@ test("reuses an empty artifact directory without overwriting an output", async (
 
   await assert.rejects(
     prepareReleaseArtifactDirectory(directory, [apk]),
-    /output already exists: kepos-android-arm64-v0\.1\.0\.apk/i,
+    /output already exists: kepos-android-arm64\.apk/i,
   );
 });
 

@@ -55,7 +55,7 @@ unset KEPOS_ANDROID_KEYSTORE KEPOS_ANDROID_KEY_ALIAS KEPOS_ANDROID_KEY_PASSWORD
 `release:windows` transfers only the tracked source snapshot to `nuc-kep`,
 invokes `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`,
 builds in the NTFS `C:\kb` workspace, and copies back only the verified
-`kepos-windows-x64-v0.1.0.zip`. The ZIP has one top-level `Kepos` directory:
+`kepos-windows-x64.zip`. The ZIP has one top-level `Kepos` directory:
 `AppxManifest.xml` and `Assets\Logo.ico` are beside `App\Kepos.exe` and its
 explicitly allowlisted runtime files. The remote side resolves the annotated
 tag against the release Mac `HEAD`, validates the exact layout and x64 PE
@@ -75,7 +75,8 @@ accepted by the publisher.
 
 ### 3. Manifest and independent verification
 
-After all three binaries exist in the same formal or rehearsal directory:
+After `kepos-android-arm64.apk`, `kepos-macos-arm64.zip`, and
+`kepos-windows-x64.zip` exist in the same formal or rehearsal directory:
 
 ```sh
 export KEPOS_MINISIGN_SECRET_KEY="/absolute/path/outside/repository/minisign.key"
@@ -109,15 +110,16 @@ the recorded public fingerprint:
 
 ```sh
 actual=$(apksigner verify --verbose --print-certs \
-  dist/release/v0.1.0/kepos-android-arm64-v0.1.0.apk | \
+  dist/release/v0.1.0/kepos-android-arm64.apk | \
   awk -F: '/Signer #1 certificate SHA-256 digest/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }')
 test "$actual" = "$(cat release/android-certificate.sha256)"
 ```
 
 Stop if the digest differs.
 
-The draft must contain exactly five assets: the Android APK, macOS ZIP, Windows
-ZIP, `SHA256SUMS`, and `SHA256SUMS.minisig`.
+The draft must contain exactly these five assets: `kepos-android-arm64.apk`,
+`kepos-macos-arm64.zip`, `kepos-windows-x64.zip`, `SHA256SUMS`, and
+`SHA256SUMS.minisig`.
 
 ```sh
 npm run release:draft -- v0.1.0

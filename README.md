@@ -64,10 +64,9 @@ The implementation follows four rules:
 | macOS | Publisher, subscriber, or both | Apple Silicon, ad-hoc-signed direct-download ZIP, native tray app |
 | Windows | Publisher, subscriber, or both | Windows 11 x64, unsigned portable ZIP, notification-area app |
 
-The direct-download release includes `kepos-android-arm64-vX.Y.Z.apk`,
-`kepos-macos-arm64-vX.Y.Z.zip`, and
-`kepos-windows-x64-vX.Y.Z.zip`. Verify `SHA256SUMS` with the repository's
-minisign key before opening any archive; the [latest release](https://github.com/LamplitIsles/kepos/releases/latest)
+The direct-download release includes `kepos-android-arm64.apk`,
+`kepos-macos-arm64.zip`, and `kepos-windows-x64.zip`. Verify `SHA256SUMS` with the
+repository's minisign key before opening any archive; the [latest release](https://github.com/LamplitIsles/kepos/releases/latest)
 contains the five release assets.
 
 The container and Pod-facing gateway have also been exercised in a private

@@ -127,7 +127,7 @@ test("builds, aligns, signs, and verifies a versioned APK without exposing the p
     plan.finalApk,
     path.join(
       repository,
-      "dist/release/rehearsal-v1.2.3/kepos-android-arm64-v1.2.3.apk",
+      "dist/release/rehearsal-v1.2.3/kepos-android-arm64.apk",
     ),
   );
 });

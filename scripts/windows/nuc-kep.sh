@@ -46,11 +46,7 @@ if [[ -n $RELEASE_TAG ]]; then
     RELEASE_DIRECTORY="${LOCAL_ROOT}/dist/release/rehearsal-${RELEASE_TAG}"
   fi
   readonly RELEASE_DIRECTORY
-  readonly RELEASE_ARTIFACT_NAME="kepos-windows-x64-${RELEASE_TAG}.zip"
-  if [[ ! $RELEASE_ARTIFACT_NAME =~ ^kepos-windows-x64-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.zip$ ]]; then
-    printf 'invalid contained release artifact name: %s\n' "$RELEASE_ARTIFACT_NAME" >&2
-    exit 2
-  fi
+  readonly RELEASE_ARTIFACT_NAME="kepos-windows-x64.zip"
   if ! (
     cd "$LOCAL_ROOT"
     node --import tsx --input-type=module -e 'import { parseReleaseTag } from "./scripts/release-version.ts"; parseReleaseTag(process.argv[1], process.argv[2]);' "$RELEASE_TAG" "$RELEASE_MODE"
@@ -135,7 +131,7 @@ if [[ -n $RELEASE_TAG ]]; then
   if [[ -d "$RELEASE_DIRECTORY" ]]; then
     while IFS= read -r -d '' existing; do
       case "$(basename "$existing")" in
-        "kepos-android-arm64-${RELEASE_TAG}.apk"|"kepos-macos-arm64-${RELEASE_TAG}.zip") ;;
+        "kepos-android-arm64.apk"|"kepos-macos-arm64.zip") ;;
         *) printf 'unexpected release output: %s\n' "$existing" >&2; exit 1 ;;
       esac
     done < <(find "$RELEASE_DIRECTORY" -mindepth 1 -maxdepth 1 -print0)

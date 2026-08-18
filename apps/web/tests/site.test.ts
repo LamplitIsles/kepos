@@ -100,11 +100,12 @@ describe("Kepos landing page", () => {
     expect(heroDownloads).toBeLessThan(heroProof);
 
     const downloads = [
-      ["kepos-android-arm64-v0.1.0.apk", /android/i],
-      ["kepos-macos-arm64-v0.1.0.zip", /mac(?:os)?/i],
-      ["kepos-windows-x64-v0.1.0.zip", /windows/i],
+      ["kepos-android-arm64.apk", /android/i],
+      ["kepos-macos-arm64.zip", /mac(?:os)?/i],
+      ["kepos-windows-x64.zip", /windows/i],
     ] as const;
     for (const [artifact, platform] of downloads) {
+      expect(html).toContain(`https://github.com/LamplitIsles/kepos/releases/latest/download/${artifact}`);
       const anchors = [...html.matchAll(new RegExp(`<a\\b[^>]*href="[^"]*${artifact}"[^>]*>`, "g"))];
       expect(anchors.length).toBeGreaterThanOrEqual(2);
       for (const [anchor] of anchors) {
@@ -112,6 +113,7 @@ describe("Kepos landing page", () => {
         expect(accessibleName).toMatch(platform);
       }
     }
+    expect(html).not.toMatch(/releases\/download\/v/);
     expect(html).not.toContain("ANDROID / ARM64");
     expect(html).not.toContain("APPLE SILICON");
     expect(css).not.toContain('content: "SIGNED RELEASE"');

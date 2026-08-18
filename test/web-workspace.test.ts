@@ -49,15 +49,15 @@ test("website offers direct Android, macOS, and Windows release downloads", () =
 
   assert.match(
     html,
-    /https:\/\/github\.com\/LamplitIsles\/kepos\/releases\/download\/v0\.1\.0\/kepos-android-arm64-v0\.1\.0\.apk/,
+    /https:\/\/github\.com\/LamplitIsles\/kepos\/releases\/latest\/download\/kepos-android-arm64\.apk/,
   );
   assert.match(
     html,
-    /https:\/\/github\.com\/LamplitIsles\/kepos\/releases\/download\/v0\.1\.0\/kepos-macos-arm64-v0\.1\.0\.zip/,
+    /https:\/\/github\.com\/LamplitIsles\/kepos\/releases\/latest\/download\/kepos-macos-arm64\.zip/,
   );
   assert.match(
     html,
-    /https:\/\/github\.com\/LamplitIsles\/kepos\/releases\/download\/v0\.1\.0\/kepos-windows-x64-v0\.1\.0\.zip/,
+    /https:\/\/github\.com\/LamplitIsles\/kepos\/releases\/latest\/download\/kepos-windows-x64\.zip/,
   );
   assert.doesNotMatch(html, /#verify-a-downloaded-release/);
   assert.doesNotMatch(html, /FORTHCOMING/);
