@@ -166,6 +166,156 @@ test("Windows build PowerShell parses with the supported Windows PowerShell", (t
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test("Windows workflow rejects reparse-point run directories", (t) => {
+  const script = windowsPath(buildScript);
+  if (!script) {
+    t.skip("the exact Windows PowerShell executable is unavailable");
+    return;
+  }
+
+  const root = mkdtempSync(path.join(os.tmpdir(), "kepos-windows-reparse-point-"));
+  const workspace = path.join(root, "workspace");
+  const repositorySnapshot = path.join(workspace, "repository");
+  const runDirectory = path.join(workspace, "20260101T000000Z");
+  const outside = path.join(root, "outside");
+  const tools = path.join(root, "tools");
+  const sentinel = path.join(outside, "sentinel.txt");
+  const powershell = process.platform === "win32" ? "powershell.exe" : powerShellOnWsl;
+  const toWindowsPath = (value: string): string => {
+    const converted = windowsPath(value);
+    assert.ok(converted, `could not convert test path to Windows form: ${value}`);
+    return converted;
+  };
+  const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+
+  mkdirSync(repositorySnapshot, { recursive: true });
+  mkdirSync(outside, { recursive: true });
+  mkdirSync(tools, { recursive: true });
+  writeFileSync(sentinel, "test-owned sentinel\n");
+
+  try {
+    const junction = spawnSync(
+      powershell,
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `New-Item -ItemType Junction -Path ${quote(toWindowsPath(runDirectory))} -Target ${quote(toWindowsPath(outside))} | Out-Null`,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(junction.status, 0, junction.stderr || junction.stdout);
+
+    const result = spawnSync(
+      powershell,
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        script,
+        "-Repository",
+        toWindowsPath(repositorySnapshot),
+        "-RunDirectory",
+        toWindowsPath(runDirectory),
+        "-WorkspaceRoot",
+        toWindowsPath(workspace),
+        "-ToolsDirectory",
+        toWindowsPath(tools),
+        "-RunId",
+        "20260101T000000Z",
+        "-RootRevision",
+        "root",
+        "-BareNativeRevision",
+        "native",
+        "-BareWinUiRevision",
+        "win-ui",
+        "-BareAppKitRevision",
+        "app-kit",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(result.status, 0, result.stderr || result.stdout);
+    assert.match(`${result.stdout}\n${result.stderr}`, /reparse point/i);
+    assert.equal(readFileSync(sentinel, "utf8"), "test-owned sentinel\n");
+    assert.equal(existsSync(path.join(outside, ".kepos-windows-workflow-run")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows release preserves pre-existing output when it rejects the run", (t) => {
+  const script = windowsPath(buildScript);
+  if (!script) {
+    t.skip("the exact Windows PowerShell executable is unavailable");
+    return;
+  }
+
+  const root = mkdtempSync(path.join(os.tmpdir(), "kepos-windows-existing-release-"));
+  const workspace = path.join(root, "workspace");
+  const repositorySnapshot = path.join(workspace, "repository");
+  const runDirectory = path.join(workspace, "20260101T000001Z");
+  const tools = path.join(root, "tools");
+  const artifactName = "kepos-windows-x64-v1.2.3.zip";
+  const artifact = path.join(runDirectory, artifactName);
+  const toWindowsPath = (value: string): string => {
+    const converted = windowsPath(value);
+    assert.ok(converted, `could not convert test path to Windows form: ${value}`);
+    return converted;
+  };
+
+  mkdirSync(repositorySnapshot, { recursive: true });
+  mkdirSync(runDirectory, { recursive: true });
+  mkdirSync(tools, { recursive: true });
+  writeFileSync(artifact, "pre-existing artifact\n");
+
+  try {
+    const result = spawnSync(
+      process.platform === "win32" ? "powershell.exe" : powerShellOnWsl,
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        script,
+        "-Repository",
+        toWindowsPath(repositorySnapshot),
+        "-RunDirectory",
+        toWindowsPath(runDirectory),
+        "-WorkspaceRoot",
+        toWindowsPath(workspace),
+        "-ToolsDirectory",
+        toWindowsPath(tools),
+        "-RunId",
+        "20260101T000001Z",
+        "-RootRevision",
+        "root",
+        "-BareNativeRevision",
+        "native",
+        "-BareWinUiRevision",
+        "win-ui",
+        "-BareAppKitRevision",
+        "app-kit",
+        "-Workflow",
+        "release",
+        "-ReleaseTag",
+        "v1.2.3",
+        "-ReleaseMode",
+        "rehearsal",
+        "-RemoteOrigin",
+        "https://example.invalid/kepos.git",
+        "-ReleaseArtifactName",
+        artifactName,
+      ],
+      { encoding: "utf8" },
+    );
+
+    assert.notEqual(result.status, 0, result.stderr || result.stdout);
+    assert.match(`${result.stdout}\n${result.stderr}`, /release output already exists/i);
+    assert.equal(readFileSync(artifact, "utf8"), "pre-existing artifact\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Windows control script passes bash syntax validation", (t) => {
   const result = spawnSync("bash", ["-n", controlScript], { encoding: "utf8" });
   if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {

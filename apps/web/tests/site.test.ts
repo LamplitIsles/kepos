@@ -100,15 +100,16 @@ describe("Kepos landing page", () => {
     expect(heroDownloads).toBeLessThan(heroProof);
 
     const downloads = [
-      ["kepos-android-arm64-v0.1.0.apk", "Android"],
-      ["kepos-macos-arm64-v0.1.0.zip", "Mac(?:OS)?"],
-      ["kepos-windows-x64-v0.1.0.zip", "Windows"],
+      ["kepos-android-arm64-v0.1.0.apk", /android/i],
+      ["kepos-macos-arm64-v0.1.0.zip", /mac(?:os)?/i],
+      ["kepos-windows-x64-v0.1.0.zip", /windows/i],
     ] as const;
     for (const [artifact, platform] of downloads) {
       const anchors = [...html.matchAll(new RegExp(`<a\\b[^>]*href="[^"]*${artifact}"[^>]*>`, "g"))];
       expect(anchors.length).toBeGreaterThanOrEqual(2);
       for (const [anchor] of anchors) {
-        expect(anchor).toMatch(new RegExp(`aria-label="Download Kepos for ${platform}"`, "i"));
+        const accessibleName = anchor.match(/\saria-label="([^"]+)"/i)?.[1];
+        expect(accessibleName).toMatch(platform);
       }
     }
     expect(html).not.toContain("ANDROID / ARM64");

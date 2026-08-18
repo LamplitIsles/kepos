@@ -43,6 +43,57 @@ function Assert-OwnedPath {
   }
 }
 
+function Assert-SafeOwnedPath {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Parent,
+    [Parameter(Mandatory = $true)] [string]$Child,
+    [Parameter(Mandatory = $true)] [string]$Name
+  )
+  Assert-OwnedPath $Parent $Child $Name
+  $parentPath = Get-CanonicalPath $Parent
+  $currentPath = Get-CanonicalPath $Child
+  while ($true) {
+    $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+      throw "$Name contains an existing reparse point: $currentPath"
+    }
+    if ($currentPath.Equals($parentPath, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+    $nextPath = [System.IO.Path]::GetDirectoryName($currentPath)
+    if ([string]::IsNullOrWhiteSpace($nextPath) -or $nextPath -eq $currentPath) {
+      throw "Unable to inspect containment path for $Name"
+    }
+    $currentPath = Get-CanonicalPath $nextPath
+  }
+}
+
+function Assert-NoReparsePointsInTree {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Root,
+    [Parameter(Mandatory = $true)] [string]$Name
+  )
+  $rootItem = Get-Item -LiteralPath $Root -Force -ErrorAction Stop
+  if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw "$Name contains an existing reparse point: $Root"
+  }
+  $link = Get-ChildItem -LiteralPath $Root -Force -Recurse -ErrorAction Stop |
+    Where-Object { ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 } |
+    Select-Object -First 1
+  if ($null -ne $link) { throw "$Name contains an existing reparse point: $($link.FullName)" }
+}
+
+function Remove-SafeOwnedTree {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Parent,
+    [Parameter(Mandatory = $true)] [string]$Path,
+    [Parameter(Mandatory = $true)] [string]$Name
+  )
+  Assert-SafeOwnedPath $Parent $Path $Name
+  if (Test-Path -LiteralPath $Path) {
+    Assert-NoReparsePointsInTree $Path $Name
+    Remove-Item -LiteralPath $Path -Recurse -Force
+  }
+}
+
 function Get-ContainedReleaseArtifactPath {
   param(
     [Parameter(Mandatory = $true)] [string]$RunDirectory,
@@ -52,7 +103,7 @@ function Get-ContainedReleaseArtifactPath {
     throw "invalid Windows artifact name: $ArtifactName"
   }
   $artifact = Join-Path $RunDirectory $ArtifactName
-  Assert-OwnedPath $RunDirectory $artifact 'release artifact'
+  Assert-SafeOwnedPath $RunDirectory $artifact 'release artifact'
   return $artifact
 }
 
@@ -93,6 +144,7 @@ function Remove-OwnedSubst {
 
 function Test-OwnedRunDirectory {
   param([Parameter(Mandatory = $true)] [System.IO.DirectoryInfo]$Directory)
+  if (($Directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
   $marker = Join-Path $Directory.FullName '.kepos-windows-workflow-run'
   if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { return $false }
   try {
@@ -236,13 +288,17 @@ function Invoke-PortableRelease {
   $artifact = Join-Path $RunDirectory $ArtifactName
   if (Test-Path -LiteralPath $artifact) { throw "release output already exists: $artifact" }
   $sourceRoot = Join-Path $RunDirectory 'dist\desktop\Kepos'
+  Assert-SafeOwnedPath $RunDirectory $sourceRoot 'portable source'
   $fileSet = @(Get-PortableFileSet $sourceRoot)
   $packageRoot = Join-Path $RunDirectory 'package'
   $packageApp = Join-Path $packageRoot 'Kepos'
   $extracted = Join-Path $RunDirectory 'extracted'
+  Assert-SafeOwnedPath $RunDirectory $packageRoot 'release package'
+  Assert-SafeOwnedPath $RunDirectory $extracted 'release extraction'
   foreach ($directory in @($packageRoot, $extracted)) {
     if (Test-Path -LiteralPath $directory) { throw "release output already exists: $directory" }
   }
+  $script:ReleasePackageOwned = $true
   New-Item -ItemType Directory -Path $packageApp -Force | Out-Null
   foreach ($relative in $fileSet) {
     $source = Join-Path $sourceRoot $relative
@@ -255,7 +311,9 @@ function Invoke-PortableRelease {
     New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
     Copy-Item -LiteralPath $source -Destination $target
   }
+  $script:ReleaseArtifactOwned = $true
   Compress-Archive -LiteralPath $packageApp -DestinationPath $artifact -CompressionLevel Optimal
+  $script:ReleaseExtractionOwned = $true
   New-Item -ItemType Directory -Path $extracted -Force | Out-Null
   Expand-Archive -LiteralPath $artifact -DestinationPath $extracted -Force
   $extractedApp = Join-Path $extracted 'Kepos'
@@ -274,18 +332,30 @@ $OriginalLocation = (Get-Location).Path
 $Logs = $null
 $RunMarker = $null
 $ReleaseArtifactPath = $null
+$ReleaseArtifactOwned = $false
+$ReleasePackageOwned = $false
+$ReleaseExtractionOwned = $false
 
 try {
   $WorkspaceRoot = Get-CanonicalPath $WorkspaceRoot
   $RunDirectory = Get-CanonicalPath $RunDirectory
   $Repository = Get-CanonicalPath $Repository
   $ToolsDirectory = Get-CanonicalPath $ToolsDirectory
-  Assert-OwnedPath $WorkspaceRoot $RunDirectory 'RunDirectory'
-  Assert-OwnedPath $WorkspaceRoot $Repository 'Repository'
+  Assert-SafeOwnedPath $WorkspaceRoot $RunDirectory 'RunDirectory'
+  Assert-SafeOwnedPath $WorkspaceRoot $Repository 'Repository'
   if ($Workflow -eq 'release') {
     if ([string]::IsNullOrWhiteSpace($ReleaseArtifactName)) { throw 'release workflow requires an artifact name' }
     # Validate and contain this value before any catch-path cleanup can use it.
     $ReleaseArtifactPath = Get-ContainedReleaseArtifactPath $RunDirectory $ReleaseArtifactName
+    foreach ($existingReleaseOutput in @(
+      $ReleaseArtifactPath,
+      (Join-Path $RunDirectory 'package'),
+      (Join-Path $RunDirectory 'extracted')
+    )) {
+      if (Test-Path -LiteralPath $existingReleaseOutput) {
+        throw "release output already exists: $existingReleaseOutput"
+      }
+    }
   }
 
   $Node = Join-Path $ToolsDirectory 'node-v24.18.1-win-x64\node.exe'
@@ -295,11 +365,11 @@ try {
   $RepositoryArtifact = Join-Path $Repository 'dist\desktop'
   $RevisionFile = Join-Path $RunDirectory 'build-revisions.txt'
   $RunMarker = Join-Path $RunDirectory '.kepos-windows-workflow-run'
-  Assert-OwnedPath $Repository $RepositoryArtifact 'Repository artifact'
-  Assert-OwnedPath $RunDirectory $Artifact 'staged artifact'
-  Assert-OwnedPath $RunDirectory $Logs 'logs'
-  Assert-OwnedPath $RunDirectory $RevisionFile 'revision file'
-  Assert-OwnedPath $WorkspaceRoot $RunMarker 'run marker'
+  Assert-SafeOwnedPath $Repository $RepositoryArtifact 'Repository artifact'
+  Assert-SafeOwnedPath $RunDirectory $Artifact 'staged artifact'
+  Assert-SafeOwnedPath $RunDirectory $Logs 'logs'
+  Assert-SafeOwnedPath $RunDirectory $RevisionFile 'revision file'
+  Assert-SafeOwnedPath $WorkspaceRoot $RunMarker 'run marker'
 
   if (-not (Test-Path -LiteralPath $WorkspaceRoot -PathType Container)) { throw "Workspace root is missing: $WorkspaceRoot" }
   if (-not (Test-Path -LiteralPath $Repository -PathType Container)) { throw "Repository snapshot is missing: $Repository" }
@@ -311,13 +381,15 @@ try {
   $ownedRuns = Get-ChildItem -LiteralPath $WorkspaceRoot -Directory -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match '^[0-9TZ-]+$' -and $_.Name -ne $RunId -and (Test-OwnedRunDirectory $_) } |
     Sort-Object LastWriteTime -Descending
-  $ownedRuns | Select-Object -Skip 3 | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+  $ownedRuns | Select-Object -Skip 3 | ForEach-Object {
+    Remove-SafeOwnedTree $WorkspaceRoot $_.FullName 'retained run directory'
+  }
   New-Item -ItemType Directory -Path $Logs -Force | Out-Null
   Start-Transcript -LiteralPath (Join-Path $Logs 'orchestrator.log') -Force | Out-Null
   $TranscriptStarted = $true
 
   foreach ($ownedOutput in @((Join-Path $RunDirectory 'dist'), (Join-Path $RunDirectory 'native-check'))) {
-    if (Test-Path -LiteralPath $ownedOutput) { Remove-Item -LiteralPath $ownedOutput -Recurse -Force }
+    Remove-SafeOwnedTree $RunDirectory $ownedOutput 'owned build output'
   }
 
   # npm workspace discovery must use the canonical checkout path. npm resolves
@@ -367,18 +439,20 @@ try {
   $NativeCheck = Join-Path $BuildRepository '.build\windows-native-check'
   $CanonicalNativeCheck = Join-Path $Repository '.build\windows-native-check'
   $CanonicalNativeBuildRoot = Join-Path $WorkspaceRoot 'cache'
-  Assert-OwnedPath $WorkspaceRoot $CanonicalNativeBuildRoot 'native build root'
+  Assert-SafeOwnedPath $WorkspaceRoot $CanonicalNativeBuildRoot 'native build root'
   New-Item -ItemType Directory -Path $CanonicalNativeBuildRoot -Force | Out-Null
   $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT = 'K:\cache'
   # A tracked snapshot can carry older mtimes than the persistent cache. Drop
   # only compiler PCH outputs so clang rebuilds them; retain downloaded SDKs.
   $cachedCMakeFiles = Join-Path $CanonicalNativeBuildRoot 'winui\CMakeFiles'
+  Assert-SafeOwnedPath $CanonicalNativeBuildRoot $cachedCMakeFiles 'cached CMake files'
   if (Test-Path -LiteralPath $cachedCMakeFiles) {
+    Assert-NoReparsePointsInTree $cachedCMakeFiles 'cached CMake files'
     Get-ChildItem -LiteralPath $cachedCMakeFiles -Filter '*.pch' -File -Recurse -ErrorAction SilentlyContinue |
       Remove-Item -Force
   }
-  Assert-OwnedPath $Repository $CanonicalNativeCheck 'native check output'
-  if (Test-Path -LiteralPath $NativeCheck) { Remove-Item -LiteralPath $NativeCheck -Recurse -Force }
+  Assert-SafeOwnedPath $Repository $CanonicalNativeCheck 'native check output'
+  Remove-SafeOwnedTree $Repository $CanonicalNativeCheck 'native check output'
 
   function Invoke-LoggedNative {
     param(
@@ -485,7 +559,7 @@ try {
   # explicit bounded outcome and is finalized after timeout cleanup.
   $NativeCheckResult = Join-Path $Logs 'bare-win-ui-run.result.log'
   $WebViewData = Join-Path $RunDirectory 'webview2'
-  Assert-OwnedPath $RunDirectory $WebViewData 'WebView2 test data'
+  Assert-SafeOwnedPath $RunDirectory $WebViewData 'WebView2 test data'
   New-Item -ItemType Directory -Path $WebViewData -Force | Out-Null
   $env:WEBVIEW2_USER_DATA_FOLDER = $WebViewData
   $process = New-Object System.Diagnostics.Process
@@ -540,6 +614,7 @@ try {
   # Keep the run directory as the sole transfer boundary: stage only the
   # already-validated desktop output, never the source checkout or native tree.
   if (-not (Test-Path -LiteralPath $RepositoryArtifact -PathType Container)) { throw "Repository desktop output is missing: $RepositoryArtifact" }
+  Assert-NoReparsePointsInTree $RepositoryArtifact 'Repository desktop output'
   New-Item -ItemType Directory -Path (Join-Path $RunDirectory 'dist') -Force | Out-Null
   Copy-Item -LiteralPath $RepositoryArtifact -Destination $Artifact -Recurse -Force
   $StagedExecutable = Join-Path $Artifact 'Kepos\App\Kepos.exe'
@@ -552,9 +627,15 @@ try {
 } catch {
   $ExitCode = 1
   if ($null -ne $ReleaseArtifactPath) {
-    Remove-Item -LiteralPath $ReleaseArtifactPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $RunDirectory 'package') -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $RunDirectory 'extracted') -Recurse -Force -ErrorAction SilentlyContinue
+    if ($ReleaseArtifactOwned) {
+      try { Remove-SafeOwnedTree $RunDirectory $ReleaseArtifactPath 'release artifact' } catch { }
+    }
+    if ($ReleasePackageOwned) {
+      try { Remove-SafeOwnedTree $RunDirectory (Join-Path $RunDirectory 'package') 'release package' } catch { }
+    }
+    if ($ReleaseExtractionOwned) {
+      try { Remove-SafeOwnedTree $RunDirectory (Join-Path $RunDirectory 'extracted') 'release extraction' } catch { }
+    }
   }
   if ($TranscriptStarted) {
     Write-Host 'Windows desktop build failed:'
