@@ -442,6 +442,10 @@ try {
   Assert-SafeOwnedPath $WorkspaceRoot $CanonicalNativeBuildRoot 'native build root'
   New-Item -ItemType Directory -Path $CanonicalNativeBuildRoot -Force | Out-Null
   $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT = 'K:\cache'
+  $NuGetCache = Join-Path $WorkspaceRoot 'cache-downloads'
+  Assert-SafeOwnedPath $WorkspaceRoot $NuGetCache 'NuGet package cache'
+  New-Item -ItemType Directory -Path $NuGetCache -Force | Out-Null
+  $env:BARE_WIN_UI_NUGET_CACHE = $NuGetCache
   # A tracked snapshot can carry older mtimes than the persistent cache. Drop
   # only compiler PCH outputs so clang rebuilds them; retain downloaded SDKs.
   $cachedCMakeFiles = Join-Path $CanonicalNativeBuildRoot 'winui\CMakeFiles'
