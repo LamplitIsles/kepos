@@ -86,6 +86,12 @@ export function formatTraySnapshot(snapshot: DesktopSnapshot): TrayLabels {
       detail: `${snapshot.publisher.services.length} shared · ${snapshot.publisher.activeSubscribers} connected`,
     };
   }
+  if (snapshot.subscriber?.connection === "unconfigured") {
+    return {
+      status: "Kepos — Waiting for pairing",
+      detail: "Subscriber key ready",
+    };
+  }
   if (snapshot.subscriber) {
     return {
       status: "Kepos — Online",

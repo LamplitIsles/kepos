@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -9,6 +12,12 @@ import {
   type DesktopNativeWindow,
   type StartDesktopHostOptions,
 } from "../apps/desktop/src/host.js";
+import type { DesktopOptions } from "../apps/desktop/src/options.js";
+import type { DesktopSnapshot } from "../apps/desktop/src/protocol.js";
+import { DEFAULT_GATEWAY_PORT } from "../src/home/gateway.js";
+import { loadDesktopOptions } from "../apps/desktop/src/options.js";
+import { acquireDesktopSingleton } from "../apps/desktop/src/singleton.js";
+import { setupSubscriber } from "../src/state/subscriber.js";
 import type { RunningDesktopRuntime } from "../apps/desktop/src/runtime.js";
 import type { DesktopTray } from "../apps/desktop/src/tray.js";
 
@@ -72,13 +81,316 @@ test("desktop host acquires dual-role locks before one control window", async ()
   assert.equal(harness.events.filter((event) => event === "exit:0").length, 1);
 });
 
+test("desktop singleton serializes bootstrap and preserves an existing config", async () => {
+  const homeDirectory = await mkdtemp(
+    path.join(tmpdir(), "kepos-desktop-concurrent-"),
+  );
+  const environment = {
+    XDG_CONFIG_HOME: path.join(homeDirectory, "config"),
+    XDG_STATE_HOME: path.join(homeDirectory, "state"),
+  };
+  const configPath = path.join(
+    environment.XDG_CONFIG_HOME,
+    "kepos",
+    "config.toml",
+  );
+  const configSource = "[subscriber]\nenabled = true\nservices = []\n";
+  await mkdir(path.dirname(configPath), { recursive: true });
+  await writeFile(configPath, configSource);
+
+  let setupCount = 0;
+  let setupEntered!: () => void;
+  const setupStarted = new Promise<void>((resolve) => {
+    setupEntered = resolve;
+  });
+  let releaseSetup!: () => void;
+  const setupGate = new Promise<void>((resolve) => {
+    releaseSetup = resolve;
+  });
+  const loadOptions = () =>
+    loadDesktopOptions([], {
+      homeDirectory,
+      environment,
+      platform: "linux",
+      setupSubscriber: async (options) => {
+        setupCount += 1;
+        setupEntered();
+        await setupGate;
+        return setupSubscriber(options);
+      },
+    });
+  const harness = createHarness();
+  const dependencies = {
+    ...harness.dependencies,
+    acquireSingleton: acquireDesktopSingleton,
+  };
+
+  try {
+    const first = startDesktopHost(
+      { homeDirectory, loadOptions },
+      dependencies,
+    );
+    await setupStarted;
+    await assert.rejects(
+      startDesktopHost({ homeDirectory, loadOptions }, dependencies),
+      /desktop is already running/i,
+    );
+    assert.equal(setupCount, 1);
+    releaseSetup();
+    const host = await first;
+    await host.shutdown();
+    assert.equal(await readFile(configPath, "utf8"), configSource);
+  } finally {
+    releaseSetup();
+    await rm(homeDirectory, { recursive: true, force: true });
+  }
+});
+
+test("desktop host releases the singleton when bootstrap fails", async () => {
+  const harness = createHarness();
+
+  await assert.rejects(
+    startDesktopHost(
+      {
+        homeDirectory: "/Users/neil",
+        loadOptions: async () => {
+          throw new Error("bootstrap failed");
+        },
+      },
+      harness.dependencies,
+    ),
+    /bootstrap failed/,
+  );
+  assert.deepEqual(harness.events, [
+    "singleton:acquire:/Users/neil",
+    "singleton:release",
+  ]);
+});
+
+test("desktop host restores pairing after runtime setup failure and retries", async () => {
+  const harness = createHarness();
+  const subscriberKey = "cd".repeat(32);
+  const firstPublisherKey = "ab".repeat(32);
+  const replacementPublisherKey = "ef".repeat(32);
+  const persisted: string[] = [];
+  const reconfigured: Array<Parameters<RunningDesktopRuntime["reconfigure"]>[0]> = [];
+  let publishSnapshot: ((snapshot: DesktopSnapshot) => void) | undefined;
+  let configuredAttempts = 0;
+  const runtime: RunningDesktopRuntime = {
+    ...harness.runtime,
+    reconfigure: async (configuration) => {
+      reconfigured.push(configuration);
+      if (configuration.subscriber?.subscriberSetup?.configured === false) {
+        publishSnapshot?.({
+          type: "snapshot",
+          appPhase: "running",
+          subscriber: {
+            phase: "running",
+            connection: "unconfigured",
+            subscriberKey,
+            services: [],
+            ...(configuration.subscriber.subscriberSetup.error
+              ? { error: configuration.subscriber.subscriberSetup.error }
+              : {}),
+          },
+        });
+        return;
+      }
+      configuredAttempts += 1;
+      if (configuredAttempts < 3) throw new Error("subscriber start failed");
+      publishSnapshot?.({
+        type: "snapshot",
+        appPhase: "running",
+        subscriber: {
+          phase: "running",
+          connection: "connected",
+          subscriberKey,
+          remotePublisher: {
+            displayName: "publisher",
+            publisherKey: replacementPublisherKey,
+            keyFingerprint: replacementPublisherKey.slice(0, 16),
+          },
+          services: [],
+        },
+      });
+    },
+  };
+  const dependencies: DesktopHostDependencies = {
+    ...harness.dependencies,
+    setSubscriberPublisher: async (options) => {
+      persisted.push(options.publisherKey);
+    },
+    startRuntime: async (startOptions) => {
+      publishSnapshot = startOptions.onSnapshot;
+      startOptions.onSnapshot({
+        type: "snapshot",
+        appPhase: "running",
+        subscriber: {
+          phase: "running",
+          connection: "unconfigured",
+          subscriberKey,
+          services: [],
+        },
+      });
+      return runtime;
+    },
+  };
+  const host = await startDesktopHost(
+    desktopHostOptions({
+      ...subscriberDesktopOptions(),
+      subscriber: {
+        ...subscriberDesktopOptions().subscriber!,
+        subscriberSetup: { configured: false, publicKey: subscriberKey },
+      },
+    }),
+    dependencies,
+  );
+
+  harness.webViews[0]?.emit("message", JSON.stringify({ type: "ready" }));
+  for (const publisherKey of [
+    firstPublisherKey,
+    firstPublisherKey,
+    replacementPublisherKey,
+  ]) {
+    harness.webViews[0]?.emit(
+      "message",
+      JSON.stringify({ type: "setSubscriberPublisher", publisherKey }),
+    );
+    await harness.flushCommands();
+  }
+
+  assert.deepEqual(persisted, [firstPublisherKey, replacementPublisherKey]);
+  assert.equal(configuredAttempts, 3);
+  assert.equal(reconfigured.length, 5);
+  assert.equal(
+    JSON.parse(harness.webViews[0]?.messages.at(-1) ?? "null").subscriber
+      .connection,
+    "connected",
+  );
+  assert.equal(
+    JSON.parse(harness.webViews[0]?.messages.at(-1) ?? "null").subscriber
+      .subscriberKey,
+    subscriberKey,
+  );
+  await host.shutdown();
+});
+
+test("desktop host republishes unconfigured state when persistence fails and retries", async () => {
+  const harness = createHarness();
+  const subscriberKey = "cd".repeat(32);
+  const publisherKey = "ef".repeat(32);
+  const persisted: string[] = [];
+  let publishSnapshot: ((snapshot: DesktopSnapshot) => void) | undefined;
+  let persistenceAttempts = 0;
+  const runtime: RunningDesktopRuntime = {
+    ...harness.runtime,
+    reconfigure: async (configuration) => {
+      if (configuration.subscriber?.subscriberSetup?.configured === false) {
+        publishSnapshot?.({
+          type: "snapshot",
+          appPhase: "running",
+          subscriber: {
+            phase: "running",
+            connection: "unconfigured",
+            subscriberKey,
+            services: [],
+            ...(configuration.subscriber.subscriberSetup.error
+              ? { error: configuration.subscriber.subscriberSetup.error }
+              : {}),
+          },
+        });
+        return;
+      }
+      publishSnapshot?.({
+        type: "snapshot",
+        appPhase: "running",
+        subscriber: {
+          phase: "running",
+          connection: "connected",
+          subscriberKey,
+          remotePublisher: {
+            displayName: "publisher",
+            publisherKey,
+            keyFingerprint: publisherKey.slice(0, 16),
+          },
+          services: [],
+        },
+      });
+    },
+  };
+  const dependencies: DesktopHostDependencies = {
+    ...harness.dependencies,
+    setSubscriberPublisher: async (options) => {
+      persisted.push(options.publisherKey);
+      persistenceAttempts += 1;
+      if (persistenceAttempts === 1) {
+        throw new Error("persistence failed");
+      }
+    },
+    startRuntime: async (startOptions) => {
+      publishSnapshot = startOptions.onSnapshot;
+      startOptions.onSnapshot({
+        type: "snapshot",
+        appPhase: "running",
+        subscriber: {
+          phase: "running",
+          connection: "unconfigured",
+          subscriberKey,
+          services: [],
+        },
+      });
+      return runtime;
+    },
+  };
+  const host = await startDesktopHost(
+    desktopHostOptions({
+      ...subscriberDesktopOptions(),
+      subscriber: {
+        ...subscriberDesktopOptions().subscriber!,
+        subscriberSetup: { configured: false, publicKey: subscriberKey },
+      },
+    }),
+    dependencies,
+  );
+
+  harness.webViews[0]?.emit("message", JSON.stringify({ type: "ready" }));
+  harness.webViews[0]?.emit(
+    "message",
+    JSON.stringify({ type: "setSubscriberPublisher", publisherKey }),
+  );
+  await harness.flushCommands();
+
+  // Persistence failed before saving; the submit must stay retryable through
+  // an unconfigured snapshot carrying the error, not hang in flight.
+  const afterFailure = JSON.parse(
+    harness.webViews[0]?.messages.at(-1) ?? "null",
+  );
+  assert.equal(afterFailure.subscriber.connection, "unconfigured");
+  assert.equal(afterFailure.subscriber.phase, "running");
+  assert.equal(afterFailure.subscriber.error, "persistence failed");
+  assert.equal(afterFailure.subscriber.subscriberKey, subscriberKey);
+  assert.deepEqual(persisted, [publisherKey]);
+
+  // A later submit retries persistence and completes the connection.
+  harness.webViews[0]?.emit(
+    "message",
+    JSON.stringify({ type: "setSubscriberPublisher", publisherKey }),
+  );
+  await harness.flushCommands();
+
+  assert.deepEqual(persisted, [publisherKey, publisherKey]);
+  assert.equal(
+    JSON.parse(harness.webViews[0]?.messages.at(-1) ?? "null").subscriber
+      .connection,
+    "connected",
+  );
+  await host.shutdown();
+});
+
 test("desktop host supports publisher-only mode", async () => {
   const harness = createHarness();
   const host = await startDesktopHost(
-    {
-      homeDirectory: "/Users/neil",
-      publisher: { stateDir: "/state/publisher" },
-    },
+    desktopHostOptions({ publisher: { stateDir: "/state/publisher" } }),
     harness.dependencies,
   );
 
@@ -119,11 +431,14 @@ test("desktop host forwards configured role policy to the runtime", async () => 
     allow: [],
     services: [],
   };
-  const options = dualOptions();
+  const options = dualDesktopOptions();
   Object.assign(options, { bootstrap });
   Object.assign(options.publisher ?? {}, { policy });
   Object.assign(options.subscriber ?? {}, { route: "public" });
-  const host = await startDesktopHost(options, harness.dependencies);
+  const host = await startDesktopHost(
+    desktopHostOptions(options),
+    harness.dependencies,
+  );
 
   assert.deepEqual(harness.runtimeOptions?.bootstrap, bootstrap);
   assert.deepEqual(harness.runtimeOptions?.publisher?.policy, policy);
@@ -367,22 +682,36 @@ for (const nativeFailure of [
   });
 }
 
-function subscriberOptions(): StartDesktopHostOptions {
+function desktopHostOptions(options: DesktopOptions): StartDesktopHostOptions {
   return {
     homeDirectory: "/Users/neil",
+    loadOptions: async () => options,
+  };
+}
+
+function subscriberDesktopOptions(): DesktopOptions {
+  return {
     subscriber: {
       stateDir: "/state/subscriber",
-      gatewayPort: 17_480,
+      gatewayPort: DEFAULT_GATEWAY_PORT,
       services: [{ id: "ssh", localPort: 2222 }],
     },
   };
 }
 
-function dualOptions(): StartDesktopHostOptions {
+function dualDesktopOptions(): DesktopOptions {
   return {
-    ...subscriberOptions(),
+    ...subscriberDesktopOptions(),
     publisher: { stateDir: "/state/publisher" },
   };
+}
+
+function subscriberOptions(): StartDesktopHostOptions {
+  return desktopHostOptions(subscriberDesktopOptions());
+}
+
+function dualOptions(): StartDesktopHostOptions {
+  return desktopHostOptions(dualDesktopOptions());
 }
 
 interface HarnessOptions {
@@ -504,7 +833,7 @@ function createHarness(options: HarnessOptions = {}) {
                   publisherKey: remotePublisherKey,
                   keyFingerprint: remotePublisherKey.slice(0, 16),
                 },
-                gatewayPort: 17_480,
+                gatewayPort: DEFAULT_GATEWAY_PORT,
                 services: [
                   {
                     id: "forgejo",
@@ -533,6 +862,7 @@ function createHarness(options: HarnessOptions = {}) {
         });
         return runtime;
       }),
+    setSubscriberPublisher: async () => undefined,
     schedulePoll: (callback) => {
       schedules.push(callback);
       return () => events.push("schedule:cancel");

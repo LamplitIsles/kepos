@@ -65,6 +65,11 @@ test("desktop loads the shared config when no role flags are given", async () =>
         subscriber: { enabled: true, services: [] },
       };
     },
+    setupSubscriber: async () => ({
+      created: false,
+      configured: true,
+      publicKey: "11".repeat(32),
+    }),
   });
 
   assert.deepEqual(loadedPaths, [undefined]);

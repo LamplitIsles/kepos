@@ -67,6 +67,12 @@ test("desktop protocol accepts only closed page commands", () => {
   assert.deepEqual(parseDesktopCommand('{"type":"quit"}'), {
     type: "quit",
   });
+  assert.deepEqual(
+    parseDesktopCommand(
+      JSON.stringify({ type: "setSubscriberPublisher", publisherKey: "ab".repeat(32) }),
+    ),
+    { type: "setSubscriberPublisher", publisherKey: "ab".repeat(32) },
+  );
   for (const type of [
     "createPairingInvitation",
     "cancelPairing",
@@ -104,6 +110,26 @@ test("desktop protocol rejects malformed, oversized, and open-ended commands", (
         '{"type":"openService","serviceId":"../../etc/passwd"}',
       ),
     /service id/,
+  );
+  for (const publisherKey of ["AB".repeat(32), "a".repeat(63), "g".repeat(64)]) {
+    assert.throws(
+      () =>
+        parseDesktopCommand(
+          JSON.stringify({ type: "setSubscriberPublisher", publisherKey }),
+        ),
+      /publisher key is invalid/,
+    );
+  }
+  assert.throws(
+    () =>
+      parseDesktopCommand(
+        JSON.stringify({
+          type: "setSubscriberPublisher",
+          publisherKey: "ab".repeat(32),
+          label: "publisher",
+        }),
+      ),
+    /unknown field/,
   );
 });
 

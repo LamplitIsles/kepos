@@ -34,18 +34,18 @@ async function main(): Promise<void> {
       arguments_[index] !== "--smoke-test",
   );
   const homeDirectory = smokeHome ?? os.homedir();
-  const options = await loadDesktopOptions(launchArguments, {
-    homeDirectory,
-    environment: process.env,
-  });
-
   const smokeReadyFile = process.env.KEPOS_WINDOWS_SMOKE_READY_FILE;
   const smokeQuitFile = process.env.KEPOS_WINDOWS_SMOKE_QUIT_FILE;
   let smokeSnapshot: DesktopSnapshot | undefined;
   const running = await startDesktopHost(
     {
       homeDirectory,
-      ...options,
+      loadOptions: () =>
+        loadDesktopOptions(launchArguments, {
+          homeDirectory,
+          environment: process.env,
+          platform: process.platform,
+        }),
       onSnapshot: (snapshot) => {
         smokeSnapshot = snapshot;
       },

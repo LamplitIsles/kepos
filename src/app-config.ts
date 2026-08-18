@@ -47,11 +47,13 @@ export async function loadKeposConfig(
   configPath?: string,
   environment?: NodeJS.ProcessEnv,
   homeDirectory?: string,
+  platform?: NodeJS.Platform,
 ): Promise<KeposConfig | undefined> {
   const source = await readKeposConfigSource(
     configPath,
     environment,
     homeDirectory,
+    platform,
   );
   return source === undefined ? undefined : parseKeposConfig(source);
 }
@@ -77,9 +79,10 @@ async function readKeposConfigSource(
   configPath: string | undefined,
   environment: NodeJS.ProcessEnv | undefined,
   homeDirectory: string | undefined,
+  platform?: NodeJS.Platform,
 ): Promise<string | undefined> {
   const resolvedPath =
-    configPath ?? defaultKeposConfigPath(environment, homeDirectory);
+    configPath ?? defaultKeposConfigPath(environment, homeDirectory, platform);
   try {
     return await readFile(resolvedPath, "utf8");
   } catch (error) {

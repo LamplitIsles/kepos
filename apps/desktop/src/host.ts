@@ -3,15 +3,18 @@ import {
   acquireSubscriberRuntimeLock,
   type RuntimeLock,
 } from "../../../src/runtime/runtime-lock.js";
+import { setSubscriberPublisher } from "../../../src/state/subscriber.js";
 import { createDesktopController } from "./controller.js";
+import type {
+  DesktopOptions,
+  DesktopSubscriberOptions,
+} from "./options.js";
 import type { DesktopSnapshot } from "./protocol.js";
 import {
   startDesktopRuntime,
   type DesktopRuntimeConfiguration,
-  type StartDesktopPublisherOptions,
   type RunningDesktopRuntime,
   type StartDesktopRuntimeOptions,
-  type StartDesktopSubscriberOptions,
 } from "./runtime.js";
 import { acquireDesktopSingleton } from "./singleton.js";
 import { renderDesktopUi } from "./ui.js";
@@ -39,9 +42,7 @@ export interface DesktopNativeWebView {
 
 export interface StartDesktopHostOptions {
   homeDirectory: string;
-  bootstrap?: StartDesktopRuntimeOptions["bootstrap"];
-  publisher?: Omit<StartDesktopPublisherOptions, "lock">;
-  subscriber?: Omit<StartDesktopSubscriberOptions, "lock">;
+  loadOptions: () => Promise<DesktopOptions>;
   onSnapshot?: (snapshot: DesktopSnapshot) => void;
 }
 
@@ -55,6 +56,9 @@ export interface DesktopHostDependencies {
   startRuntime(
     options: StartDesktopRuntimeOptions,
   ): Promise<RunningDesktopRuntime>;
+  setSubscriberPublisher(
+    options: Parameters<typeof setSubscriberPublisher>[0],
+  ): Promise<void>;
   schedulePoll(callback: () => void): () => void;
   exit(code: number): void;
 }
@@ -74,17 +78,28 @@ export async function startDesktopHost(
   dependencies: DesktopHostDependencies,
 ): Promise<RunningDesktopHost> {
   const singleton = await dependencies.acquireSingleton(options.homeDirectory);
+  let startupOptions: DesktopOptions;
+  try {
+    startupOptions = await options.loadOptions();
+  } catch (error) {
+    try {
+      await singleton.release();
+    } catch {
+      // Preserve the startup error after attempting singleton release.
+    }
+    throw error;
+  }
   let publisherLock: RuntimeLock | undefined;
   let subscriberLock: RuntimeLock | undefined;
   try {
-    if (options.publisher) {
+    if (startupOptions.publisher) {
       publisherLock = await dependencies.acquirePublisherLock(
-        options.publisher.stateDir,
+        startupOptions.publisher.stateDir,
       );
     }
-    if (options.subscriber) {
+    if (startupOptions.subscriber) {
       subscriberLock = await dependencies.acquireSubscriberLock(
-        options.subscriber.stateDir,
+        startupOptions.subscriber.stateDir,
       );
     }
   } catch (error) {
@@ -190,10 +205,77 @@ export async function startDesktopHost(
     await runtime.reconfigure(configuration);
   }
 
+  let persistedSubscriberPublisherKey: string | undefined;
+
+  async function connectSubscriber(publisherKey: string): Promise<void> {
+    const subscriber = startupOptions.subscriber;
+    if (!subscriber) throw new Error("subscriber is not configured");
+    const setup = subscriber.subscriberSetup;
+    if (!setup || setup.configured !== false) return;
+
+    const configuration = (nextSubscriber: DesktopSubscriberOptions) => ({
+      ...(startupOptions.bootstrap
+        ? { bootstrap: startupOptions.bootstrap }
+        : {}),
+      ...(startupOptions.publisher
+        ? { publisher: startupOptions.publisher }
+        : {}),
+      subscriber: nextSubscriber,
+    });
+    const publishRetryableUnconfigured = async (
+      error: unknown,
+    ): Promise<void> => {
+      const retryableSubscriber = {
+        ...subscriber,
+        subscriberSetup: {
+          ...setup,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+      startupOptions = {
+        ...startupOptions,
+        subscriber: retryableSubscriber,
+      };
+      try {
+        await reconfigure(configuration(retryableSubscriber));
+      } catch {
+        // Preserve the original failure; the retryable options remain active.
+      }
+    };
+
+    if (persistedSubscriberPublisherKey !== publisherKey) {
+      try {
+        await dependencies.setSubscriberPublisher({
+          stateDir: subscriber.stateDir,
+          label: "publisher",
+          publisherKey,
+        });
+      } catch (error) {
+        await publishRetryableUnconfigured(error);
+        throw error;
+      }
+      persistedSubscriberPublisherKey = publisherKey;
+    }
+
+    const { subscriberSetup: _subscriberSetup, ...configuredSubscriber } =
+      subscriber;
+    try {
+      await reconfigure(configuration(configuredSubscriber));
+    } catch (error) {
+      await publishRetryableUnconfigured(error);
+      throw error;
+    }
+
+    startupOptions = {
+      ...startupOptions,
+      subscriber: configuredSubscriber,
+    };
+  }
+
   const controller = createDesktopController({
     initialSnapshot: {
       ...initialSnapshot,
-      ...(options.publisher
+      ...(startupOptions.publisher
         ? {
             publisher: {
               phase: "starting" as const,
@@ -204,7 +286,7 @@ export async function startDesktopHost(
             },
           }
         : {}),
-      ...(options.subscriber
+      ...(startupOptions.subscriber
         ? {
             subscriber: {
               phase: "starting" as const,
@@ -221,6 +303,7 @@ export async function startDesktopHost(
     createPairingInvitation: () =>
       requireRuntime(runtime).createPairingInvitation(),
     denyPairing: () => requireRuntime(runtime).denyPairing(),
+    setSubscriberPublisher: connectSubscriber,
     quit: shutdown,
   });
   try {
@@ -262,19 +345,21 @@ export async function startDesktopHost(
   let startedRuntime: RunningDesktopRuntime;
   try {
     runtimeStartTask = dependencies.startRuntime({
-      ...(options.bootstrap ? { bootstrap: options.bootstrap } : {}),
-      ...(options.publisher
+      ...(startupOptions.bootstrap
+        ? { bootstrap: startupOptions.bootstrap }
+        : {}),
+      ...(startupOptions.publisher
         ? {
             publisher: {
-              ...options.publisher,
+              ...startupOptions.publisher,
               lock: publisherLock,
             },
           }
         : {}),
-      ...(options.subscriber
+      ...(startupOptions.subscriber
         ? {
             subscriber: {
-              ...options.subscriber,
+              ...startupOptions.subscriber,
               lock: subscriberLock,
             },
           }
@@ -343,4 +428,9 @@ export const defaultDesktopHostDependencies = {
   acquirePublisherLock: acquirePublisherRuntimeLock,
   acquireSubscriberLock: acquireSubscriberRuntimeLock,
   startRuntime: startDesktopRuntime,
+  setSubscriberPublisher: async (
+    options: Parameters<typeof setSubscriberPublisher>[0],
+  ) => {
+    await setSubscriberPublisher(options);
+  },
 };

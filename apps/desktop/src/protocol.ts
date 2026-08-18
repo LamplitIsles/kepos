@@ -1,4 +1,5 @@
 export type DesktopConnection =
+  | "unconfigured"
   | "connecting"
   | "connected"
   | "reconnecting"
@@ -90,6 +91,7 @@ export type DesktopCommand =
   | { type: "cancelPairing" }
   | { type: "approvePairing" }
   | { type: "denyPairing" }
+  | { type: "setSubscriberPublisher"; publisherKey: string }
   | { type: "quit" };
 
 export function parseDesktopCommand(source: string): DesktopCommand {
@@ -116,6 +118,17 @@ export function parseDesktopCommand(source: string): DesktopCommand {
       throw new Error("desktop command service id is invalid");
     }
     return { type: "openService", serviceId: value.serviceId };
+  }
+
+  if (value.type === "setSubscriberPublisher") {
+    rejectUnknownFields(value, ["type", "publisherKey"]);
+    if (
+      typeof value.publisherKey !== "string" ||
+      !publisherKeyPattern.test(value.publisherKey)
+    ) {
+      throw new Error("desktop command publisher key is invalid");
+    }
+    return { type: "setSubscriberPublisher", publisherKey: value.publisherKey };
   }
 
   if (
@@ -153,3 +166,4 @@ import * as b4a from "b4a";
 
 const maximumMessageBytes = 64 * 1024;
 const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
+const publisherKeyPattern = /^[0-9a-f]{64}$/;

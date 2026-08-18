@@ -201,7 +201,8 @@ export function renderDesktopUi(): string {
       box-shadow: 0 0 0 4px rgba(168, 173, 158, .08);
     }
     .status[data-state="connected"],
-    .status[data-state="running"] { color: var(--green-soft); }
+    .status[data-state="running"],
+    .status[data-state="unconfigured"] { color: var(--green-soft); }
     .status[data-state="connected"] .status-dot,
     .status[data-state="running"] .status-dot {
       background: var(--green);
@@ -209,6 +210,7 @@ export function renderDesktopUi(): string {
     }
     .status[data-state="connecting"] .status-dot,
     .status[data-state="reconnecting"] .status-dot { animation: pulse 1.3s ease-in-out infinite; }
+    .status[data-state="unconfigured"] .status-dot { background: var(--green-soft); }
     .status[data-state="failed"] { color: var(--danger); }
     .status[data-state="failed"] .status-dot { background: var(--danger); }
 
@@ -307,6 +309,32 @@ export function renderDesktopUi(): string {
     .pairing-detail { margin: 0 0 16px; color: var(--muted); font-size: 10px; line-height: 1.55; }
     .pairing-error { color: var(--danger); }
     .pairing-actions { display: flex; gap: 8px; }
+    .subscriber-bootstrap {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 18px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      background: rgba(183, 238, 69, .035);
+    }
+    .subscriber-bootstrap h2 { margin: 0; font-size: 14px; }
+    .subscriber-bootstrap p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+    .subscriber-bootstrap label { color: var(--muted); font-size: 8px; letter-spacing: .13em; text-transform: uppercase; }
+    .subscriber-bootstrap input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 2px;
+      outline: none;
+      background: var(--ink);
+      color: var(--cream);
+      font: 10px var(--mono);
+      letter-spacing: .03em;
+      user-select: text;
+    }
+    .subscriber-bootstrap input:focus { border-color: var(--green); }
+    .subscriber-bootstrap .form-error { color: var(--danger); }
+    .subscriber-bootstrap .action { justify-self: start; }
 
     .service {
       display: grid;
@@ -416,6 +444,14 @@ export function renderDesktopUi(): string {
               <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="local-subscriber-key">Pending</span><button class="action compact" type="button" data-action="copy-local-subscriber-key" aria-label="Copy this device subscriber public key" disabled>Copy</button></div></div>
             </article>
           </div>
+          <form class="subscriber-bootstrap" data-role="subscriber-bootstrap" hidden novalidate>
+            <h2>Connect this subscriber</h2>
+            <p>Enter the publisher public key to save this connection and start the subscriber.</p>
+            <label for="publisher-key">Publisher public key</label>
+            <input id="publisher-key" data-role="publisher-key" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" minlength="64" maxlength="64" pattern="[0-9a-f]{64}" required aria-describedby="subscriber-bootstrap-error" placeholder="lowercase 64-hex key">
+            <p class="form-error" data-role="subscriber-bootstrap-error" role="alert" aria-live="assertive" hidden></p>
+            <button class="action" data-role="subscriber-bootstrap-submit" type="submit">Connect / Save</button>
+          </form>
           <div class="section-head"><strong>Services from this publisher</strong><span data-role="remote-service-label">0 available</span></div>
           <div class="services" data-role="services" aria-live="polite"><div class="empty">Finding your private services…</div></div>
         </section>
@@ -451,10 +487,15 @@ export function renderDesktopUi(): string {
       let selectedView = "remote";
       let lastRelationshipView = "remote";
       let toastTimer;
+      let subscriberBootstrapInFlight = false;
       const relationshipButtons = Array.from(document.querySelectorAll('[data-relationship-tab]'));
       const settingsButton = document.querySelector('[data-view-tab="settings"]');
       const settingsBackButton = document.querySelector('[data-role="settings-back"]');
       const servicesNode = document.querySelector('[data-role="services"]');
+      const subscriberBootstrapForm = document.querySelector('[data-role="subscriber-bootstrap"]');
+      const publisherKeyInput = document.querySelector('[data-role="publisher-key"]');
+      const subscriberBootstrapError = document.querySelector('[data-role="subscriber-bootstrap-error"]');
+      const subscriberBootstrapSubmit = document.querySelector('[data-role="subscriber-bootstrap-submit"]');
       const sharedServicesNode = document.querySelector('[data-role="shared-services"]');
       const remoteSurfaceNode = document.querySelector('[data-role="remote-surface"]');
       const hostedSurfaceNode = document.querySelector('[data-role="hosted-surface"]');
@@ -492,6 +533,7 @@ export function renderDesktopUi(): string {
         .replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 
       const fingerprint = (key) => key ? key.slice(0, 8) + '…' + key.slice(-8) : 'Pending';
+      const subscriberStatusLabel = (subscriber) => subscriber.connection === 'unconfigured' ? 'Waiting to pair' : subscriber.connection;
       const plural = (count, singular, pluralValue) => count + ' ' + (count === 1 ? singular : pluralValue);
 
       const icons = {
@@ -626,23 +668,37 @@ export function renderDesktopUi(): string {
         applySelectedView();
 
         if (subscriber) {
-          const remoteName = subscriber.remotePublisher ? subscriber.remotePublisher.displayName : 'Remote publisher';
+          const waitingForPairing = subscriber.connection === 'unconfigured';
+          const waitingForPublisher = !subscriber.remotePublisher;
+          if (waitingForPairing && subscriber.phase === 'running') {
+            subscriberBootstrapInFlight = false;
+          }
+          subscriberBootstrapForm.hidden = !waitingForPairing;
+          subscriberBootstrapSubmit.disabled = !waitingForPairing || subscriberBootstrapInFlight;
+          if (waitingForPairing && subscriber.error) {
+            subscriberBootstrapError.textContent = subscriber.error;
+            subscriberBootstrapError.hidden = false;
+          }
+          const remoteName = subscriber.remotePublisher ? subscriber.remotePublisher.displayName : 'Waiting for publisher';
           const state = subscriber.phase === 'failed' ? 'failed' : subscriber.connection;
           remoteRelationshipName.textContent = remoteName;
-          connectionNode.textContent = subscriber.phase === 'failed' ? 'Failed' : subscriber.connection;
+          connectionNode.textContent = subscriber.phase === 'failed' ? 'Failed' : subscriberStatusLabel(subscriber);
           connectionNode.closest('[data-relationship-tab]').dataset.state = state;
           remotePublisherName.textContent = remoteName;
-          remotePublisherKey.textContent = fingerprint(subscriber.remotePublisher && subscriber.remotePublisher.publisherKey);
+          remotePublisherKey.textContent = waitingForPublisher ? (waitingForPairing ? 'Not paired' : 'Pending') : fingerprint(subscriber.remotePublisher.publisherKey);
           localSubscriberKey.textContent = fingerprint(subscriber.subscriberKey);
-          remotePublisherCopy.disabled = !(subscriber.remotePublisher && subscriber.remotePublisher.publisherKey);
+          remotePublisherCopy.disabled = waitingForPublisher;
           localSubscriberCopy.disabled = !subscriber.subscriberKey;
-          subscriberRuntimeNode.textContent = subscriber.phase + ' · ' + subscriber.connection;
+          subscriberRuntimeNode.textContent = subscriber.phase + ' · ' + subscriberStatusLabel(subscriber);
           gatewayNode.textContent = subscriber.gatewayPort ? 'localhost:' + subscriber.gatewayPort : 'Not available';
           remoteServiceLabel.textContent = plural(availableServices.length, 'available', 'available');
           servicesNode.innerHTML = subscriber.error
             ? '<div class="error">' + escapeHtml(subscriber.error) + '</div>'
+            : waitingForPairing ? '<div class="empty">Pair this subscriber with a publisher to begin.</div>'
             : services.length ? services.map(renderService).join('') : '<div class="empty">Finding your private services…</div>';
         } else {
+          subscriberBootstrapForm.hidden = true;
+          subscriberBootstrapSubmit.disabled = true;
           subscriberRuntimeNode.textContent = 'Not configured';
           gatewayNode.textContent = 'Not available';
         }
@@ -677,14 +733,14 @@ export function renderDesktopUi(): string {
           ? (subscriber.phase === 'failed' ? 'failed' : subscriber.connection)
           : showingHosted ? (publisher.phase === 'running' ? 'running' : publisher.phase) : snapshot.appPhase;
         const activeLabel = showingRemote
-          ? (subscriber.phase === 'failed' ? 'Subscriber failed' : subscriber.connection)
+          ? (subscriber.phase === 'failed' ? 'Subscriber failed' : subscriberStatusLabel(subscriber))
           : showingHosted ? (publisher.phase === 'running' ? 'Publishing' : publisher.phase) : snapshot.appPhase;
         viewStatusNode.dataset.state = activeState;
         viewStatusLabel.textContent = activeLabel;
         if (selectedView !== 'settings') {
           viewKickerNode.textContent = showingRemote ? 'Remote relationship' : 'Hosted relationship';
           viewTitleNode.textContent = showingRemote
-            ? (subscriber.remotePublisher ? subscriber.remotePublisher.displayName : 'Remote publisher')
+            ? (subscriber.remotePublisher ? subscriber.remotePublisher.displayName : 'Waiting for publisher')
             : (publisher.displayName || 'Local publisher');
           const visibleCount = showingRemote ? availableServices.length : publisher.services.length;
           countNode.textContent = plural(visibleCount, 'SERVICE', 'SERVICES');
@@ -720,6 +776,27 @@ export function renderDesktopUi(): string {
           ? availableRelationshipView(lastRelationshipView, snapshot.subscriber, snapshot.publisher)
           : lastRelationshipView;
         if (relationship) selectView(relationship);
+      });
+      publisherKeyInput.addEventListener('input', () => {
+        publisherKeyInput.setCustomValidity('');
+        subscriberBootstrapError.hidden = true;
+      });
+      subscriberBootstrapForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!snapshot || !snapshot.subscriber || snapshot.subscriber.connection !== 'unconfigured') return;
+        const publisherKey = publisherKeyInput.value;
+        if (!/^[0-9a-f]{64}$/.test(publisherKey)) {
+          publisherKeyInput.setCustomValidity('Enter exactly 64 lowercase hexadecimal characters.');
+          subscriberBootstrapError.textContent = 'Enter exactly 64 lowercase hexadecimal characters.';
+          subscriberBootstrapError.hidden = false;
+          publisherKeyInput.reportValidity();
+          return;
+        }
+        publisherKeyInput.setCustomValidity('');
+        subscriberBootstrapError.hidden = true;
+        subscriberBootstrapInFlight = true;
+        subscriberBootstrapSubmit.disabled = true;
+        send({ type: 'setSubscriberPublisher', publisherKey });
       });
 
       window.addEventListener("bare-native-message", (event) => {
