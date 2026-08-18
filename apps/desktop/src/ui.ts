@@ -349,7 +349,8 @@ export function renderDesktopUi(): string {
 
     .empty, .error { display: grid; min-height: 150px; place-items: center; border-bottom: 1px solid var(--soft-line); color: var(--muted); font-family: var(--display); font-size: 18px; font-style: italic; text-align: center; }
     .error { color: var(--danger); }
-    .settings-intro { max-width: 530px; margin: 2px 0 26px; color: var(--muted); font-family: var(--display); font-size: 18px; line-height: 1.45; }
+    .settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin: 2px 0 26px; }
+    .settings-intro { max-width: 530px; margin: 0; color: var(--muted); font-family: var(--display); font-size: 18px; line-height: 1.45; }
     .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .settings-panel { min-height: 126px; padding: 16px; border: 1px solid var(--line); background: rgba(23, 32, 16, .68); }
     .setting-label { margin: 0 0 8px; color: var(--green); font-size: 8px; letter-spacing: .16em; text-transform: uppercase; }
@@ -385,7 +386,7 @@ export function renderDesktopUi(): string {
         </button>
         <button class="relationship-tab" type="button" data-relationship-tab="hosted" hidden>
           <span class="relationship-direction">Published here</span>
-          <span class="relationship-name" data-role="hosted-relationship-name">This Mac</span>
+          <span class="relationship-name" data-role="hosted-relationship-name">This device</span>
           <span class="relationship-state" data-role="sharing">Starting</span>
         </button>
       </nav>
@@ -411,8 +412,8 @@ export function renderDesktopUi(): string {
             </article>
             <div class="relation-flow"><span class="relation-flow-label">publishes services to</span><svg viewBox="0 0 36 18" aria-hidden="true"><path d="M2 9h30M26 3l6 6-6 6"/></svg></div>
             <article class="identity-card local" data-role="relationship-subscribers" data-identity="local-subscriber">
-              <div class="identity-top"><div><p class="identity-role">Subscriber</p><h2 class="identity-name">This Mac</h2></div><span class="identity-place">Local</span></div>
-              <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="local-subscriber-key">Pending</span><button class="action compact" type="button" data-action="copy-local-subscriber-key" aria-label="Copy this Mac subscriber public key" disabled>Copy</button></div></div>
+              <div class="identity-top"><div><p class="identity-role">Subscriber</p><h2 class="identity-name">This device</h2></div><span class="identity-place">Local</span></div>
+              <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="local-subscriber-key">Pending</span><button class="action compact" type="button" data-action="copy-local-subscriber-key" aria-label="Copy this device subscriber public key" disabled>Copy</button></div></div>
             </article>
           </div>
           <div class="section-head"><strong>Services from this publisher</strong><span data-role="remote-service-label">0 available</span></div>
@@ -420,8 +421,8 @@ export function renderDesktopUi(): string {
         </section>
         <section class="surface" data-role="hosted-surface" hidden>
           <article class="identity-card local" data-role="relationship-publisher" data-identity="local-publisher">
-            <div class="identity-top"><div><p class="identity-role">Publisher</p><h2 class="identity-name" data-role="local-publisher-name">This Mac</h2></div><div class="publisher-primary-actions"><button class="action compact" type="button" data-action="create-pairing">Add device</button><span class="identity-place">Local</span></div></div>
-            <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="local-publisher-key">Pending</span><button class="action compact" type="button" data-action="copy-local-publisher-key" aria-label="Copy this Mac publisher public key" disabled>Copy</button></div></div>
+            <div class="identity-top"><div><p class="identity-role">Publisher</p><h2 class="identity-name" data-role="local-publisher-name">This device</h2></div><div class="publisher-primary-actions"><button class="action compact" type="button" data-action="create-pairing">Add device</button><span class="identity-place">Local</span></div></div>
+            <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="local-publisher-key">Pending</span><button class="action compact" type="button" data-action="copy-local-publisher-key" aria-label="Copy this device publisher public key" disabled>Copy</button></div></div>
           </article>
           <div class="pairing" data-role="pairing" hidden></div>
           <section class="subscriber-roster" data-role="relationship-subscribers">
@@ -432,7 +433,7 @@ export function renderDesktopUi(): string {
           <div class="services" data-role="shared-services" aria-live="polite"><div class="empty">Starting local publisher…</div></div>
         </section>
         <section class="surface" data-role="settings-surface" hidden>
-          <p class="settings-intro">Global runtime details live here. Public identities and membership stay with the publisher relationship they belong to.</p>
+          <div class="settings-heading"><p class="settings-intro">Global runtime details live here. Public identities and membership stay with the publisher relationship they belong to.</p><button class="action compact" type="button" data-role="settings-back">Back to connection</button></div>
           <div class="settings-grid">
             <article class="settings-panel"><p class="setting-label">Subscriber runtime</p><p class="setting-value" data-role="subscriber-runtime">Not configured</p><p class="setting-label">Local gateway</p><p class="setting-value" data-role="gateway">Not available</p></article>
             <article class="settings-panel"><p class="setting-label">Publisher runtime</p><p class="setting-value" data-role="publisher-runtime">Not configured</p><p class="setting-label">Transport</p><p class="setting-value">One shared HyperDHT node</p></article>
@@ -448,9 +449,11 @@ export function renderDesktopUi(): string {
       "use strict";
       let snapshot = null;
       let selectedView = "remote";
+      let lastRelationshipView = "remote";
       let toastTimer;
       const relationshipButtons = Array.from(document.querySelectorAll('[data-relationship-tab]'));
       const settingsButton = document.querySelector('[data-view-tab="settings"]');
+      const settingsBackButton = document.querySelector('[data-role="settings-back"]');
       const servicesNode = document.querySelector('[data-role="services"]');
       const sharedServicesNode = document.querySelector('[data-role="shared-services"]');
       const remoteSurfaceNode = document.querySelector('[data-role="remote-surface"]');
@@ -566,6 +569,14 @@ export function renderDesktopUi(): string {
           '</div></div>';
       };
 
+      const availableRelationshipView = (preferred, subscriber, publisher) => {
+        if (preferred === 'remote' && subscriber) return 'remote';
+        if (preferred === 'hosted' && publisher) return 'hosted';
+        if (subscriber) return 'remote';
+        if (publisher) return 'hosted';
+        return null;
+      };
+
       const applySelectedView = () => {
         for (const button of relationshipButtons) {
           const view = button.dataset.relationshipTab;
@@ -586,6 +597,7 @@ export function renderDesktopUi(): string {
 
       const selectView = (view) => {
         selectedView = view;
+        if (view !== 'settings') lastRelationshipView = view;
         render();
       };
 
@@ -599,8 +611,12 @@ export function renderDesktopUi(): string {
         const services = subscriber && Array.isArray(subscriber.services) ? subscriber.services : [];
         const availableServices = services.filter((service) => service.available);
         const subscriberKeys = publisher && Array.isArray(publisher.activeSubscriberKeys) ? publisher.activeSubscriberKeys : [];
-        if (selectedView === 'remote' && !subscriber) selectedView = publisher ? 'hosted' : 'settings';
-        if (selectedView === 'hosted' && !publisher) selectedView = subscriber ? 'remote' : 'settings';
+        const availableLastRelationship = availableRelationshipView(lastRelationshipView, subscriber, publisher);
+        if (availableLastRelationship) lastRelationshipView = availableLastRelationship;
+        settingsBackButton.hidden = availableLastRelationship === null;
+        if (selectedView !== 'settings') {
+          selectedView = availableRelationshipView(selectedView, subscriber, publisher) || 'settings';
+        }
 
         for (const button of relationshipButtons) {
           const view = button.dataset.relationshipTab;
@@ -632,7 +648,7 @@ export function renderDesktopUi(): string {
         }
 
         if (publisher) {
-          const localName = publisher.displayName || 'This Mac';
+          const localName = publisher.displayName || 'This device';
           const state = publisher.phase === 'running' ? 'running' : publisher.phase;
           hostedRelationshipName.textContent = localName;
           sharingNode.textContent = publisher.phase === 'running' ? plural(subscriberKeys.length, 'connected', 'connected') : publisher.phase;
@@ -699,6 +715,12 @@ export function renderDesktopUi(): string {
         );
       }
       settingsButton.addEventListener('click', () => selectView('settings'));
+      settingsBackButton.addEventListener('click', () => {
+        const relationship = snapshot
+          ? availableRelationshipView(lastRelationshipView, snapshot.subscriber, snapshot.publisher)
+          : lastRelationshipView;
+        if (relationship) selectView(relationship);
+      });
 
       window.addEventListener("bare-native-message", (event) => {
         try {
