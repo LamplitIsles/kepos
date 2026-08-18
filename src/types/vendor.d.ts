@@ -51,7 +51,7 @@ declare module "bare-native" {
     constructor(
       width: number,
       height: number,
-      options?: { hidesOnClose?: boolean },
+      options?: { hidesOnClose?: boolean; title?: string },
     );
     content(view: WebView): this;
     close(): this;

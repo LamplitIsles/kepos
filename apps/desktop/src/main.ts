@@ -55,6 +55,7 @@ async function main(): Promise<void> {
       createWindow: (width, height) =>
         new Window(width, height, {
           hidesOnClose: true,
+          title: "Kepos",
         }) as DesktopNativeWindow,
       createWebView: () => new WebView() as DesktopNativeWebView,
       createTray: () =>
