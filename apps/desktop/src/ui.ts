@@ -566,10 +566,34 @@ export function renderDesktopUi(): string {
           '</div></div>';
       };
 
-      const selectView = (view) => { selectedView = view; render(); };
+      const applySelectedView = () => {
+        for (const button of relationshipButtons) {
+          const view = button.dataset.relationshipTab;
+          button.classList.toggle('selected', view === selectedView);
+          button.setAttribute('aria-pressed', String(view === selectedView));
+        }
+        settingsButton.classList.toggle('selected', selectedView === 'settings');
+        settingsButton.setAttribute('aria-pressed', String(selectedView === 'settings'));
+        remoteSurfaceNode.hidden = selectedView !== 'remote';
+        hostedSurfaceNode.hidden = selectedView !== 'hosted';
+        settingsSurfaceNode.hidden = selectedView !== 'settings';
+        if (selectedView === 'settings') {
+          viewKickerNode.textContent = 'This device';
+          viewTitleNode.textContent = 'Settings';
+          countNode.textContent = 'DEVICE';
+        }
+      };
+
+      const selectView = (view) => {
+        selectedView = view;
+        render();
+      };
 
       const render = () => {
-        if (!snapshot) return;
+        if (!snapshot) {
+          applySelectedView();
+          return;
+        }
         const subscriber = snapshot.subscriber;
         const publisher = snapshot.publisher;
         const services = subscriber && Array.isArray(subscriber.services) ? subscriber.services : [];
@@ -582,14 +606,8 @@ export function renderDesktopUi(): string {
           const view = button.dataset.relationshipTab;
           const configured = view === 'remote' ? Boolean(subscriber) : Boolean(publisher);
           button.hidden = !configured;
-          button.classList.toggle('selected', view === selectedView);
-          button.setAttribute('aria-pressed', String(view === selectedView));
         }
-        settingsButton.classList.toggle('selected', selectedView === 'settings');
-        settingsButton.setAttribute('aria-pressed', String(selectedView === 'settings'));
-        remoteSurfaceNode.hidden = selectedView !== 'remote';
-        hostedSurfaceNode.hidden = selectedView !== 'hosted';
-        settingsSurfaceNode.hidden = selectedView !== 'settings';
+        applySelectedView();
 
         if (subscriber) {
           const remoteName = subscriber.remotePublisher ? subscriber.remotePublisher.displayName : 'Remote publisher';
@@ -647,12 +665,14 @@ export function renderDesktopUi(): string {
           : showingHosted ? (publisher.phase === 'running' ? 'Publishing' : publisher.phase) : snapshot.appPhase;
         viewStatusNode.dataset.state = activeState;
         viewStatusLabel.textContent = activeLabel;
-        viewKickerNode.textContent = showingRemote ? 'Remote relationship' : showingHosted ? 'Hosted relationship' : 'This Mac';
-        viewTitleNode.textContent = showingRemote
-          ? (subscriber.remotePublisher ? subscriber.remotePublisher.displayName : 'Remote publisher')
-          : showingHosted ? (publisher.displayName || 'Local publisher') : 'Settings';
-        const visibleCount = showingRemote ? availableServices.length : showingHosted ? publisher.services.length : 0;
-        countNode.textContent = selectedView === 'settings' ? 'DEVICE' : plural(visibleCount, 'SERVICE', 'SERVICES');
+        if (selectedView !== 'settings') {
+          viewKickerNode.textContent = showingRemote ? 'Remote relationship' : 'Hosted relationship';
+          viewTitleNode.textContent = showingRemote
+            ? (subscriber.remotePublisher ? subscriber.remotePublisher.displayName : 'Remote publisher')
+            : (publisher.displayName || 'Local publisher');
+          const visibleCount = showingRemote ? availableServices.length : publisher.services.length;
+          countNode.textContent = plural(visibleCount, 'SERVICE', 'SERVICES');
+        }
       };
 
       const send = (command) => window.bareNative.postMessage(JSON.stringify(command));
