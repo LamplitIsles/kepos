@@ -370,6 +370,13 @@ try {
   Assert-OwnedPath $WorkspaceRoot $CanonicalNativeBuildRoot 'native build root'
   New-Item -ItemType Directory -Path $CanonicalNativeBuildRoot -Force | Out-Null
   $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT = 'K:\cache'
+  # A tracked snapshot can carry older mtimes than the persistent cache. Drop
+  # only compiler PCH outputs so clang rebuilds them; retain downloaded SDKs.
+  $cachedCMakeFiles = Join-Path $CanonicalNativeBuildRoot 'winui\CMakeFiles'
+  if (Test-Path -LiteralPath $cachedCMakeFiles) {
+    Get-ChildItem -LiteralPath $cachedCMakeFiles -Filter '*.pch' -File -Recurse -ErrorAction SilentlyContinue |
+      Remove-Item -Force
+  }
   Assert-OwnedPath $Repository $CanonicalNativeCheck 'native check output'
   if (Test-Path -LiteralPath $NativeCheck) { Remove-Item -LiteralPath $NativeCheck -Recurse -Force }
 
