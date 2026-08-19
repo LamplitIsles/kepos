@@ -96,8 +96,11 @@ a subscriber-only `config.toml` with the same bootstrap network as the publisher
 and explicit local ports. Copying a publisher section from another device would
 be incorrect.
 
-The product needs a supported onboarding mechanism for deployment/bootstrap
-configuration rather than requiring manual TOML editing.
+Desktop builds should follow the existing Android model: read only
+`network.bootstrap` from the releaser's local, untracked Kepos config, emit a
+sanitized build asset, and package that default with macOS and Windows. A fresh
+desktop config should consume the packaged endpoints once; an existing config
+must remain authoritative. The complete local TOML must never enter an artifact.
 
 ### 4. Desktop observability was inadequate
 
@@ -134,15 +137,18 @@ or restarting the app.
 ## Follow-up order
 
 1. Fix and test the stale `Connecting` snapshot/UI transition.
-2. Add persistent sanitized desktop diagnostics and native bootstrap error
+2. Package the same sanitized build-time bootstrap asset for desktop that
+   Android already consumes, and prove fresh config uses it without overwriting
+   existing config or identity.
+3. Add persistent sanitized desktop diagnostics and native bootstrap error
    reporting.
-3. Decide framework-dependent prerequisite versus self-contained deployment;
-   make packaging and documentation truthful for the selected model.
-4. Reproduce first-run onboarding from empty Windows user roots and fix the
+4. Produce a self-contained Windows App SDK deployment and make packaging and
+   documentation truthful for that model.
+5. Reproduce first-run onboarding from empty Windows user roots and fix the
    missing connect form.
-5. Add Windows 10 compatibility as an explicit target only after testing the
+6. Add Windows 10 compatibility as an explicit target only after testing the
    selected deployment model on Windows 10 build 19045 and Windows 11 x64.
-6. Validate a persistent Mihomo/Clash process-level DIRECT rule, then repeat the
+7. Validate a persistent Mihomo/Clash process-level DIRECT rule, then repeat the
    external peer, service registry, close/reopen, and restart matrix.
 
 ## Acceptance boundary
