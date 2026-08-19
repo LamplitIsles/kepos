@@ -92,6 +92,10 @@ test("desktop host records only the opt-in rendered-page acknowledgement", async
     connectFormVisible: true,
   });
   let acknowledgement: unknown;
+  let resolveAcknowledgement!: () => void;
+  const acknowledgementReceived = new Promise<void>((resolve) => {
+    resolveAcknowledgement = resolve;
+  });
   try {
     const harness = createHarness();
     const host = await startDesktopHost(
@@ -100,6 +104,7 @@ test("desktop host records only the opt-in rendered-page acknowledgement", async
         smokeRenderFile: marker,
         onSmokeRendered: (value) => {
           acknowledgement = value;
+          resolveAcknowledgement();
         },
       },
       harness.dependencies,
@@ -107,7 +112,7 @@ test("desktop host records only the opt-in rendered-page acknowledgement", async
 
     assert.match(harness.webViews[0]?.html ?? "", /windows-smoke-rendered/);
     harness.webViews[0]?.emit("message", message);
-    await harness.flushCommands();
+    await acknowledgementReceived;
     assert.equal(await readFile(marker, "utf8"), `${message}\n`);
     assert.deepEqual(acknowledgement, JSON.parse(message));
 

@@ -318,10 +318,12 @@ export async function startDesktopHost(
   let smokeRenderRecorded = false;
   const receiveMessage = async (message: string): Promise<void> => {
     if (smokeRenderFile) {
+      console.error(`Windows smoke page message: ${message}`);
       let acknowledgement: DesktopSmokeRenderAcknowledgement | undefined;
       try {
         acknowledgement = parseDesktopSmokeRenderAcknowledgement(message);
-      } catch {
+      } catch (error) {
+        console.error("Windows smoke acknowledgement parse failed", error);
         // Let malformed or unrelated messages take the normal command path.
       }
       if (acknowledgement !== undefined) {

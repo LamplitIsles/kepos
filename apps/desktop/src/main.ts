@@ -39,6 +39,7 @@ async function main(): Promise<void> {
     ? process.env.KEPOS_WINDOWS_SMOKE_RENDER_FILE
     : undefined;
   const smokeQuitFile = process.env.KEPOS_WINDOWS_SMOKE_QUIT_FILE;
+  let smokeFailure = false;
   let smokeSnapshot: DesktopSnapshot | undefined;
   let resolveSmokeRendered: (() => void) | undefined;
   const smokeRendered = smokeRenderFile
@@ -98,7 +99,7 @@ async function main(): Promise<void> {
             // The process exit code remains the authoritative smoke result.
           }
         }
-        Bare.exit(code);
+        Bare.exit(smokeFailure ? 1 : code);
       },
     },
   );
@@ -114,6 +115,7 @@ async function main(): Promise<void> {
         await writeFile(smokeReadyFile, `${JSON.stringify(smokeSnapshot)}\n`);
       }
     } catch (error) {
+      smokeFailure = true;
       await running.shutdown().catch(() => undefined);
       throw error;
     }
