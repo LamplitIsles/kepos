@@ -62,11 +62,13 @@ export async function loadKeposBootstrap(
   configPath?: string,
   environment?: NodeJS.ProcessEnv,
   homeDirectory?: string,
+  platform?: NodeJS.Platform,
 ): Promise<DhtAddress[] | undefined> {
   const source = await readKeposConfigSource(
     configPath,
     environment,
     homeDirectory,
+    platform,
   );
   if (source === undefined) return undefined;
   const value: unknown = parse(source);

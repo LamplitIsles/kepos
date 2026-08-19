@@ -3,6 +3,9 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { desktopBootstrapAssetPath } from "../apps/desktop/src/paths.js";
+import { writeKeposBootstrapAsset } from "./bootstrap-config.js";
+
 export type DesktopTarget = "darwin-arm64" | "win32-x64";
 
 const desktopTargets: readonly DesktopTarget[] = ["darwin-arm64", "win32-x64"];
@@ -57,6 +60,20 @@ export function desktopWindowsOutput(repository: string): string {
 
 function desktopWindowsApp(repository: string): string {
   return path.join(desktopWindowsOutput(repository), "Kepos");
+}
+
+export function desktopBootstrapAssetPathForTarget(
+  repository: string,
+  target: DesktopTarget,
+): string {
+  const executable =
+    target === "darwin-arm64"
+      ? path.join(desktopAppBundle(repository), "Contents", "MacOS", "Kepos")
+      : path.join(desktopWindowsApp(repository), "App", "Kepos.exe");
+  return desktopBootstrapAssetPath(
+    executable,
+    target === "darwin-arm64" ? "darwin" : "win32",
+  );
 }
 
 function sourcePath(repository: string, packageName: string): string {
@@ -334,12 +351,20 @@ export async function runDesktopBuild(
   for (const command of plan.commands(repository, tools)) {
     await run(repository, command, target);
   }
+  if (target === "darwin-arm64") {
+    await writeKeposBootstrapAsset({
+      outputPath: desktopBootstrapAssetPathForTarget(repository, target),
+    });
+  }
   await plan.validate(repository);
 }
 
 async function validateDarwinOutput(repository: string): Promise<void> {
   const bundle = desktopAppBundle(repository);
   await requireFile(path.join(bundle, "Contents", "MacOS", "Kepos"));
+  await requireFile(
+    path.join(bundle, "Contents", "Resources", "kepos-bootstrap.json"),
+  );
   const frameworks = await readdir(path.join(bundle, "Contents", "Frameworks"));
   for (const required of [
     "bare-abort.",
