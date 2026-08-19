@@ -72,9 +72,12 @@ for a clean machine without Windows App Runtime.
 
 With only `client.identity.json` present and no publisher contact, the expected
 `Connect this subscriber` form did not appear; the UI remained on `Connecting`.
-The publisher contact had to be created manually. Root cause is not established:
-it may be a stale/initial snapshot path or a mismatch between the payload used
-and the expected first-run UI behavior.
+The publisher contact had to be created manually. The root cause is the Windows
+WebView bridge contract: the shared page calls `window.bareNative.postMessage`
+and listens for `bare-native-message`, while `bare-win-ui` exposes raw
+`window.chrome.webview` messaging without installing that compatibility layer.
+The page therefore throws before sending `ready`, so the controller never sends
+its current `unconfigured` snapshot.
 
 The valid contact schema requires all three fields:
 
@@ -129,14 +132,18 @@ transmitted repeatedly without responses.
 ### 6. UI connection state became stale
 
 After the transport path connected with TUN disabled, the main window continued
-to show `Connecting`. The runtime-to-controller-to-WebView snapshot path needs a
-regression test covering a real `connecting -> connected` transition followed
-by registry refresh. Connection display must not depend on reopening the window
-or restarting the app.
+to show `Connecting`. This was the same bridge failure, not evidence that the
+runtime remained connecting: because the page `ready` command never reached the
+host, the controller intentionally sent no snapshots, and every runtime-backed
+field stayed at its static HTML default. Settings navigation still worked
+because it is local page JavaScript. The Windows adapter must implement the same
+two-way portable bridge as macOS, and the packaged Kepos smoke must prove both
+message directions plus rendered non-default state.
 
 ## Follow-up order
 
-1. Fix and test the stale `Connecting` snapshot/UI transition.
+1. Add the macOS-compatible two-way bridge to `bare-win-ui`, pin it in Kepos,
+   and prove the packaged page sends `ready` and renders returned snapshots.
 2. Package the same sanitized build-time bootstrap asset for desktop that
    Android already consumes, and prove fresh config uses it without overwriting
    existing config or identity.
@@ -144,11 +151,9 @@ or restarting the app.
    reporting.
 4. Produce a self-contained Windows App SDK deployment and make packaging and
    documentation truthful for that model.
-5. Reproduce first-run onboarding from empty Windows user roots and fix the
-   missing connect form.
-6. Add Windows 10 compatibility as an explicit target only after testing the
+5. Add Windows 10 compatibility as an explicit target only after testing the
    selected deployment model on Windows 10 build 19045 and Windows 11 x64.
-7. Validate a persistent Mihomo/Clash process-level DIRECT rule, then repeat the
+6. Validate a persistent Mihomo/Clash process-level DIRECT rule, then repeat the
    external peer, service registry, close/reopen, and restart matrix.
 
 ## Acceptance boundary
