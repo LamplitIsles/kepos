@@ -607,7 +607,7 @@ try {
       '--define', 'BARE_WIN_UI_TESTING:BOOL=ON'
     )
     Invoke-LoggedNative $BareMake 'bare-win-ui-test-build' @('build', '--build', $TestingBuild)
-    Invoke-LoggedNative $BareMake 'bare-win-ui-test-install' @('install', '--build', $TestingBuild, '--prefix', $TestWinUi)
+    Invoke-LoggedNative $BareMake 'bare-win-ui-test-install' @('install', '--build', $TestingBuild, '--prefix', (Join-Path $TestWinUi 'prebuilds'))
     Invoke-LoggedNative $BareBuild 'bare-win-ui-build' @('--base', $TestWinUi, '--host', 'win32-x64', '--runtime', (Join-Path $TestWinUi 'runtime.js'), '--out', $NativeCheck, (Join-Path $TestWinUi 'sample.js'))
   $NativeExecutable = Get-ChildItem -LiteralPath $NativeCheck -Filter '*.exe' -Recurse | Select-Object -First 1
   if ($null -eq $NativeExecutable) { throw "bare-win-ui native check produced no executable under $NativeCheck" }
