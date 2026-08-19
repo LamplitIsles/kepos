@@ -1,3 +1,5 @@
+import { appendFile, writeFile } from "node:fs/promises";
+
 import {
   acquirePublisherRuntimeLock,
   acquireSubscriberRuntimeLock,
@@ -10,6 +12,10 @@ import type {
   DesktopSubscriberOptions,
 } from "./options.js";
 import type { DesktopSnapshot } from "./protocol.js";
+import {
+  parseDesktopSmokeRenderAcknowledgement,
+  type DesktopSmokeRenderAcknowledgement,
+} from "./smoke.js";
 import {
   startDesktopRuntime,
   type DesktopRuntimeConfiguration,
@@ -44,6 +50,8 @@ export interface StartDesktopHostOptions {
   homeDirectory: string;
   loadOptions: () => Promise<DesktopOptions>;
   onSnapshot?: (snapshot: DesktopSnapshot) => void;
+  smokeRenderFile?: string;
+  onSmokeRendered?: (acknowledgement: DesktopSmokeRenderAcknowledgement) => void;
 }
 
 export interface DesktopHostDependencies {
@@ -306,6 +314,30 @@ export async function startDesktopHost(
     setSubscriberPublisher: connectSubscriber,
     quit: shutdown,
   });
+  const smokeRenderFile = options.smokeRenderFile;
+  let smokeRenderRecorded = false;
+  const receiveMessage = async (message: string): Promise<void> => {
+    if (smokeRenderFile) {
+      await appendFile(`${smokeRenderFile}.messages`, `${message}\n`);
+      console.error(`Windows smoke page message: ${message}`);
+      let acknowledgement: DesktopSmokeRenderAcknowledgement | undefined;
+      try {
+        acknowledgement = parseDesktopSmokeRenderAcknowledgement(message);
+      } catch (error) {
+        console.error("Windows smoke acknowledgement parse failed", error);
+        // Let malformed or unrelated messages take the normal command path.
+      }
+      if (acknowledgement !== undefined) {
+        if (!smokeRenderRecorded) {
+          smokeRenderRecorded = true;
+          await writeFile(smokeRenderFile, `${message}\n`);
+          options.onSmokeRendered?.(acknowledgement);
+        }
+        return;
+      }
+    }
+    await controller.receive(message);
+  };
   try {
     mainTray.on("select", (id) => {
       if (id === trayItemIds.open) {
@@ -317,12 +349,14 @@ export async function startDesktopHost(
       }
     });
     mainWebView.on("message", (message) => {
-      void controller.receive(message).catch((error: unknown) => {
+      void receiveMessage(message).catch((error: unknown) => {
         console.error(error);
       });
     });
     mainWindow.content(mainWebView);
-    mainWebView.loadHTML(renderDesktopUi());
+    mainWebView.loadHTML(
+      renderDesktopUi({ smokeAcknowledgement: smokeRenderFile !== undefined }),
+    );
   } catch (error) {
     await cleanNativeSetup(
       mainWindow,

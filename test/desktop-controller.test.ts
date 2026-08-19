@@ -83,8 +83,14 @@ test("desktop controller sends the latest snapshot after page readiness", async 
   ]);
 
   controller.publish(initial);
+  assert.equal(sent.length, 2);
+  assert.deepEqual(JSON.parse(sent.at(-1) ?? "null"), initial);
   controller.publish(initial);
   assert.equal(sent.length, 2);
+
+  await controller.receive('{"type":"ready"}');
+  assert.equal(sent.length, 3);
+  assert.deepEqual(JSON.parse(sent.at(-1) ?? "null"), initial);
 });
 
 test("desktop controller opens only a current validated HTTP service", async () => {

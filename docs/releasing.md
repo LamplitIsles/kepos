@@ -59,9 +59,12 @@ builds in the NTFS `C:\kb` workspace, and copies back only the verified
 `AppxManifest.xml` and `Assets\Logo.ico` are beside `App\Kepos.exe` and its
 explicitly allowlisted runtime files. The remote side resolves the annotated
 tag against the release Mac `HEAD`, validates the exact layout and x64 PE
-architecture, extracts into fresh test-owned directories, provisions valid
-publisher state, and launches with test-owned state for a bounded healthy
-role/runtime snapshot followed by clean Quit. Failed runs retain logs under
+architecture, extracts into fresh empty test-owned directories, and launches the
+packaged app with test-owned state to prove a real first-run render over the
+WebView bridge: the app bootstraps its own subscriber identity, records the
+rendered-page acknowledgement, reports a healthy unconfigured subscriber
+snapshot, and quits cleanly (ready, rendered, and quit markers) before the ZIP
+is accepted. Failed runs retain logs under
 `dist/windows/<run-id>/logs` but remove partial publishable ZIPs.
 
 For a no-tag local rehearsal, use the isolated path:

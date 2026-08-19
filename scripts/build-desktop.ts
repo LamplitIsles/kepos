@@ -237,6 +237,8 @@ function windowsPlan(
         "--define",
         "FETCHCONTENT_UPDATES_DISCONNECTED:BOOL=ON",
         "--define",
+        "BARE_WIN_UI_TESTING:BOOL=OFF",
+        "--define",
         `node:FILEPATH=${tools.node}`,
         "--define",
         `npm:FILEPATH=${tools.npm}`,

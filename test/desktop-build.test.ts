@@ -274,6 +274,9 @@ test("desktop Windows plan builds an unpackaged WinUI directory and links native
   assert.ok(makeGenerate?.arguments.includes("win32"));
   assert.ok(makeGenerate?.arguments.includes("--arch"));
   assert.ok(makeGenerate?.arguments.includes("x64"));
+  assert.ok(
+    makeGenerate?.arguments.includes("BARE_WIN_UI_TESTING:BOOL=OFF"),
+  );
   assert.equal(
     plan.outputDirectory(repository),
     path.join(repository, "dist", "desktop", "Kepos"),
