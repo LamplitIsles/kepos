@@ -467,7 +467,6 @@ try {
   $TestWinUi = Join-Path $NativeCheck 'bare-win-ui-testing'
   $CanonicalNativeCheck = Join-Path $Repository '.build\windows-native-check'
   $CanonicalNativeBuildRoot = Join-Path $WorkspaceRoot 'cache'
-  $TestingNativeBuildRoot = Join-Path $CanonicalNativeBuildRoot 'winui-testing'
   Assert-SafeOwnedPath $WorkspaceRoot $CanonicalNativeBuildRoot 'native build root'
   New-Item -ItemType Directory -Path $CanonicalNativeBuildRoot -Force | Out-Null
   $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT = 'K:\cache'
@@ -477,16 +476,12 @@ try {
   $env:BARE_WIN_UI_NUGET_CACHE = $NuGetCache
   # A tracked snapshot can carry older mtimes than the persistent cache. Drop
   # only compiler PCH outputs so clang rebuilds them; retain downloaded SDKs.
-  foreach ($cachedCMakeFiles in @(
-    (Join-Path $CanonicalNativeBuildRoot 'winui\CMakeFiles'),
-    (Join-Path $TestingNativeBuildRoot 'CMakeFiles')
-  )) {
-    Assert-SafeOwnedPath $CanonicalNativeBuildRoot $cachedCMakeFiles 'cached CMake files'
-    if (Test-Path -LiteralPath $cachedCMakeFiles) {
-      Assert-NoReparsePointsInTree $cachedCMakeFiles 'cached CMake files'
-      Get-ChildItem -LiteralPath $cachedCMakeFiles -Filter '*.pch' -File -Recurse -ErrorAction SilentlyContinue |
-        Remove-Item -Force
-    }
+  $cachedCMakeFiles = Join-Path $CanonicalNativeBuildRoot 'winui\CMakeFiles'
+  Assert-SafeOwnedPath $CanonicalNativeBuildRoot $cachedCMakeFiles 'cached CMake files'
+  if (Test-Path -LiteralPath $cachedCMakeFiles) {
+    Assert-NoReparsePointsInTree $cachedCMakeFiles 'cached CMake files'
+    Get-ChildItem -LiteralPath $cachedCMakeFiles -Filter '*.pch' -File -Recurse -ErrorAction SilentlyContinue |
+      Remove-Item -Force
   }
   Assert-SafeOwnedPath $Repository $CanonicalNativeCheck 'native check output'
   Remove-SafeOwnedTree $Repository $CanonicalNativeCheck 'native check output'
@@ -589,7 +584,9 @@ try {
     # private native controls, so build an isolated test prebuild and source
     # root instead of reusing the production prebuild installed above.
     $WinUi = Join-Path $BuildRepository 'vendor\holepunch\bare-win-ui'
-    $TestingBuild = Join-Path $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT 'winui-testing'
+    # Reconfigure the already populated production build tree so all fetched
+    # SDKs and source dependencies stay inside the existing safe cache root.
+    $TestingBuild = Join-Path $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT 'winui'
     Assert-SafeOwnedPath $NativeCheck $TestWinUi 'bare-win-ui test source'
     New-Item -ItemType Directory -Path $TestWinUi -Force | Out-Null
     foreach ($sourceItem in Get-ChildItem -LiteralPath $WinUi -Force) {
