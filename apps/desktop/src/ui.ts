@@ -21,7 +21,7 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
             !subscriberBootstrapForm.hidden
           ) {
             smokeAcknowledgementSent = true;
-            send(JSON.stringify({
+            send({
               type: "windows-smoke-rendered",
               connection: next.subscriber.connection,
               serviceCount: Array.isArray(next.subscriber.services)
@@ -29,7 +29,7 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
                 : 0,
               subscriberKeyPresent: Boolean(next.subscriber.subscriberKey),
               connectFormVisible: !subscriberBootstrapForm.hidden,
-            }));
+            });
           }`
     : "";
 
