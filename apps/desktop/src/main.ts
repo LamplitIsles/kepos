@@ -13,7 +13,7 @@ import type { DesktopTray } from "./tray.js";
 import { loadDesktopOptions } from "./options.js";
 import { desktopLaunchArguments } from "./process.js";
 import type { DesktopSnapshot } from "./protocol.js";
-import { isHealthySmokeSnapshot } from "./smoke.js";
+import { isHealthyUnconfiguredSmokeSnapshot } from "./smoke.js";
 
 async function main(): Promise<void> {
   const arguments_ = desktopLaunchArguments(process.argv);
@@ -35,8 +35,28 @@ async function main(): Promise<void> {
   );
   const homeDirectory = smokeHome ?? os.homedir();
   const smokeReadyFile = process.env.KEPOS_WINDOWS_SMOKE_READY_FILE;
+  const smokeRenderFile = smokeTest
+    ? process.env.KEPOS_WINDOWS_SMOKE_RENDER_FILE
+    : undefined;
   const smokeQuitFile = process.env.KEPOS_WINDOWS_SMOKE_QUIT_FILE;
   let smokeSnapshot: DesktopSnapshot | undefined;
+  let resolveSmokeRendered: (() => void) | undefined;
+  const smokeRendered = smokeRenderFile
+    ? new Promise<void>((resolve, reject) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        resolveSmokeRendered = () => {
+          if (timer !== undefined) clearTimeout(timer);
+          resolve();
+        };
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              "desktop smoke did not receive a rendered-page acknowledgement",
+            ),
+          );
+        }, 40_000);
+      })
+    : Promise.resolve();
   const running = await startDesktopHost(
     {
       homeDirectory,
@@ -49,6 +69,12 @@ async function main(): Promise<void> {
       onSnapshot: (snapshot) => {
         smokeSnapshot = snapshot;
       },
+      ...(smokeRenderFile
+        ? {
+            smokeRenderFile,
+            onSmokeRendered: () => resolveSmokeRendered?.(),
+          }
+        : {}),
     },
     {
       ...defaultDesktopHostDependencies,
@@ -78,8 +104,11 @@ async function main(): Promise<void> {
   );
   if (smokeTest) {
     try {
-      if (!isHealthySmokeSnapshot(smokeSnapshot)) {
-        throw new Error("desktop smoke did not observe a healthy role/runtime snapshot");
+      await smokeRendered;
+      if (!isHealthyUnconfiguredSmokeSnapshot(smokeSnapshot)) {
+        throw new Error(
+          "desktop smoke did not observe a healthy unconfigured subscriber snapshot",
+        );
       }
       if (smokeReadyFile) {
         await writeFile(smokeReadyFile, `${JSON.stringify(smokeSnapshot)}\n`);

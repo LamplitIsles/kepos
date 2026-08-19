@@ -3,7 +3,36 @@ const keposMark = `
     <path d="M13 6H5v20h8M19 6h8v20h-8M9 16h14" />
   </svg>`;
 
-export function renderDesktopUi(): string {
+export interface DesktopUiOptions {
+  smokeAcknowledgement?: boolean;
+}
+
+export function renderDesktopUi(options: DesktopUiOptions = {}): string {
+  const smokeAcknowledgementState = options.smokeAcknowledgement
+    ? "      let smokeAcknowledgementSent = false;"
+    : "";
+  const smokeAcknowledgementAfterRender = options.smokeAcknowledgement
+    ? `
+          if (
+            !smokeAcknowledgementSent &&
+            next.subscriber &&
+            next.subscriber.connection === "unconfigured" &&
+            Boolean(next.subscriber.subscriberKey) &&
+            !subscriberBootstrapForm.hidden
+          ) {
+            smokeAcknowledgementSent = true;
+            send(JSON.stringify({
+              type: "windows-smoke-rendered",
+              connection: next.subscriber.connection,
+              serviceCount: Array.isArray(next.subscriber.services)
+                ? next.subscriber.services.length
+                : 0,
+              subscriberKeyPresent: Boolean(next.subscriber.subscriberKey),
+              connectFormVisible: !subscriberBootstrapForm.hidden,
+            }));
+          }`
+    : "";
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -488,6 +517,7 @@ export function renderDesktopUi(): string {
       let lastRelationshipView = "remote";
       let toastTimer;
       let subscriberBootstrapInFlight = false;
+${smokeAcknowledgementState}
       const relationshipButtons = Array.from(document.querySelectorAll('[data-relationship-tab]'));
       const settingsButton = document.querySelector('[data-view-tab="settings"]');
       const settingsBackButton = document.querySelector('[data-role="settings-back"]');
@@ -802,7 +832,11 @@ export function renderDesktopUi(): string {
       window.addEventListener("bare-native-message", (event) => {
         try {
           const next = JSON.parse(event.data);
-          if (next && next.type === "snapshot") { snapshot = next; render(); }
+          if (next && next.type === "snapshot") {
+            snapshot = next;
+            render();
+${smokeAcknowledgementAfterRender}
+          }
         } catch { showToast('Invalid host message'); }
       });
 

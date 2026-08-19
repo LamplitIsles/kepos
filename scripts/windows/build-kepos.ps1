@@ -224,56 +224,83 @@ function Invoke-PortableSmoke {
     [Parameter(Mandatory = $true)] [string]$SmokeRoot,
     [Parameter(Mandatory = $true)] [string]$Logs
   )
-  $state = Join-Path $SmokeRoot 'state'
   $smokeHome = Join-Path $SmokeRoot 'home'
   $appData = Join-Path $SmokeRoot 'AppData\Roaming'
   $localAppData = Join-Path $SmokeRoot 'AppData\Local'
   $webViewData = Join-Path $SmokeRoot 'WebView2'
   $ready = Join-Path $SmokeRoot 'ready.marker'
+  $rendered = Join-Path $SmokeRoot 'rendered.marker'
   $quit = Join-Path $SmokeRoot 'quit.marker'
-  New-Item -ItemType Directory -Path $state, $smokeHome, $appData, $localAppData, $webViewData, $Logs -Force | Out-Null
-  $utf8 = New-Object System.Text.UTF8Encoding($false)
-  $publisherManifest = @{ displayName = 'Kepos release smoke'; publisherConfig = 'publisher.json'; services = @() } |
-    ConvertTo-Json -Depth 5
-  $publisherConfig = @{ seed = (('00' * 32) -join ''); allow = @() } | ConvertTo-Json -Depth 5
-  [System.IO.File]::WriteAllText((Join-Path $state 'publisher.manifest.json'), $publisherManifest, $utf8)
-  [System.IO.File]::WriteAllText((Join-Path $state 'publisher.json'), $publisherConfig, $utf8)
+  # These roots intentionally begin empty. The app must create the subscriber
+  # identity/configuration through its real bootstrap path before it can render
+  # the unconfigured snapshot.
+  New-Item -ItemType Directory -Path $smokeHome, $appData, $localAppData, $webViewData, $Logs -Force | Out-Null
   $env:APPDATA = $appData
   $env:LOCALAPPDATA = $localAppData
   $env:WEBVIEW2_USER_DATA_FOLDER = $webViewData
   $env:KEPOS_WINDOWS_SMOKE_READY_FILE = $ready
+  $env:KEPOS_WINDOWS_SMOKE_RENDER_FILE = $rendered
   $env:KEPOS_WINDOWS_SMOKE_QUIT_FILE = $quit
   $process = New-Object System.Diagnostics.Process
   $process.StartInfo.FileName = $Executable
-  $process.StartInfo.Arguments = "--publisher-state `"$state`" --smoke-test --smoke-home `"$smokeHome`""
+  $process.StartInfo.Arguments = "--smoke-test --smoke-home `"$smokeHome`""
   $process.StartInfo.WorkingDirectory = Split-Path -Parent $Executable
   $process.StartInfo.UseShellExecute = $false
   $process.StartInfo.RedirectStandardOutput = $false
   $process.StartInfo.RedirectStandardError = $false
+  $processStarted = $false
   try {
     if (-not $process.Start()) { throw 'Windows portable smoke process did not start' }
+    $processStarted = $true
     if (-not $process.WaitForExit(45000)) {
       & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-File (Join-Path $Logs 'smoke-timeout.log')
       throw 'Windows portable smoke process timed out'
     }
     if ($process.ExitCode -ne 0) { throw "Windows portable smoke exited with code $($process.ExitCode)" }
-    if (-not (Test-Path -LiteralPath $ready -PathType Leaf)) { throw 'Windows portable smoke never reached ready' }
+    foreach ($marker in @($ready, $rendered, $quit)) {
+      if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+        throw "Windows portable smoke is missing marker: $marker"
+      }
+    }
     try {
       $snapshot = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
-      if ($snapshot.appPhase -ne 'running' -or $null -eq $snapshot.publisher -or $snapshot.publisher.phase -ne 'running') {
-        throw 'ready marker did not contain a healthy publisher/runtime snapshot'
+      if (
+        $snapshot.appPhase -ne 'running' -or
+        $null -eq $snapshot.subscriber -or
+        $snapshot.subscriber.phase -ne 'running' -or
+        $snapshot.subscriber.connection -ne 'unconfigured' -or
+        [string]::IsNullOrWhiteSpace([string]$snapshot.subscriber.subscriberKey)
+      ) {
+        throw 'ready marker did not contain a healthy unconfigured subscriber snapshot'
+      }
+
+      $acknowledgement = Get-Content -LiteralPath $rendered -Raw | ConvertFrom-Json
+      $expectedFields = @('connectFormVisible', 'connection', 'serviceCount', 'subscriberKeyPresent', 'type') | Sort-Object
+      $actualFields = @($acknowledgement.PSObject.Properties.Name) | Sort-Object
+      if (($expectedFields -join '|') -ne ($actualFields -join '|')) {
+        throw 'rendered acknowledgement contained unexpected fields'
+      }
+      if (
+        $acknowledgement.type -ne 'windows-smoke-rendered' -or
+        $acknowledgement.connection -ne 'unconfigured' -or
+        $acknowledgement.serviceCount -ne 0 -or
+        $acknowledgement.subscriberKeyPresent -ne $true -or
+        $acknowledgement.connectFormVisible -ne $true
+      ) {
+        throw 'rendered acknowledgement did not prove the unconfigured page state'
       }
     } catch {
-      throw "Windows portable smoke health proof is invalid: $($_.Exception.Message)"
+      throw "Windows portable smoke bridge/render proof is invalid: $($_.Exception.Message)"
     }
-    if (-not (Test-Path -LiteralPath $quit -PathType Leaf)) { throw 'Windows portable smoke did not complete clean Quit' }
   } finally {
-    if (-not $process.HasExited) {
+    if ($processStarted -and -not $process.HasExited) {
       & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-File (Join-Path $Logs 'smoke-cleanup.log')
     }
     $process.Dispose()
     Remove-Item Env:KEPOS_WINDOWS_SMOKE_READY_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:KEPOS_WINDOWS_SMOKE_RENDER_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:KEPOS_WINDOWS_SMOKE_QUIT_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue
   }
 }
 
@@ -437,8 +464,10 @@ try {
   $BuildRepository = 'K:\source'
   Set-Location -LiteralPath $BuildRepository
   $NativeCheck = Join-Path $BuildRepository '.build\windows-native-check'
+  $TestWinUi = Join-Path $NativeCheck 'bare-win-ui-testing'
   $CanonicalNativeCheck = Join-Path $Repository '.build\windows-native-check'
   $CanonicalNativeBuildRoot = Join-Path $WorkspaceRoot 'cache'
+  $TestingNativeBuildRoot = Join-Path $CanonicalNativeBuildRoot 'winui-testing'
   Assert-SafeOwnedPath $WorkspaceRoot $CanonicalNativeBuildRoot 'native build root'
   New-Item -ItemType Directory -Path $CanonicalNativeBuildRoot -Force | Out-Null
   $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT = 'K:\cache'
@@ -448,12 +477,16 @@ try {
   $env:BARE_WIN_UI_NUGET_CACHE = $NuGetCache
   # A tracked snapshot can carry older mtimes than the persistent cache. Drop
   # only compiler PCH outputs so clang rebuilds them; retain downloaded SDKs.
-  $cachedCMakeFiles = Join-Path $CanonicalNativeBuildRoot 'winui\CMakeFiles'
-  Assert-SafeOwnedPath $CanonicalNativeBuildRoot $cachedCMakeFiles 'cached CMake files'
-  if (Test-Path -LiteralPath $cachedCMakeFiles) {
-    Assert-NoReparsePointsInTree $cachedCMakeFiles 'cached CMake files'
-    Get-ChildItem -LiteralPath $cachedCMakeFiles -Filter '*.pch' -File -Recurse -ErrorAction SilentlyContinue |
-      Remove-Item -Force
+  foreach ($cachedCMakeFiles in @(
+    (Join-Path $CanonicalNativeBuildRoot 'winui\CMakeFiles'),
+    (Join-Path $TestingNativeBuildRoot 'CMakeFiles')
+  )) {
+    Assert-SafeOwnedPath $CanonicalNativeBuildRoot $cachedCMakeFiles 'cached CMake files'
+    if (Test-Path -LiteralPath $cachedCMakeFiles) {
+      Assert-NoReparsePointsInTree $cachedCMakeFiles 'cached CMake files'
+      Get-ChildItem -LiteralPath $cachedCMakeFiles -Filter '*.pch' -File -Recurse -ErrorAction SilentlyContinue |
+        Remove-Item -Force
+    }
   }
   Assert-SafeOwnedPath $Repository $CanonicalNativeCheck 'native check output'
   Remove-SafeOwnedTree $Repository $CanonicalNativeCheck 'native check output'
@@ -552,10 +585,33 @@ try {
   Invoke-LoggedNative $Npm 'desktop-build' @('run', 'desktop:build', '--', '--target', 'win32-x64')
 
   if ($Workflow -eq 'dogfood') {
-    # The dogfood build proves primitive lifecycle directly. Release uses the
-    # stronger extracted-app healthy-role and clean-Quit smoke below.
+    # Keep the packaged desktop build production-only. The adapter sample uses
+    # private native controls, so build an isolated test prebuild and source
+    # root instead of reusing the production prebuild installed above.
     $WinUi = Join-Path $BuildRepository 'vendor\holepunch\bare-win-ui'
-  Invoke-LoggedNative $BareBuild 'bare-win-ui-build' @('--base', $WinUi, '--host', 'win32-x64', '--runtime', (Join-Path $WinUi 'runtime.js'), '--out', $NativeCheck, (Join-Path $WinUi 'sample.js'))
+    $TestingBuild = Join-Path $env:KEPOS_WINDOWS_NATIVE_BUILD_ROOT 'winui-testing'
+    Assert-SafeOwnedPath $NativeCheck $TestWinUi 'bare-win-ui test source'
+    New-Item -ItemType Directory -Path $TestWinUi -Force | Out-Null
+    foreach ($sourceItem in Get-ChildItem -LiteralPath $WinUi -Force) {
+      if ($sourceItem.Name -in @('.git', 'build', 'prebuilds')) { continue }
+      Copy-Item -LiteralPath $sourceItem.FullName -Destination (Join-Path $TestWinUi $sourceItem.Name) -Recurse -Force
+    }
+    $NodeModules = Join-Path $BuildRepository 'node_modules'
+    Invoke-LoggedNative $BareMake 'bare-win-ui-test-generate' @(
+      'generate',
+      '--source', $WinUi,
+      '--build', $TestingBuild,
+      '--platform', 'win32',
+      '--arch', 'x64',
+      '--define', "CMAKE_PREFIX_PATH:PATH=$NodeModules",
+      '--define', 'FETCHCONTENT_UPDATES_DISCONNECTED:BOOL=ON',
+      '--define', "node:FILEPATH=$Node",
+      '--define', "npm:FILEPATH=$Npm",
+      '--define', 'BARE_WIN_UI_TESTING:BOOL=ON'
+    )
+    Invoke-LoggedNative $BareMake 'bare-win-ui-test-build' @('build', '--build', $TestingBuild)
+    Invoke-LoggedNative $BareMake 'bare-win-ui-test-install' @('install', '--build', $TestingBuild, '--prefix', $TestWinUi)
+    Invoke-LoggedNative $BareBuild 'bare-win-ui-build' @('--base', $TestWinUi, '--host', 'win32-x64', '--runtime', (Join-Path $TestWinUi 'runtime.js'), '--out', $NativeCheck, (Join-Path $TestWinUi 'sample.js'))
   $NativeExecutable = Get-ChildItem -LiteralPath $NativeCheck -Filter '*.exe' -Recurse | Select-Object -First 1
   if ($null -eq $NativeExecutable) { throw "bare-win-ui native check produced no executable under $NativeCheck" }
   # Inherit both probe streams so a child filling either pipe cannot deadlock
@@ -624,7 +680,11 @@ try {
   $StagedExecutable = Join-Path $Artifact 'Kepos\App\Kepos.exe'
   if (-not (Test-Path -LiteralPath $StagedExecutable -PathType Leaf)) { throw "staged Kepos.exe was not produced: $StagedExecutable" }
   Get-ChildItem -LiteralPath $Artifact -File -Recurse | Select-Object FullName, Length | Format-Table -AutoSize | Out-File (Join-Path $Logs 'artifact-files.txt')
-  if ($Workflow -eq 'release') {
+  if ($Workflow -eq 'dogfood') {
+    $PackagedSmokeRoot = Join-Path $RunDirectory 'packaged-smoke'
+    Assert-SafeOwnedPath $RunDirectory $PackagedSmokeRoot 'packaged smoke root'
+    Invoke-PortableSmoke $StagedExecutable $PackagedSmokeRoot (Join-Path $Logs 'packaged-smoke')
+  } elseif ($Workflow -eq 'release') {
     Invoke-PortableRelease $RunDirectory $Logs $ReleaseArtifactName $ReleaseMode
   }
   Write-Host "Windows desktop build complete: $Artifact"

@@ -41,6 +41,7 @@ export function createDesktopController(
     const command = parseDesktopCommand(message);
     if (command.type === "ready") {
       ready = true;
+      lastSent = undefined;
       sendCurrent();
       return;
     }

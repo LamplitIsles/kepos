@@ -35,6 +35,14 @@ test("desktop UI stays operational instead of repeating product slogans", () => 
   assert.match(html, /data-role="service-count"/);
 });
 
+test("desktop rendered-page smoke acknowledgement is opt-in", () => {
+  assert.doesNotMatch(renderDesktopUi(), /windows-smoke-rendered/);
+  const smokeHtml = renderDesktopUi({ smokeAcknowledgement: true });
+  assert.match(smokeHtml, /windows-smoke-rendered/);
+  assert.match(smokeHtml, /subscriberKeyPresent/);
+  assert.match(smokeHtml, /connectFormVisible/);
+});
+
 test("desktop service glyphs use the same Lucide choices as Android", () => {
   const html = renderDesktopUi();
 

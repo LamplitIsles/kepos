@@ -81,6 +81,45 @@ test("desktop host acquires dual-role locks before one control window", async ()
   assert.equal(harness.events.filter((event) => event === "exit:0").length, 1);
 });
 
+test("desktop host records only the opt-in rendered-page acknowledgement", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-desktop-rendered-smoke-"));
+  const marker = path.join(root, "rendered.marker");
+  const message = JSON.stringify({
+    type: "windows-smoke-rendered",
+    connection: "unconfigured",
+    serviceCount: 0,
+    subscriberKeyPresent: true,
+    connectFormVisible: true,
+  });
+  let acknowledgement: unknown;
+  try {
+    const harness = createHarness();
+    const host = await startDesktopHost(
+      {
+        ...subscriberOptions(),
+        smokeRenderFile: marker,
+        onSmokeRendered: (value) => {
+          acknowledgement = value;
+        },
+      },
+      harness.dependencies,
+    );
+
+    assert.match(harness.webViews[0]?.html ?? "", /windows-smoke-rendered/);
+    harness.webViews[0]?.emit("message", message);
+    await harness.flushCommands();
+    assert.equal(await readFile(marker, "utf8"), `${message}\n`);
+    assert.deepEqual(acknowledgement, JSON.parse(message));
+
+    harness.webViews[0]?.emit("message", JSON.stringify({ type: "ready" }));
+    await harness.flushCommands();
+    assert.equal(harness.webViews[0]?.messages.length, 1);
+    await host.shutdown();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("desktop singleton serializes bootstrap and preserves an existing config", async () => {
   const homeDirectory = await mkdtemp(
     path.join(tmpdir(), "kepos-desktop-concurrent-"),
