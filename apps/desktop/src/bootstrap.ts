@@ -39,20 +39,23 @@ export interface DesktopBootstrapResult {
 export async function readDesktopBootstrapAsset(
   assetPath: string,
 ): Promise<DhtAddress[] | undefined> {
+  let source: string;
   try {
-    return parseDesktopBootstrapAsset(await readFile(assetPath, "utf8"));
+    source = await readFile(assetPath, "utf8");
   } catch (error) {
-    if (error instanceof Error && error.message === "invalid desktop bootstrap asset") {
-      return undefined;
-    }
     if (
       error instanceof Error &&
       "code" in error &&
-      error.code === "ENOENT"
+      (error.code === "ENOENT" || error.code === "EACCES")
     ) {
       return undefined;
     }
     throw error;
+  }
+  try {
+    return parseDesktopBootstrapAsset(source);
+  } catch {
+    return undefined;
   }
 }
 

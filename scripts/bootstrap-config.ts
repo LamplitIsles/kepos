@@ -9,6 +9,7 @@ export async function writeKeposBootstrapAsset(options: {
   environment?: NodeJS.ProcessEnv;
   homeDirectory?: string;
   platform?: NodeJS.Platform;
+  mode?: number;
 }): Promise<void> {
   const outputDirectory = path.dirname(options.outputPath);
   await mkdir(outputDirectory, { recursive: true });
@@ -27,7 +28,7 @@ export async function writeKeposBootstrapAsset(options: {
       options.platform,
     );
     await writeFile(temporaryPath, `${JSON.stringify(bootstrap ?? null)}\n`, {
-      mode: 0o600,
+      mode: options.mode ?? 0o600,
     });
     await replaceFileAtomically(temporaryPath, options.outputPath);
   } finally {

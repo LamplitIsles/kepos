@@ -354,6 +354,7 @@ export async function runDesktopBuild(
   if (target === "darwin-arm64") {
     await writeKeposBootstrapAsset({
       outputPath: desktopBootstrapAssetPathForTarget(repository, target),
+      mode: 0o644,
     });
   }
   await plan.validate(repository);
