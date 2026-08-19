@@ -117,7 +117,17 @@ test("desktop host records only the opt-in rendered-page acknowledgement", async
     assert.deepEqual(acknowledgement, JSON.parse(message));
 
     harness.webViews[0]?.emit("message", JSON.stringify({ type: "ready" }));
-    await harness.flushCommands();
+    // The host captures every bridge message to a diagnostics file before
+    // handling commands, so the ready handshake snapshot lands after real
+    // filesystem I/O rather than in a microtask. Wait for it instead of
+    // assuming a fixed event-loop budget.
+    for (
+      let attempts = 0;
+      attempts < 250 && harness.webViews[0]?.messages.length === 0;
+      attempts += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     assert.equal(harness.webViews[0]?.messages.length, 1);
     await host.shutdown();
   } finally {
