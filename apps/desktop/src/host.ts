@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { appendFile, writeFile } from "node:fs/promises";
 
 import {
   acquirePublisherRuntimeLock,
@@ -318,6 +318,7 @@ export async function startDesktopHost(
   let smokeRenderRecorded = false;
   const receiveMessage = async (message: string): Promise<void> => {
     if (smokeRenderFile) {
+      await appendFile(`${smokeRenderFile}.messages`, `${message}\n`);
       console.error(`Windows smoke page message: ${message}`);
       let acknowledgement: DesktopSmokeRenderAcknowledgement | undefined;
       try {
