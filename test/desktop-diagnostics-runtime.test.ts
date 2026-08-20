@@ -252,3 +252,78 @@ test("desktop runtime forwards both role observations, device events, and correl
   await runtime.stop();
   assert.ok(deviceEvents.some((event) => event.event === "desktop.lifecycle" && event.phase === "stopped"));
 });
+
+test("desktop runtime evicts the oldest subscriber attempt while retaining newer matches", async () => {
+  const snapshots: DesktopSnapshot[] = [];
+  let subscriberObserve: Observe | undefined;
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/test-owned/subscriber",
+        gatewayPort: DEFAULT_GATEWAY_PORT,
+        services: [],
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+      onObservation: () => undefined,
+    },
+    {
+      createDht: dht,
+      acquirePublisherLock: async () => ({ release: async () => undefined }),
+      acquireSubscriberLock: async () => ({ release: async () => undefined }),
+      loadPublisherState: async () => {
+        throw new Error("publisher is not configured");
+      },
+      loadSubscriberConnectionState: async () => ({
+        identity: { publicKey: subscriberKey, secretKey: "22".repeat(64) },
+        contact: {
+          publisherKey: remotePublisherKey,
+          label: "Remote",
+          requestedLocalPort: 0,
+        },
+        pending: false,
+      }),
+      startPublisher: async () => {
+        throw new Error("publisher is not configured");
+      },
+      startSubscriber: async (options) => {
+        subscriberObserve = options.observe;
+        return runningSubscriber(() => subscriberStatus("connecting"));
+      },
+      readRegistry: async () => registry,
+      now: () => 1_000,
+      random: () => 0.5,
+      renderPairingQr: async () => "<svg />",
+      persistPublisherAllowlist: async () => undefined,
+    },
+  );
+
+  assert.ok(subscriberObserve);
+  const attemptIds = Array.from({ length: 17 }, (_, index) =>
+    `outer-${(index + 1).toString(16).padStart(16, "0")}`,
+  );
+  for (const outerId of attemptIds) {
+    subscriberObserve?.(observation("outer.attempt", "subscriber", outerId));
+  }
+
+  subscriberObserve?.(
+    observation("outer.closed", "subscriber", attemptIds[0]!),
+  );
+  assert.equal(snapshots.at(-1)?.subscriber?.connectionHint, undefined);
+  subscriberObserve?.(
+    observation("outer.closed", "subscriber", attemptIds[1]!),
+  );
+  assert.equal(snapshots.at(-1)?.subscriber?.connectionHint, undefined);
+  subscriberObserve?.(
+    observation("outer.closed", "subscriber", attemptIds[2]!),
+  );
+  assert.equal(snapshots.at(-1)?.subscriber?.connectionHint, undefined);
+  subscriberObserve?.(
+    observation("outer.closed", "subscriber", attemptIds[3]!),
+  );
+  assert.equal(
+    snapshots.at(-1)?.subscriber?.connectionHint,
+    "udp-firewall-vpn-tun",
+  );
+
+  await runtime.stop();
+});

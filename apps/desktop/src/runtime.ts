@@ -31,15 +31,13 @@ import {
 import { loadPublisherState } from "../../../src/state/publisher.js";
 import { loadSubscriberConnectionState } from "../../../src/state/subscriber.js";
 import type { Observation } from "../../../src/mux/observability.js";
-import type {
-  DesktopDiagnosticObservation,
-  DesktopObservationCallback,
-} from "./diagnostics.js";
 import {
   createDesktopConfigObservation,
   createDesktopLifecycleObservation,
   createDesktopRegistryObservation,
-} from "./diagnostics.js";
+  type DesktopDiagnosticObservation,
+  type DesktopObservationCallback,
+} from "./diagnostics-contract.js";
 import type {
   DesktopPublisherRole,
   DesktopService,
@@ -189,6 +187,7 @@ export async function startDesktopRuntime(
     ...(publisherRole ? { publisher: clonePublisherRole(publisherRole) } : {}),
   });
   const publish = (): void => options.onSnapshot(snapshot());
+  const subscriberAttemptLimit = 16;
   const subscriberAttempts = new Map<
     string,
     { connected: boolean }
@@ -225,6 +224,10 @@ export async function startDesktopRuntime(
     }
     if (observation.event === "outer.attempt") {
       subscriberAttempts.set(outerId, { connected: false });
+      if (subscriberAttempts.size > subscriberAttemptLimit) {
+        const oldest = subscriberAttempts.keys().next().value;
+        if (typeof oldest === "string") subscriberAttempts.delete(oldest);
+      }
       return;
     }
     const attempt = subscriberAttempts.get(outerId);

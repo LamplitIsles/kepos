@@ -1,12 +1,14 @@
 import { appendFile, writeFile } from "node:fs/promises";
 
 import {
-  createDesktopConfigObservation,
-  createDesktopLifecycleObservation,
   createNoopDesktopDiagnosticSink,
   DESKTOP_DIAGNOSTIC_SUMMARY_MAX_BYTES,
   type DesktopDiagnosticSink,
 } from "./diagnostics.js";
+import {
+  createDesktopConfigObservation,
+  createDesktopLifecycleObservation,
+} from "./diagnostics-contract.js";
 import {
   acquirePublisherRuntimeLock,
   acquireSubscriberRuntimeLock,

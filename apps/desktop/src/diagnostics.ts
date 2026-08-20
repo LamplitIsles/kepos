@@ -21,8 +21,6 @@ import {
   type DesktopDiagnosticObservation,
 } from "./diagnostics-contract.js";
 
-export * from "./diagnostics-contract.js";
-
 export const DESKTOP_DIAGNOSTIC_ACTIVE_MAX_BYTES = 256 * 1024;
 export const DESKTOP_DIAGNOSTIC_ROTATED_FILE_COUNT = 3;
 export const DESKTOP_DIAGNOSTIC_TOTAL_MAX_BYTES =

@@ -11,15 +11,17 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  createDesktopConfigObservation,
   createDesktopDiagnosticSink,
-  createDesktopLifecycleObservation,
-  createDesktopRegistryObservation,
   createNoopDesktopDiagnosticSink,
-  normalizeDesktopDiagnosticEvent,
-  serializeDesktopDiagnosticEvent,
   type DesktopDiagnosticFileSystem,
 } from "../apps/desktop/src/diagnostics.js";
+import {
+  createDesktopConfigObservation,
+  createDesktopLifecycleObservation,
+  createDesktopRegistryObservation,
+  normalizeDesktopDiagnosticEvent,
+  serializeDesktopDiagnosticEvent,
+} from "../apps/desktop/src/diagnostics-contract.js";
 import { createDesktopController } from "../apps/desktop/src/controller.js";
 import {
   parseDesktopCommand,
