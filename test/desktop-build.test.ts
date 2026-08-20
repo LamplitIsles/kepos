@@ -10,8 +10,11 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { DESKTOP_BOOTSTRAP_ASSET } from "../apps/desktop/src/paths.js";
+
 import {
   desktopAppBundle,
+  desktopBootstrapAssetPathForTarget,
   desktopBuildCommands,
   desktopBuildPlan,
   requestedTarget,
@@ -242,6 +245,22 @@ test("desktop build targets an unsigned Apple Silicon Bare app", () => {
       ],
     },
   ]);
+});
+
+test("macOS desktop build packages the bootstrap beside its executable", () => {
+  const repository = "/checkout";
+  assert.equal(
+    desktopBootstrapAssetPathForTarget(repository, "darwin-arm64"),
+    path.join(
+      repository,
+      "dist",
+      "desktop",
+      "Kepos.app",
+      "Contents",
+      "Resources",
+      DESKTOP_BOOTSTRAP_ASSET,
+    ),
+  );
 });
 
 test("desktop Windows plan builds an unpackaged WinUI directory and links native shims", () => {

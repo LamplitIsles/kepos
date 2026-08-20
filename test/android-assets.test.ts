@@ -262,16 +262,16 @@ test("Android build embeds only bootstrap endpoints from the local Kepos config"
       ].join("\n"),
     );
 
-    const builder = await import("../scripts/android-bootstrap-config.js").catch(
+    const builder = await import("../scripts/bootstrap-config.js").catch(
       () => null,
     ) as null | {
-      writeAndroidBootstrapAsset(options: {
+      writeKeposBootstrapAsset(options: {
         outputPath: string;
         environment: NodeJS.ProcessEnv;
       }): Promise<void>;
     };
-    assert.notEqual(builder, null, "missing Android bootstrap asset builder");
-    await builder!.writeAndroidBootstrapAsset({
+    assert.notEqual(builder, null, "missing shared bootstrap asset builder");
+    await builder!.writeKeposBootstrapAsset({
       outputPath,
       environment:
         process.platform === "win32"
@@ -288,26 +288,31 @@ test("Android build embeds only bootstrap endpoints from the local Kepos config"
   }
 });
 
-test("Android bootstrap generation removes stale generated assets", async () => {
+test("shared bootstrap generation replaces only its target", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "kepos-android-bootstrap-"));
   try {
     const outputDirectory = path.join(directory, "assets");
     const outputPath = path.join(outputDirectory, "kepos-bootstrap.json");
     await mkdir(outputDirectory, { recursive: true });
+    await writeFile(outputPath, "old\n");
     await writeFile(path.join(outputDirectory, "stale-full-config.json"), "secret");
-    const builder = await import("../scripts/android-bootstrap-config.js") as {
-      writeAndroidBootstrapAsset(options: {
+    const builder = await import("../scripts/bootstrap-config.js") as {
+      writeKeposBootstrapAsset(options: {
         outputPath: string;
         environment: NodeJS.ProcessEnv;
       }): Promise<void>;
     };
 
-    await builder.writeAndroidBootstrapAsset({
+    await builder.writeKeposBootstrapAsset({
       outputPath,
       environment: { XDG_CONFIG_HOME: path.join(directory, "missing") },
     });
 
-    assert.deepEqual(await readdir(outputDirectory), ["kepos-bootstrap.json"]);
+    assert.deepEqual(await readdir(outputDirectory), [
+      "kepos-bootstrap.json",
+      "stale-full-config.json",
+    ]);
+    assert.equal(await readFile(outputPath, "utf8"), "null\n");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -317,16 +322,16 @@ test("Android build leaves bootstrap selection to HyperDHT without local config"
   const directory = await mkdtemp(path.join(tmpdir(), "kepos-android-bootstrap-"));
   try {
     const outputPath = path.join(directory, "assets", "kepos-bootstrap.json");
-    const builder = await import("../scripts/android-bootstrap-config.js").catch(
+    const builder = await import("../scripts/bootstrap-config.js").catch(
       () => null,
     ) as null | {
-      writeAndroidBootstrapAsset(options: {
+      writeKeposBootstrapAsset(options: {
         outputPath: string;
         environment: NodeJS.ProcessEnv;
       }): Promise<void>;
     };
-    assert.notEqual(builder, null, "missing Android bootstrap asset builder");
-    await builder!.writeAndroidBootstrapAsset({
+    assert.notEqual(builder, null, "missing shared bootstrap asset builder");
+    await builder!.writeKeposBootstrapAsset({
       outputPath,
       environment: { XDG_CONFIG_HOME: path.join(directory, "missing") },
     });

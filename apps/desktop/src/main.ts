@@ -65,6 +65,7 @@ async function main(): Promise<void> {
         loadDesktopOptions(launchArguments, {
           homeDirectory,
           environment: process.env,
+          executablePath: process.execPath,
           platform: process.platform,
         }),
       onSnapshot: (snapshot) => {

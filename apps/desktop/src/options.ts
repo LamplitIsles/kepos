@@ -53,6 +53,7 @@ export interface DesktopConfigContext {
 export interface LoadDesktopOptionsContext {
   homeDirectory: string;
   environment?: NodeJS.ProcessEnv;
+  executablePath?: string;
   loadConfig?: typeof loadKeposConfig;
   saveConfig?: typeof saveKeposConfig;
   setupSubscriber?: typeof setupSubscriber;

@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { writeAndroidBootstrapAsset } from "./android-bootstrap-config.js";
+import { writeKeposBootstrapAsset } from "./bootstrap-config.js";
 
 const repository = fileURLToPath(new URL("..", import.meta.url));
 const assets = path.join(repository, "android", "app", "src", "main", "assets");
@@ -29,7 +29,7 @@ await rm(bundle, { force: true });
 await rm(addons, { force: true, recursive: true });
 await mkdir(assets, { recursive: true });
 await mkdir(addons, { recursive: true });
-await writeAndroidBootstrapAsset({ outputPath: bootstrapAsset });
+await writeKeposBootstrapAsset({ outputPath: bootstrapAsset });
 
 await run("bare-pack", [
   "--preset",

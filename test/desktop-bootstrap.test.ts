@@ -10,6 +10,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { DESKTOP_BOOTSTRAP_ASSET } from "../apps/desktop/src/paths.js";
+
 import { parseKeposConfig, type KeposConfig } from "../src/app-config.js";
 import { DEFAULT_GATEWAY_PORT } from "../src/home/gateway.js";
 import { ensureDesktopBootstrap } from "../apps/desktop/src/bootstrap.js";
@@ -138,9 +140,25 @@ test("desktop first launch creates and repeats preserve config and subscriber id
     XDG_STATE_HOME: path.join(root, "state-home"),
   };
   try {
+    const executablePath = path.join(
+      root,
+      "Kepos.app",
+      "Contents",
+      "MacOS",
+      "Kepos",
+    );
+    await mkdir(path.join(root, "Kepos.app", "Contents", "Resources"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(root, "Kepos.app", "Contents", "Resources", DESKTOP_BOOTSTRAP_ASSET),
+      '[{"host":"bootstrap.example","port":49737}]\n',
+    );
+
     const first = await loadDesktopOptions([], {
       homeDirectory: root,
       environment,
+      executablePath,
       platform: "darwin",
     });
     const configPath = path.join(
@@ -158,6 +176,7 @@ test("desktop first launch creates and repeats preserve config and subscriber id
     const identityBytes = await readFile(identityPath);
 
     assert.deepEqual(first, {
+      bootstrap: [{ host: "bootstrap.example", port: 49_737 }],
       subscriber: {
         stateDir: path.join(
           environment.XDG_STATE_HOME,
@@ -173,12 +192,16 @@ test("desktop first launch creates and repeats preserve config and subscriber id
       },
     });
     assert.deepEqual(parseKeposConfig(configBytes.toString()), {
+      network: {
+        bootstrap: [{ host: "bootstrap.example", port: 49_737 }],
+      },
       subscriber: { enabled: true, gatewayPort: DEFAULT_GATEWAY_PORT, services: [] },
     });
 
     const second = await loadDesktopOptions([], {
       homeDirectory: root,
       environment,
+      executablePath,
       platform: "darwin",
     });
     assert.deepEqual(second, first);
@@ -197,15 +220,38 @@ test("desktop bootstrap preserves an existing default config", async () => {
   try {
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(configPath, config);
+    const executablePath = path.join(
+      root,
+      "Kepos.app",
+      "Contents",
+      "MacOS",
+      "Kepos",
+    );
+    await mkdir(path.join(root, "Kepos.app", "Contents", "Resources"), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(root, "Kepos.app", "Contents", "Resources", DESKTOP_BOOTSTRAP_ASSET),
+      '[{"host":"packaged.example","port":49739}]\n',
+    );
     const options = await loadDesktopOptions([], {
       homeDirectory: root,
       environment: {
         XDG_CONFIG_HOME: path.join(root, "config"),
         XDG_STATE_HOME: path.join(root, "state"),
       },
+      executablePath,
       platform: "darwin",
     });
 
+    const identityPath = path.join(
+      root,
+      "state",
+      "kepos-neo",
+      "subscriber",
+      "client.identity.json",
+    );
+    const identityBytes = await readFile(identityPath);
     assert.equal(await readFile(configPath, "utf8"), config);
     assert.deepEqual(options.subscriber, {
       stateDir: path.join(root, "state", "kepos-neo", "subscriber"),
@@ -227,6 +273,18 @@ test("desktop bootstrap preserves an existing default config", async () => {
         ).publicKey,
       },
     });
+
+    await loadDesktopOptions([], {
+      homeDirectory: root,
+      environment: {
+        XDG_CONFIG_HOME: path.join(root, "config"),
+        XDG_STATE_HOME: path.join(root, "state"),
+      },
+      executablePath,
+      platform: "darwin",
+    });
+    assert.equal(await readFile(configPath, "utf8"), config);
+    assert.deepEqual(await readFile(identityPath), identityBytes);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
