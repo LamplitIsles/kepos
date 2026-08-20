@@ -9,6 +9,8 @@ import {
   type DesktopNativeWebView,
   type DesktopNativeWindow,
 } from "./host.js";
+import { createDesktopDiagnosticSink } from "./diagnostics.js";
+import { defaultDesktopDiagnosticsDirectory } from "./paths.js";
 import type { DesktopTray } from "./tray.js";
 import { loadDesktopOptions } from "./options.js";
 import { desktopLaunchArguments } from "./process.js";
@@ -39,6 +41,14 @@ async function main(): Promise<void> {
     ? process.env.KEPOS_WINDOWS_SMOKE_RENDER_FILE
     : undefined;
   const smokeQuitFile = process.env.KEPOS_WINDOWS_SMOKE_QUIT_FILE;
+  const diagnostics = createDesktopDiagnosticSink({
+    directory: defaultDesktopDiagnosticsDirectory({
+      homeDirectory,
+      environment: process.env,
+      platform: process.platform,
+    }),
+    platform: process.platform,
+  });
   let smokeFailure = false;
   let smokeSnapshot: DesktopSnapshot | undefined;
   let resolveSmokeRendered: (() => void) | undefined;
@@ -61,6 +71,7 @@ async function main(): Promise<void> {
   const running = await startDesktopHost(
     {
       homeDirectory,
+      diagnostics,
       loadOptions: () =>
         loadDesktopOptions(launchArguments, {
           homeDirectory,

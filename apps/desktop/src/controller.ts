@@ -1,8 +1,10 @@
 import {
   parseDesktopCommand,
+  serializeDesktopDiagnosticsResult,
   serializeDesktopSnapshot,
   type DesktopSnapshot,
 } from "./protocol.js";
+import { desktopDiagnosticErrorCategory } from "./diagnostics.js";
 
 export interface DesktopController {
   publish(snapshot: DesktopSnapshot): void;
@@ -18,6 +20,7 @@ export interface DesktopControllerOptions {
   createPairingInvitation(): Promise<void>;
   denyPairing(): Promise<void>;
   setSubscriberPublisher(publisherKey: string): Promise<void>;
+  copyDiagnostics: () => Promise<string>;
   quit(): Promise<void>;
 }
 
@@ -72,6 +75,26 @@ export function createDesktopController(
         throw new Error("subscriber is already configured");
       }
       await options.setSubscriberPublisher(command.publisherKey);
+      return;
+    }
+    if (command.type === "copyDiagnostics") {
+      try {
+        options.send(
+          serializeDesktopDiagnosticsResult({
+            type: "diagnosticsResult",
+            ok: true,
+            summary: await options.copyDiagnostics(),
+          }),
+        );
+      } catch (error) {
+        options.send(
+          serializeDesktopDiagnosticsResult({
+            type: "diagnosticsResult",
+            ok: false,
+            errorCategory: desktopDiagnosticErrorCategory(error),
+          }),
+        );
+      }
       return;
     }
 

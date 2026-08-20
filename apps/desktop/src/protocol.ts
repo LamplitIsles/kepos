@@ -1,3 +1,5 @@
+import type { DesktopDiagnosticErrorCategory } from "./diagnostics.js";
+
 export type DesktopConnection =
   | "unconfigured"
   | "connecting"
@@ -46,6 +48,7 @@ export interface DesktopSubscriberRole {
   };
   gatewayPort?: number;
   services: DesktopService[];
+  connectionHint?: "udp-firewall-vpn-tun";
   error?: string;
 }
 
@@ -87,12 +90,21 @@ export interface DesktopSnapshot {
 export type DesktopCommand =
   | { type: "ready" }
   | { type: "openService"; serviceId: string }
+  | { type: "copyDiagnostics" }
   | { type: "createPairingInvitation" }
   | { type: "cancelPairing" }
   | { type: "approvePairing" }
   | { type: "denyPairing" }
   | { type: "setSubscriberPublisher"; publisherKey: string }
   | { type: "quit" };
+
+export type DesktopDiagnosticsResult =
+  | { type: "diagnosticsResult"; ok: true; summary: string }
+  | {
+      type: "diagnosticsResult";
+      ok: false;
+      errorCategory: DesktopDiagnosticErrorCategory;
+    };
 
 export function parseDesktopCommand(source: string): DesktopCommand {
   if (b4a.byteLength(source, "utf8") > maximumMessageBytes) {
@@ -134,6 +146,7 @@ export function parseDesktopCommand(source: string): DesktopCommand {
   if (
     value.type === "ready" ||
     value.type === "quit" ||
+    value.type === "copyDiagnostics" ||
     value.type === "createPairingInvitation" ||
     value.type === "cancelPairing" ||
     value.type === "approvePairing" ||
@@ -148,6 +161,35 @@ export function parseDesktopCommand(source: string): DesktopCommand {
 
 export function serializeDesktopSnapshot(snapshot: DesktopSnapshot): string {
   return JSON.stringify(snapshot);
+}
+
+export function serializeDesktopDiagnosticsResult(
+  result: DesktopDiagnosticsResult,
+): string {
+  let serialized: string;
+  if (result.ok) {
+    if (typeof result.summary !== "string") {
+      throw new Error("diagnostics result summary is invalid");
+    }
+    serialized = JSON.stringify({
+      type: "diagnosticsResult",
+      ok: true,
+      summary: result.summary,
+    });
+  } else {
+    if (!diagnosticErrorCategories.has(result.errorCategory)) {
+      throw new Error("diagnostics result error category is invalid");
+    }
+    serialized = JSON.stringify({
+      type: "diagnosticsResult",
+      ok: false,
+      errorCategory: result.errorCategory,
+    });
+  }
+  if (b4a.byteLength(serialized, "utf8") > maximumMessageBytes) {
+    throw new Error("diagnostics result exceeds 64 KiB");
+  }
+  return serialized;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -165,5 +207,15 @@ function rejectUnknownFields(
 import * as b4a from "b4a";
 
 const maximumMessageBytes = 64 * 1024;
+const diagnosticErrorCategories = new Set([
+  "unknown",
+  "timeout",
+  "permission",
+  "not-found",
+  "invalid",
+  "conflict",
+  "unavailable",
+  "size",
+]);
 const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
 const publisherKeyPattern = /^[0-9a-f]{64}$/;
