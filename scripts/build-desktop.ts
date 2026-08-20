@@ -1,4 +1,12 @@
-import { readdir, rm, stat } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -7,6 +15,10 @@ import {
   DESKTOP_BOOTSTRAP_ASSET,
   desktopBootstrapAssetPath,
 } from "../apps/desktop/src/paths.js";
+import {
+  parseBootstrapAsset,
+  requireBootstrapAsset,
+} from "../src/bootstrap-asset.js";
 import { writeKeposBootstrapAsset } from "./bootstrap-config.js";
 
 export type DesktopTarget = "darwin-arm64" | "win32-x64";
@@ -21,6 +33,11 @@ export interface DesktopBuildCommand {
 export interface DesktopBuildTools {
   node: string;
   npm: string;
+}
+
+export interface DesktopBuildOptions {
+  bootstrapAssetPath?: string;
+  requireBootstrap?: boolean;
 }
 
 export interface DesktopBuildPlan {
@@ -341,8 +358,14 @@ export async function runDesktopBuild(
   repository: string,
   target: DesktopTarget = desktopTargetForPlatform(),
   tools: DesktopBuildTools = defaultTools(),
+  options: DesktopBuildOptions = {},
 ): Promise<void> {
   const plan = desktopBuildPlan(target);
+  const requireBootstrap =
+    options.requireBootstrap ?? process.env.KEPOS_BOOTSTRAP_REQUIRED === "1";
+  const stagingDirectory = path.join(repository, ".build", "desktop-bootstrap");
+  const stagingPath = path.join(stagingDirectory, DESKTOP_BOOTSTRAP_ASSET);
+
   await rm(path.join(repository, "dist", "desktop"), {
     force: true,
     recursive: true,
@@ -351,16 +374,67 @@ export async function runDesktopBuild(
     force: true,
     recursive: true,
   });
-  for (const command of plan.commands(repository, tools)) {
-    await run(repository, command, target);
+  await rm(stagingDirectory, { force: true, recursive: true });
+
+  try {
+    let bootstrapSource = "null\n";
+    if (target === "darwin-arm64") {
+      await writeKeposBootstrapAsset({
+        outputPath: stagingPath,
+        mode: 0o644,
+        required: requireBootstrap,
+      });
+      bootstrapSource = await readFile(stagingPath, "utf8");
+    } else if (options.bootstrapAssetPath !== undefined) {
+      bootstrapSource = await readDesktopBootstrapAssetInput(
+        options.bootstrapAssetPath,
+        requireBootstrap,
+      );
+    } else if (requireBootstrap) {
+      throw new Error("required Windows bootstrap asset input is missing");
+    }
+
+    for (const command of plan.commands(repository, tools)) {
+      await run(repository, command, target);
+    }
+
+    const outputPath = desktopBootstrapAssetPathForTarget(repository, target);
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, bootstrapSource, { mode: 0o644 });
+    await plan.validate(repository);
+  } finally {
+    await rm(stagingDirectory, { force: true, recursive: true });
   }
-  if (target === "darwin-arm64") {
-    await writeKeposBootstrapAsset({
-      outputPath: desktopBootstrapAssetPathForTarget(repository, target),
-      mode: 0o644,
+}
+
+export async function readDesktopBootstrapAssetInput(
+  inputPath: string,
+  required: boolean,
+): Promise<string> {
+  let source: string;
+  try {
+    const metadata = await lstat(inputPath);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new Error("desktop bootstrap asset input must be a regular file");
+    }
+    source = await readFile(inputPath, "utf8");
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("regular file")) {
+      throw error;
+    }
+    throw new Error(`cannot read desktop bootstrap asset input: ${inputPath}`, {
+      cause: error,
     });
   }
-  await plan.validate(repository);
+
+  let bootstrap;
+  try {
+    bootstrap = parseBootstrapAsset(source);
+  } catch (error) {
+    throw new Error("invalid desktop bootstrap asset input", { cause: error });
+  }
+  if (required) requireBootstrapAsset(bootstrap);
+  return source;
 }
 
 async function validateDarwinOutput(repository: string): Promise<void> {
@@ -390,6 +464,7 @@ async function validateWindowsOutput(repository: string): Promise<void> {
   const app = desktopWindowsApp(repository);
   const output = path.join(app, "App");
   await requireFile(path.join(output, "Kepos.exe"));
+  await requireFile(path.join(output, DESKTOP_BOOTSTRAP_ASSET));
   await requireFile(path.join(app, "AppxManifest.xml"));
   await requireFile(path.join(app, "Assets", "Logo.ico"));
   for (const required of [
@@ -465,6 +540,32 @@ async function run(
   });
 }
 
+export function requestedBootstrapAsset(
+  arguments_: readonly string[],
+): string | undefined {
+  const inline = arguments_.find((argument) =>
+    argument.startsWith("--bootstrap-asset="),
+  );
+  const index = arguments_.indexOf("--bootstrap-asset");
+  if (inline !== undefined && index !== -1) {
+    throw new Error("bootstrap asset must be specified only once");
+  }
+  if (inline !== undefined) {
+    const value = inline.slice("--bootstrap-asset=".length);
+    if (!value) throw new Error("missing value for --bootstrap-asset");
+    return value;
+  }
+  if (index === -1) return undefined;
+  const value = arguments_[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error("missing value for --bootstrap-asset");
+  }
+  if (arguments_.indexOf("--bootstrap-asset", index + 1) !== -1) {
+    throw new Error("bootstrap asset must be specified only once");
+  }
+  return value;
+}
+
 export function requestedTarget(
   arguments_: readonly string[],
 ): DesktopTarget | undefined {
@@ -483,7 +584,13 @@ export function requestedTarget(
 
 const repository = fileURLToPath(new URL("..", import.meta.url));
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const target = requestedTarget(process.argv.slice(2)) ?? desktopTargetForPlatform();
-  await runDesktopBuild(repository, target);
+  const arguments_ = process.argv.slice(2);
+  const target = requestedTarget(arguments_) ?? desktopTargetForPlatform();
+  await runDesktopBuild(repository, target, defaultTools(), {
+    bootstrapAssetPath: requestedBootstrapAsset(arguments_),
+    requireBootstrap:
+      arguments_.filter((argument) => argument === "--require-bootstrap").length > 0 ||
+      process.env.KEPOS_BOOTSTRAP_REQUIRED === "1",
+  });
   process.stdout.write(`Desktop app ready: ${desktopBuildPlan(target).outputDirectory(repository)}\n`);
 }

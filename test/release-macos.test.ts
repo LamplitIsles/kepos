@@ -40,6 +40,7 @@ test("isolates the macOS build from user npm configuration", () => {
     {
       PATH: "/usr/bin",
       NPM_CONFIG_USERCONFIG: os.devNull,
+      KEPOS_BOOTSTRAP_REQUIRED: "1",
     },
   );
 });

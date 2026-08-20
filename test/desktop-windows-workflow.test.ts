@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
+  copyFileSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -12,6 +14,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+
+import { generateBootstrapAsset } from "../scripts/generate-bootstrap-asset.js";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const powerShellOnWsl = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
@@ -47,6 +51,197 @@ function runGit(cwd: string, args: string[]) {
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 }
+
+test("Windows host input is sanitized and required generation rejects missing config", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "kepos-windows-bootstrap-input-"));
+  const configHome = path.join(root, "config-home");
+  const configDirectory = path.join(configHome, "kepos");
+  const outputPath = path.join(root, "run", "kepos-bootstrap.json");
+  mkdirSync(configDirectory, { recursive: true });
+  writeFileSync(
+    path.join(configDirectory, "config.toml"),
+    [
+      "[network]",
+      'bootstrap = ["bootstrap-one.example:49737"]',
+      "",
+      "[publisher]",
+      'display_name = "must not cross the NUC boundary"',
+      "allow = []",
+      "services = []",
+      "",
+      "[subscriber]",
+      "enabled = true",
+      "services = []",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    await generateBootstrapAsset([outputPath, "required"], {
+      XDG_CONFIG_HOME: configHome,
+    });
+    assert.deepEqual(JSON.parse(readFileSync(outputPath, "utf8")), [
+      { host: "bootstrap-one.example", port: 49_737 },
+    ]);
+    assert.doesNotMatch(readFileSync(outputPath, "utf8"), /publisher|subscriber|must not cross/);
+
+    await assert.rejects(
+      generateBootstrapAsset([
+        path.join(root, "missing", "kepos-bootstrap.json"),
+        "required",
+      ], {
+        XDG_CONFIG_HOME: path.join(root, "missing-config"),
+      }),
+      /required.*empty/i,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows NUC transfer keeps the bootstrap input separate from tracked source", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "kepos-windows-transfer-seam-"));
+  const fakeBin = path.join(root, "fake-bin");
+  const fakeState = path.join(root, "fake-state");
+  mkdirSync(path.join(root, "scripts", "windows"), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  mkdirSync(fakeState, { recursive: true });
+
+  for (const file of [
+    "scripts/windows/nuc-kep.sh",
+    "scripts/windows/tracked-manifest.sh",
+    "scripts/generate-bootstrap-asset.ts",
+  ]) {
+    const target = path.join(root, file);
+    mkdirSync(path.dirname(target), { recursive: true });
+    copyFileSync(path.join(repository, file), target);
+    if (file.endsWith(".sh")) chmodSync(target, 0o755);
+  }
+  writeFileSync(
+    path.join(root, ".gitignore"),
+    ".env\nlive-config.toml\nunrelated-untracked.txt\ndist/\nvendor/\nfake-bin/\nfake-state/\n",
+  );
+  writeFileSync(path.join(root, "tracked.txt"), "tracked\n");
+  writeFileSync(path.join(root, ".env"), "credential=not-for-transfer\n");
+  writeFileSync(path.join(root, "live-config.toml"), "complete config\n");
+  writeFileSync(path.join(root, "unrelated-untracked.txt"), "unrelated\n");
+
+  for (const name of ["bare-native", "bare-win-ui", "bare-app-kit"]) {
+    const directory = path.join(root, "vendor", "holepunch", name);
+    mkdirSync(directory, { recursive: true });
+    runGit(directory, ["init", "--quiet"]);
+    runGit(directory, ["config", "user.email", "test@example.invalid"]);
+    runGit(directory, ["config", "user.name", "Workflow Test"]);
+    writeFileSync(path.join(directory, "tracked.txt"), `${name}\n`);
+    runGit(directory, ["add", "tracked.txt"]);
+    runGit(directory, ["commit", "--quiet", "-m", "fixture"]);
+  }
+
+  const fakeNode = path.join(fakeBin, "node");
+  writeFileSync(
+    fakeNode,
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [[ \${FAKE_NODE_FAIL:-0} == 1 ]]; then exit 91; fi
+if [[ "\${3:-}" == "scripts/generate-bootstrap-asset.ts" ]]; then
+  printf '%s\n' '[{"host":"bootstrap.example","port":49737}]' > "\${4}"
+  exit 0
+fi
+printf '%s\n' 'unexpected fake node invocation' >&2
+exit 92
+`,
+  );
+  chmodSync(fakeNode, 0o755);
+  const fakeSsh = path.join(fakeBin, "ssh");
+  writeFileSync(
+    fakeSsh,
+    `#!/usr/bin/env bash
+set -euo pipefail
+count_file="\${FAKE_ROOT}/ssh-count"
+count=0
+if [[ -f "\${count_file}" ]]; then count="\$(cat "\${count_file}")"; fi
+count="\$((count + 1))"
+printf '%s' "\${count}" > "\${count_file}"
+printf '%s\n' "\${*:2}" > "\${FAKE_ROOT}/ssh-command-\${count}"
+cat > "\${FAKE_ROOT}/ssh-input-\${count}"
+if [[ \${count} -eq 2 ]]; then cp "\${FAKE_ROOT}/ssh-input-\${count}" "\${FAKE_ROOT}/archive.tar"; fi
+`,
+  );
+  chmodSync(fakeSsh, 0o755);
+  const fakeScp = path.join(fakeBin, "scp");
+  writeFileSync(
+    fakeScp,
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [[ \${1:-} == -r ]]; then shift; fi
+source="\${1}"
+destination="\${2}"
+if [[ "\${destination}" == *kepos-bootstrap.json ]]; then
+  cp "\${source}" "\${FAKE_ROOT}/remote-bootstrap.json"
+elif [[ "\${source}" == */logs ]]; then
+  destination="\${destination%/}"
+  mkdir -p "\${destination}/logs"
+  printf '%s\n' 'logs' > "\${destination}/logs/transfer.marker"
+elif [[ "\${source}" == */dist/desktop ]]; then
+  destination="\${destination%/}"
+  mkdir -p "\${destination}/desktop"
+  printf '%s\n' 'desktop' > "\${destination}/desktop/transfer.marker"
+else
+  printf '%s\n' 'unexpected fake scp invocation' >&2
+  exit 93
+fi
+`,
+  );
+  chmodSync(fakeScp, 0o755);
+
+  runGit(root, ["init", "--quiet"]);
+  runGit(root, ["config", "user.email", "test@example.invalid"]);
+  runGit(root, ["config", "user.name", "Workflow Test"]);
+  runGit(root, ["add", ".gitignore", "tracked.txt", "scripts"]);
+  runGit(root, ["commit", "--quiet", "-m", "fixture"]);
+
+  const environment = {
+    ...isolatedGitEnvironment,
+    PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+    WINDOWS_USER: "test",
+    FAKE_ROOT: fakeState,
+  };
+  try {
+    const result = spawnSync("bash", ["scripts/windows/nuc-kep.sh"], {
+      cwd: root,
+      encoding: "utf8",
+      env: environment,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    const archiveListing = spawnSync("tar", ["-tf", path.join(fakeState, "archive.tar")], {
+      encoding: "utf8",
+    });
+    assert.equal(archiveListing.status, 0, archiveListing.stderr);
+    assert.match(archiveListing.stdout, /tracked\.txt/);
+    assert.doesNotMatch(archiveListing.stdout, /\.env|live-config|unrelated-untracked|kepos-bootstrap/);
+    assert.equal(
+      readFileSync(path.join(fakeState, "remote-bootstrap.json"), "utf8"),
+      '[{"host":"bootstrap.example","port":49737}]\n',
+    );
+    const remoteCommand = readFileSync(
+      path.join(fakeState, "ssh-command-2"),
+      "utf8",
+    );
+    assert.match(remoteCommand, /BootstrapAsset/);
+    assert.match(remoteCommand, /kepos-bootstrap\.json/);
+
+    const failed = spawnSync("bash", ["scripts/windows/nuc-kep.sh"], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...environment, FAKE_NODE_FAIL: "1" },
+    });
+    assert.notEqual(failed.status, 0);
+    assert.equal(existsSync(path.join(fakeState, "ssh-command-3")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("Windows transfer manifest includes tracked submodule files and no live state", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "kepos-windows-manifest-"));

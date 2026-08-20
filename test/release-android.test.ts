@@ -83,6 +83,9 @@ test("builds, aligns, signs, and verifies a versioned APK without exposing the p
     plan.commands.map(({ kind }) => kind),
     ["fetch", "bundle", "build", "zipalign", "sign", "verify"],
   );
+  assert.deepEqual(plan.commands[1].environment, {
+    KEPOS_BOOTSTRAP_REQUIRED: "1",
+  });
   assert.deepEqual(plan.commands[2], {
     kind: "build",
     command: path.join(repository, "android", "gradlew"),

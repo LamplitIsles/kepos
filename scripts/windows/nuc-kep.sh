@@ -17,8 +17,10 @@ readonly TRACKED_MANIFEST="${LOCAL_ROOT}/scripts/windows/tracked-manifest.sh"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 readonly RUN_ID
 readonly LOCAL_OUTPUT="${LOCAL_ROOT}/dist/windows/${RUN_ID}"
+readonly LOCAL_BOOTSTRAP="${LOCAL_OUTPUT}/kepos-bootstrap.json"
 readonly REMOTE_RUN="${WINDOWS_BUILDS}/${RUN_ID}"
 readonly REMOTE_SOURCE="${WINDOWS_BUILDS}/source"
+readonly REMOTE_BOOTSTRAP="${REMOTE_RUN}/kepos-bootstrap.json"
 TRANSFER_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/kepos-windows-transfer.XXXXXX")"
 readonly TRANSFER_ARCHIVE
 PARTIAL_ARTIFACT=""
@@ -39,6 +41,11 @@ if [[ $# -gt 0 ]]; then
   [[ $# -eq 2 ]] && RELEASE_MODE="rehearsal"
 fi
 readonly RELEASE_MODE RELEASE_TAG
+BOOTSTRAP_INPUT_MODE="optional"
+if [[ -n $RELEASE_TAG ]]; then
+  BOOTSTRAP_INPUT_MODE="required"
+fi
+readonly BOOTSTRAP_INPUT_MODE
 if [[ -n $RELEASE_TAG ]]; then
   if [[ $RELEASE_MODE == release ]]; then
     RELEASE_DIRECTORY="${LOCAL_ROOT}/dist/release/${RELEASE_TAG}"
@@ -159,6 +166,16 @@ bare_native_revision=$(git -C "$LOCAL_ROOT/vendor/holepunch/bare-native" rev-par
 bare_win_ui_revision=$(git -C "$LOCAL_ROOT/vendor/holepunch/bare-win-ui" rev-parse HEAD)
 bare_app_kit_revision=$(git -C "$LOCAL_ROOT/vendor/holepunch/bare-app-kit" rev-parse HEAD)
 
+# Generate the only untracked build input from the local bootstrap section. The
+# source snapshot below remains tracked-only and never contains this file.
+if ! (
+  cd "$LOCAL_ROOT"
+  node --import tsx scripts/generate-bootstrap-asset.ts "$LOCAL_BOOTSTRAP" "$BOOTSTRAP_INPUT_MODE"
+); then
+  printf '%s\n' 'failed to generate the sanitized Windows bootstrap input' >&2
+  exit 1
+fi
+
 # Archive Git's cached recursive manifest, never the working tree. Paths are
 # NUL-safe, so ignored/untracked .env, .npmrc, caches, and live state cannot enter.
 bash "$TRACKED_MANIFEST" "$LOCAL_ROOT" |
@@ -173,6 +190,8 @@ remote_command+=(-RunDirectory "${WINDOWS_BUILD_ROOT}\\${RUN_ID}")
 remote_command+=(-WorkspaceRoot "$WINDOWS_BUILD_ROOT")
 remote_command+=(-ToolsDirectory "${WINDOWS_ROOT}\\.local\\kepos-tools")
 remote_command+=(-RunId "$RUN_ID")
+remote_command+=(-BootstrapAsset "${WINDOWS_BUILD_ROOT}\\${RUN_ID}\\kepos-bootstrap.json")
+if [[ -n $RELEASE_TAG ]]; then remote_command+=(-RequireBootstrap); fi
 remote_command+=(-RootRevision "$root_revision")
 remote_command+=(-BareNativeRevision "$bare_native_revision")
 remote_command+=(-BareWinUiRevision "$bare_win_ui_revision")
@@ -188,11 +207,28 @@ fi
 remote_powershell=""
 for argument in "${remote_command[@]}"; do remote_powershell+=" $(shell_quote "$argument")"; done
 
+remote_prepare_payload="set -euo pipefail
+rm -rf -- $(shell_quote "$REMOTE_RUN")
+mkdir -p -- $(shell_quote "$REMOTE_RUN")
+"
+if ! ssh "$HOST" "bash -c $(shell_quote "$remote_prepare_payload")" </dev/null; then
+  printf 'Windows run directory preparation failed: %s\n' "$REMOTE_RUN" >&2
+  exit 1
+fi
+if ! scp "$LOCAL_BOOTSTRAP" "$HOST:$REMOTE_BOOTSTRAP"; then
+  printf 'Windows bootstrap input transfer failed: %s\n' "$REMOTE_BOOTSTRAP" >&2
+  exit 1
+fi
+
 remote_payload="set -euo pipefail
 exec 9>$(shell_quote "$REMOTE_LOCK")
 if ! flock -n 9; then
   printf '%s\\n' 'Another Kepos Windows workflow is already running on this host.' >&2
   exit 75
+fi
+if [[ ! -f $(shell_quote "$REMOTE_BOOTSTRAP") ]]; then
+  printf '%s\\n' 'Windows bootstrap input is missing on the NUC.' >&2
+  exit 1
 fi
 rm -rf -- $(shell_quote "$REMOTE_SOURCE")
 mkdir -p -- $(shell_quote "$REMOTE_SOURCE")

@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { loadRequiredKeposBootstrap } from "./bootstrap-config.js";
+import { verifyBootstrapAssetArchive } from "./release-bootstrap.js";
 import {
   assertReleaseGitState,
   parseReleaseTag,
@@ -42,7 +44,10 @@ export function macosReleaseEnvironment(
   baseEnvironment: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const environment = releaseSubprocessEnvironment(baseEnvironment);
-  if (kind === "build") environment.NPM_CONFIG_USERCONFIG = os.devNull;
+  if (kind === "build") {
+    environment.NPM_CONFIG_USERCONFIG = os.devNull;
+    environment.KEPOS_BOOTSTRAP_REQUIRED = "1";
+  }
   return environment;
 }
 
@@ -332,6 +337,7 @@ async function main(): Promise<void> {
   }
   const repository = fileURLToPath(new URL("..", import.meta.url));
   const { tag, mode } = parseMacosReleaseArguments(process.argv.slice(2));
+  const expectedBootstrap = await loadRequiredKeposBootstrap();
   await assertReleaseGitState({
     tag,
     mode,
@@ -360,6 +366,17 @@ async function main(): Promise<void> {
       removeTree: (directory) => rm(directory, { force: true, recursive: true }),
     },
   );
+  try {
+    await verifyBootstrapAssetArchive({
+      archivePath: result.macosZip,
+      entryPath: "Kepos.app/Contents/Resources/kepos-bootstrap.json",
+      expected: expectedBootstrap,
+      label: "macOS ZIP",
+    });
+  } catch (error) {
+    await rm(result.macosZip, { force: true });
+    throw error;
+  }
   process.stdout.write(`macOS ZIP: ${result.macosZip}\n`);
 }
 
