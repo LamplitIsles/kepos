@@ -20,6 +20,7 @@ import {
   requireBootstrapAsset,
 } from "../src/bootstrap-asset.js";
 import { writeKeposBootstrapAsset } from "./bootstrap-config.js";
+import { stageWindowsSelfContainedRuntime } from "./windows/self-contained-runtime.js";
 
 export type DesktopTarget = "darwin-arm64" | "win32-x64";
 
@@ -398,6 +399,13 @@ export async function runDesktopBuild(
       await run(repository, command, target);
     }
 
+    if (target === "win32-x64") {
+      const runtime = await stageWindowsSelfContainedRuntime(repository);
+      process.stdout.write(
+        `Windows self-contained runtime staged: ${runtime.fileCount} files, manifest ${runtime.manifestSha256}\n`,
+      );
+    }
+
     const outputPath = desktopBootstrapAssetPathForTarget(repository, target);
     await mkdir(path.dirname(outputPath), { recursive: true });
     await writeFile(outputPath, bootstrapSource, { mode: 0o644 });
@@ -465,12 +473,13 @@ async function validateWindowsOutput(repository: string): Promise<void> {
   const output = path.join(app, "App");
   await requireFile(path.join(output, "Kepos.exe"));
   await requireFile(path.join(output, DESKTOP_BOOTSTRAP_ASSET));
+  await requireFile(path.join(output, "self-contained-runtime.json"));
+  await requireFile(path.join(output, "Microsoft.WindowsAppRuntime.dll"));
   await requireFile(path.join(app, "AppxManifest.xml"));
   await requireFile(path.join(app, "Assets", "Logo.ico"));
   for (const required of [
     "bare-win-ui-",
     "Microsoft.Web.WebView2.Core.dll",
-    "Microsoft.WindowsAppRuntime.Bootstrap.dll",
   ]) {
     const files = await readdir(output);
     if (
