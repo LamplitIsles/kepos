@@ -1,4 +1,7 @@
-import type { DesktopDiagnosticErrorCategory } from "./diagnostics.js";
+import {
+  isDesktopDiagnosticErrorCategory,
+  type DesktopDiagnosticErrorCategory,
+} from "./diagnostics-contract.js";
 
 export type DesktopConnection =
   | "unconfigured"
@@ -177,7 +180,7 @@ export function serializeDesktopDiagnosticsResult(
       summary: result.summary,
     });
   } else {
-    if (!diagnosticErrorCategories.has(result.errorCategory)) {
+    if (!isDesktopDiagnosticErrorCategory(result.errorCategory)) {
       throw new Error("diagnostics result error category is invalid");
     }
     serialized = JSON.stringify({
@@ -207,15 +210,5 @@ function rejectUnknownFields(
 import * as b4a from "b4a";
 
 const maximumMessageBytes = 64 * 1024;
-const diagnosticErrorCategories = new Set([
-  "unknown",
-  "timeout",
-  "permission",
-  "not-found",
-  "invalid",
-  "conflict",
-  "unavailable",
-  "size",
-]);
 const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
 const publisherKeyPattern = /^[0-9a-f]{64}$/;

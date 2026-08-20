@@ -189,7 +189,6 @@ export async function startDesktopRuntime(
     ...(publisherRole ? { publisher: clonePublisherRole(publisherRole) } : {}),
   });
   const publish = (): void => options.onSnapshot(snapshot());
-  let latestSubscriberOuterId: string | undefined;
   const subscriberAttempts = new Map<
     string,
     { connected: boolean }
@@ -225,15 +224,9 @@ export async function startDesktopRuntime(
       return;
     }
     if (observation.event === "outer.attempt") {
-      latestSubscriberOuterId = outerId;
       subscriberAttempts.set(outerId, { connected: false });
-      if (subscriberAttempts.size > 16) {
-        const oldest = subscriberAttempts.keys().next().value;
-        if (typeof oldest === "string") subscriberAttempts.delete(oldest);
-      }
       return;
     }
-    if (outerId !== latestSubscriberOuterId) return;
     const attempt = subscriberAttempts.get(outerId);
     if (!attempt) return;
     if (observation.event === "outer.connected") {
@@ -244,7 +237,6 @@ export async function startDesktopRuntime(
     }
     if (observation.event !== "outer.closed") return;
     subscriberAttempts.delete(outerId);
-    latestSubscriberOuterId = undefined;
     if (attempt.connected) return;
     failedSubscriberSequences++;
     if (failedSubscriberSequences >= 3) setConnectionHint(true);
@@ -780,7 +772,6 @@ export async function startDesktopRuntime(
       publisherPreparation = undefined;
     }
     if (subscriberChanged) {
-      latestSubscriberOuterId = undefined;
       subscriberAttempts.clear();
       failedSubscriberSequences = 0;
       connectionHintVisible = false;

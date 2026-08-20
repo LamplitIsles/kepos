@@ -4,7 +4,7 @@ import {
   serializeDesktopSnapshot,
   type DesktopSnapshot,
 } from "./protocol.js";
-import { desktopDiagnosticErrorCategory } from "./diagnostics.js";
+import { desktopDiagnosticErrorCategory } from "./diagnostics-contract.js";
 
 export interface DesktopController {
   publish(snapshot: DesktopSnapshot): void;

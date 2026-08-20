@@ -202,25 +202,45 @@ test("desktop runtime forwards both role observations, device events, and correl
   await runtime.reconfigure({ publisher, subscriber });
   assert.ok(deviceEvents.some((event) => event.event === "desktop.config"));
 
-  const failedIds = [
-    "outer-0000000000000001",
-    "outer-0000000000000002",
-    "outer-0000000000000003",
-  ];
-  for (const outerId of failedIds) {
-    subscriberObserve?.(observation("outer.attempt", "subscriber", outerId));
-    subscriberObserve?.(observation("outer.closed", "subscriber", outerId));
-  }
+  // The first two attempts overlap. Both matching closes count toward the
+  // streak even though the older attempt is no longer the latest one.
+  subscriberObserve?.(
+    observation("outer.attempt", "subscriber", "outer-0000000000000001"),
+  );
+  subscriberObserve?.(
+    observation("outer.attempt", "subscriber", "outer-0000000000000002"),
+  );
+  subscriberObserve?.(
+    observation("outer.closed", "subscriber", "outer-0000000000000001"),
+  );
+  subscriberObserve?.(
+    observation("outer.closed", "subscriber", "outer-0000000000000002"),
+  );
+  subscriberObserve?.(
+    observation("outer.attempt", "subscriber", "outer-0000000000000003"),
+  );
+  subscriberObserve?.(
+    observation("outer.closed", "subscriber", "outer-0000000000000003"),
+  );
   assert.equal(
     snapshots.at(-1)?.subscriber?.connectionHint,
     "udp-firewall-vpn-tun",
   );
 
-  // An older overlapping close and a publisher event do not advance the streak.
-  subscriberObserve?.(observation("outer.attempt", "subscriber", "outer-0000000000000004"));
-  subscriberObserve?.(observation("outer.attempt", "subscriber", "outer-0000000000000005"));
-  subscriberObserve?.(observation("outer.closed", "subscriber", "outer-0000000000000004"));
-  publisherObserve?.(observation("outer.closed", "publisher", "outer-0000000000000006"));
+  // A publisher event is unrelated. The still-open subscriber attempt can
+  // connect and clear the hint even after an older overlapping close.
+  subscriberObserve?.(
+    observation("outer.attempt", "subscriber", "outer-0000000000000004"),
+  );
+  subscriberObserve?.(
+    observation("outer.attempt", "subscriber", "outer-0000000000000005"),
+  );
+  subscriberObserve?.(
+    observation("outer.closed", "subscriber", "outer-0000000000000004"),
+  );
+  publisherObserve?.(
+    observation("outer.closed", "publisher", "outer-0000000000000006"),
+  );
   assert.equal(
     snapshots.at(-1)?.subscriber?.connectionHint,
     "udp-firewall-vpn-tun",
