@@ -9,6 +9,8 @@ param(
   [Parameter(Mandatory = $true)] [string]$BareNativeRevision,
   [Parameter(Mandatory = $true)] [string]$BareWinUiRevision,
   [Parameter(Mandatory = $true)] [string]$BareAppKitRevision,
+  [string]$BootstrapAsset,
+  [switch]$RequireBootstrap,
   [ValidateSet('dogfood', 'release')] [string]$Workflow = 'dogfood',
   [string]$ReleaseTag,
   [ValidateSet('release', 'rehearsal')] [string]$ReleaseMode,
@@ -107,6 +109,28 @@ function Get-ContainedReleaseArtifactPath {
   return $artifact
 }
 
+function Assert-BootstrapInput {
+  param(
+    [Parameter(Mandatory = $true)] [string]$RunDirectory,
+    [string]$Path,
+    [Parameter(Mandatory = $true)] [bool]$Required
+  )
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    if ($Required) { throw 'required Windows bootstrap input is missing' }
+    return $null
+  }
+  $canonical = Get-CanonicalPath $Path
+  Assert-SafeOwnedPath $RunDirectory $canonical 'bootstrap input'
+  if ([System.IO.Path]::GetFileName($canonical) -ne 'kepos-bootstrap.json') {
+    throw 'bootstrap input must use the fixed kepos-bootstrap.json name'
+  }
+  $item = Get-Item -LiteralPath $canonical -Force -ErrorAction Stop
+  if (-not $item.PSIsContainer -and (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0)) {
+    return $canonical
+  }
+  throw 'bootstrap input must be a regular file'
+}
+
 function Get-SubstTarget {
   $lines = @(& subst.exe 2>&1)
   $code = $LASTEXITCODE
@@ -191,6 +215,7 @@ function Get-PortableFileSet {
     '^AppxManifest\.xml$',
     '^Assets\\Logo\.ico$',
     '^App\\Kepos\.exe$',
+    '^App\\kepos-bootstrap\.json$',
     '^App\\app\.bundle$',
     '^App\\Microsoft\.Web\.WebView2\.Core\.dll$',
     '^App\\Microsoft\.WindowsAppRuntime\.Bootstrap\.dll$',
@@ -208,7 +233,7 @@ function Get-PortableFileSet {
       throw "Windows portable app contains an unexpected entry: $name"
     }
   }
-  foreach ($name in @('AppxManifest.xml', 'Assets\Logo.ico', 'App\Kepos.exe', 'App\app.bundle', 'App\Microsoft.Web.WebView2.Core.dll', 'App\Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
+  foreach ($name in @('AppxManifest.xml', 'Assets\Logo.ico', 'App\Kepos.exe', 'App\kepos-bootstrap.json', 'App\app.bundle', 'App\Microsoft.Web.WebView2.Core.dll', 'App\Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
     if (-not $relative.Contains($name)) { throw "Windows portable app is missing $name" }
   }
   if (-not ($relative | Where-Object { $_ -match '^App\\bare-win-ui-' })) {
@@ -222,7 +247,9 @@ function Invoke-PortableSmoke {
   param(
     [Parameter(Mandatory = $true)] [string]$Executable,
     [Parameter(Mandatory = $true)] [string]$SmokeRoot,
-    [Parameter(Mandatory = $true)] [string]$Logs
+    [Parameter(Mandatory = $true)] [string]$Logs,
+    [string]$BootstrapAsset,
+    [string]$Node
   )
   $smokeHome = Join-Path $SmokeRoot 'home'
   $appData = Join-Path $SmokeRoot 'AppData\Roaming'
@@ -289,6 +316,20 @@ function Invoke-PortableSmoke {
       ) {
         throw 'rendered acknowledgement did not prove the unconfigured page state'
       }
+
+      if (-not [string]::IsNullOrWhiteSpace($BootstrapAsset)) {
+        $configPath = Join-Path $appData 'Kepos\config.toml'
+        if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+          throw 'Windows portable smoke did not create its first-run config'
+        }
+        Invoke-LoggedNative $Node 'bootstrap-config' @(
+          '--import',
+          'tsx',
+          'scripts\verify-desktop-bootstrap.ts',
+          $BootstrapAsset,
+          $configPath
+        )
+      }
     } catch {
       throw "Windows portable smoke bridge/render proof is invalid: $($_.Exception.Message)"
     }
@@ -309,7 +350,9 @@ function Invoke-PortableRelease {
     [Parameter(Mandatory = $true)] [string]$RunDirectory,
     [Parameter(Mandatory = $true)] [string]$Logs,
     [Parameter(Mandatory = $true)] [string]$ArtifactName,
-    [Parameter(Mandatory = $true)] [string]$Mode
+    [Parameter(Mandatory = $true)] [string]$Mode,
+    [Parameter(Mandatory = $true)] [string]$BootstrapAsset,
+    [Parameter(Mandatory = $true)] [string]$Node
   )
   if ($ArtifactName -ne 'kepos-windows-x64.zip') { throw "invalid Windows artifact name: $ArtifactName" }
   $artifact = Join-Path $RunDirectory $ArtifactName
@@ -346,7 +389,14 @@ function Invoke-PortableRelease {
   $extractedApp = Join-Path $extracted 'Kepos'
   $extractedSet = @(Get-PortableFileSet $extractedApp)
   if (($fileSet -join "`n") -ne ($extractedSet -join "`n")) { throw 'Windows ZIP changed the validated portable file set' }
-  Invoke-PortableSmoke (Join-Path $extractedApp 'App\Kepos.exe') $extracted (Join-Path $Logs 'smoke')
+  Invoke-LoggedNative $Node 'bootstrap-artifact' @(
+    '--import',
+    'tsx',
+    'scripts\verify-bootstrap-asset.ts',
+    $BootstrapAsset,
+    (Join-Path $extractedApp 'App\kepos-bootstrap.json')
+  )
+  Invoke-PortableSmoke (Join-Path $extractedApp 'App\Kepos.exe') $extracted (Join-Path $Logs 'smoke') $BootstrapAsset $Node
   Get-FileHash -Algorithm SHA256 -LiteralPath $artifact | Format-List | Out-File (Join-Path $Logs 'release-artifact.sha256')
   Write-Host "Windows ZIP verified: $artifact"
 }
@@ -370,6 +420,8 @@ try {
   $ToolsDirectory = Get-CanonicalPath $ToolsDirectory
   Assert-SafeOwnedPath $WorkspaceRoot $RunDirectory 'RunDirectory'
   Assert-SafeOwnedPath $WorkspaceRoot $Repository 'Repository'
+  $bootstrapRequired = [bool]$RequireBootstrap -or $Workflow -eq 'release'
+  $BootstrapAsset = Assert-BootstrapInput $RunDirectory $BootstrapAsset $bootstrapRequired
   if ($Workflow -eq 'release') {
     if ([string]::IsNullOrWhiteSpace($ReleaseArtifactName)) { throw 'release workflow requires an artifact name' }
     # Validate and contain this value before any catch-path cleanup can use it.
@@ -577,7 +629,12 @@ try {
     "bare-app-kit=$BareAppKitRevision"
   ) | Set-Content -LiteralPath $RevisionFile -Encoding utf8
 
-  Invoke-LoggedNative $Npm 'desktop-build' @('run', 'desktop:build', '--', '--target', 'win32-x64')
+  $DesktopBuildArguments = @('run', 'desktop:build', '--', '--target', 'win32-x64')
+  if (-not [string]::IsNullOrWhiteSpace($BootstrapAsset)) {
+    $DesktopBuildArguments += @('--bootstrap-asset', $BootstrapAsset)
+  }
+  if ($bootstrapRequired) { $DesktopBuildArguments += '--require-bootstrap' }
+  Invoke-LoggedNative $Npm 'desktop-build' $DesktopBuildArguments
 
   if ($Workflow -eq 'dogfood') {
     # Keep the packaged desktop build production-only. The adapter sample uses
@@ -680,9 +737,9 @@ try {
   if ($Workflow -eq 'dogfood') {
     $PackagedSmokeRoot = Join-Path $RunDirectory 'packaged-smoke'
     Assert-SafeOwnedPath $RunDirectory $PackagedSmokeRoot 'packaged smoke root'
-    Invoke-PortableSmoke $StagedExecutable $PackagedSmokeRoot (Join-Path $Logs 'packaged-smoke')
+    Invoke-PortableSmoke $StagedExecutable $PackagedSmokeRoot (Join-Path $Logs 'packaged-smoke') $BootstrapAsset $Node
   } elseif ($Workflow -eq 'release') {
-    Invoke-PortableRelease $RunDirectory $Logs $ReleaseArtifactName $ReleaseMode
+    Invoke-PortableRelease $RunDirectory $Logs $ReleaseArtifactName $ReleaseMode $BootstrapAsset $Node
   }
   Write-Host "Windows desktop build complete: $Artifact"
 } catch {

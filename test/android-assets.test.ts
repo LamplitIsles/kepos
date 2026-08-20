@@ -268,6 +268,7 @@ test("Android build embeds only bootstrap endpoints from the local Kepos config"
       writeKeposBootstrapAsset(options: {
         outputPath: string;
         environment: NodeJS.ProcessEnv;
+        required?: boolean;
       }): Promise<void>;
     };
     assert.notEqual(builder, null, "missing shared bootstrap asset builder");
@@ -277,12 +278,53 @@ test("Android build embeds only bootstrap endpoints from the local Kepos config"
         process.platform === "win32"
           ? { APPDATA: configHome }
           : { XDG_CONFIG_HOME: configHome },
+      required: true,
     });
 
     assert.deepEqual(JSON.parse(await readFile(outputPath, "utf8")), [
       { host: "bootstrap-one.example", port: 49_737 },
       { host: "bootstrap-two.example", port: 49_738 },
     ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("required shared bootstrap generation rejects missing and empty assets", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "kepos-required-bootstrap-"));
+  try {
+    const outputPath = path.join(directory, "kepos-bootstrap.json");
+    const builder = await import("../scripts/bootstrap-config.js") as {
+      writeKeposBootstrapAsset(options: {
+        outputPath: string;
+        environment: NodeJS.ProcessEnv;
+        required?: boolean;
+      }): Promise<void>;
+    };
+
+    await assert.rejects(
+      builder.writeKeposBootstrapAsset({
+        outputPath,
+        environment: { XDG_CONFIG_HOME: path.join(directory, "missing") },
+        required: true,
+      }),
+      /required.*empty/i,
+    );
+
+    const configDirectory = path.join(directory, "config", "kepos");
+    await mkdir(configDirectory, { recursive: true });
+    await writeFile(
+      path.join(configDirectory, "config.toml"),
+      "[network]\nbootstrap = []\n",
+    );
+    await assert.rejects(
+      builder.writeKeposBootstrapAsset({
+        outputPath,
+        environment: { XDG_CONFIG_HOME: path.join(directory, "config") },
+        required: true,
+      }),
+      /required.*empty/i,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

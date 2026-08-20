@@ -17,6 +17,8 @@ import {
   desktopBootstrapAssetPathForTarget,
   desktopBuildCommands,
   desktopBuildPlan,
+  readDesktopBootstrapAssetInput,
+  requestedBootstrapAsset,
   requestedTarget,
 } from "../scripts/build-desktop.js";
 import {
@@ -324,14 +326,52 @@ test("desktop Windows plan builds an unpackaged WinUI directory and links native
   );
 });
 
-test("desktop target parsing and planning reject missing or unknown targets", () => {
+test("desktop target and bootstrap input parsing reject missing or unknown values", () => {
   assert.equal(requestedTarget(["--target", "win32-x64"]), "win32-x64");
+  assert.equal(
+    requestedBootstrapAsset(["--bootstrap-asset", "C:\\kb\\run\\kepos-bootstrap.json"]),
+    "C:\\kb\\run\\kepos-bootstrap.json",
+  );
   assert.throws(() => requestedTarget(["--target"]), /missing value/);
+  assert.throws(() => requestedBootstrapAsset(["--bootstrap-asset"]), /missing value/);
+  assert.throws(
+    () => requestedBootstrapAsset(["--bootstrap-asset", "one", "--bootstrap-asset", "two"]),
+    /only once/,
+  );
   assert.throws(() => requestedTarget(["--target=win32"]), /unsupported desktop build target/);
   assert.throws(
     () => desktopBuildPlan("win32"),
     /unsupported desktop build target/,
   );
+});
+
+test("required Windows bootstrap input validates before native build commands", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "kepos-windows-bootstrap-input-"));
+  try {
+    const inputPath = path.join(directory, DESKTOP_BOOTSTRAP_ASSET);
+    await writeFile(inputPath, '[{"host":"bootstrap.example","port":49737}]\n');
+    assert.equal(await readDesktopBootstrapAssetInput(inputPath, true), '[{"host":"bootstrap.example","port":49737}]\n');
+
+    for (const source of [
+      "missing",
+      "null\n",
+      "[]\n",
+      "not-json\n",
+      '[{"host":"bootstrap.example","port":49737,"unexpected":true}]\n',
+    ]) {
+      if (source === "missing") {
+        await rm(inputPath, { force: true });
+      } else {
+        await writeFile(inputPath, source);
+      }
+      await assert.rejects(
+        readDesktopBootstrapAssetInput(inputPath, true),
+        /bootstrap asset|empty|read/i,
+      );
+    }
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
 });
 
 test("desktop output is ignored without ignoring desktop source", async () => {

@@ -26,10 +26,15 @@ npm run android:check
 npm run desktop:check
 ```
 
-The candidate commit must remain clean for every release command. Confirm the
-requested version is new and that the local and remote tag do not already
-exist. Windows uses the exact command in the next section; it rejects a dirty
-worktree and, for a formal release, an unannotated or mismatched tag.
+The candidate commit must remain clean for every release command. The
+release machine's normal Kepos config must contain a non-empty
+`[network].bootstrap` array. Release and rehearsal commands fail before native
+packaging when that sanitized asset is missing or invalid; the writer reads
+only this network section and never copies the TOML into a build input or
+artifact. Confirm the requested version is new and that the local and remote
+tag do not already exist. Windows uses the exact command in the next section;
+it rejects a dirty worktree and, for a formal release, an unannotated or
+mismatched tag.
 
 ### 2. Build the exact tagged artifacts
 
@@ -52,9 +57,10 @@ WINDOWS_USER=kepos npm run release:windows -- v0.1.0
 unset KEPOS_ANDROID_KEYSTORE KEPOS_ANDROID_KEY_ALIAS KEPOS_ANDROID_KEY_PASSWORD
 ```
 
-`release:windows` transfers only the tracked source snapshot to `nuc-kep`,
-invokes `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`,
-builds in the NTFS `C:\kb` workspace, and copies back only the verified
+`release:windows` transfers only the tracked source snapshot plus one
+separately generated `kepos-bootstrap.json` sidecar to `nuc-kep`, invokes
+`/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`, builds in the
+NTFS `C:\kb` workspace, and copies back only the verified
 `kepos-windows-x64.zip`. The ZIP has one top-level `Kepos` directory:
 `AppxManifest.xml` and `Assets\Logo.ico` are beside `App\Kepos.exe` and its
 explicitly allowlisted runtime files. The remote side resolves the annotated

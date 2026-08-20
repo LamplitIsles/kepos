@@ -6,6 +6,7 @@ import {
   saveKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
+import { parseBootstrapAsset } from "../../../src/bootstrap-asset.js";
 import type { DhtAddress } from "../../../src/mux/hyperdht.js";
 import { DEFAULT_GATEWAY_PORT } from "../../../src/home/gateway.js";
 import {
@@ -26,6 +27,7 @@ export interface DesktopBootstrapContext {
   platform?: NodeJS.Platform;
   executablePath?: string;
   loadConfig?: typeof loadKeposConfig;
+  readBootstrapAsset?: typeof readDesktopBootstrapAsset;
   saveConfig?: typeof saveKeposConfig;
   setupSubscriber?: typeof setupSubscriber;
 }
@@ -62,33 +64,11 @@ export async function readDesktopBootstrapAsset(
 export function parseDesktopBootstrapAsset(
   source: string,
 ): DhtAddress[] | undefined {
-  let value: unknown;
   try {
-    value = JSON.parse(source) as unknown;
+    return parseBootstrapAsset(source);
   } catch {
     throw new Error("invalid desktop bootstrap asset");
   }
-  if (value === null) return undefined;
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("invalid desktop bootstrap asset");
-  }
-  return value.map((endpoint) => {
-    if (
-      endpoint === null ||
-      typeof endpoint !== "object" ||
-      Object.keys(endpoint).length !== 2 ||
-      !("host" in endpoint) ||
-      typeof endpoint.host !== "string" ||
-      endpoint.host.length === 0 ||
-      !("port" in endpoint) ||
-      !Number.isInteger(endpoint.port) ||
-      endpoint.port < 1 ||
-      endpoint.port > 65_535
-    ) {
-      throw new Error("invalid desktop bootstrap asset");
-    }
-    return { host: endpoint.host, port: endpoint.port };
-  });
 }
 
 export async function ensureDesktopBootstrap(
@@ -102,7 +82,7 @@ export async function ensureDesktopBootstrap(
     context.platform,
   );
   if (config === undefined) {
-    const bootstrap = await readDesktopBootstrapAsset(
+    const bootstrap = await (context.readBootstrapAsset ?? readDesktopBootstrapAsset)(
       desktopBootstrapAssetPath(
         context.executablePath ?? process.execPath,
         context.platform,

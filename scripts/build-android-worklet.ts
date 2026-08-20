@@ -29,7 +29,10 @@ await rm(bundle, { force: true });
 await rm(addons, { force: true, recursive: true });
 await mkdir(assets, { recursive: true });
 await mkdir(addons, { recursive: true });
-await writeKeposBootstrapAsset({ outputPath: bootstrapAsset });
+await writeKeposBootstrapAsset({
+  outputPath: bootstrapAsset,
+  required: process.env.KEPOS_BOOTSTRAP_REQUIRED === "1",
+});
 
 await run("bare-pack", [
   "--preset",

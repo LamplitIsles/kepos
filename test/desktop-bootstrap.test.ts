@@ -98,6 +98,14 @@ test("desktop Windows first launch and relaunch preserve injected filesystem sta
       LOCALAPPDATA: "C:\\Users\\kepos\\AppData\\Local",
     },
     platform: "win32" as const,
+    executablePath: "C:\\Program Files\\Kepos\\App\\Kepos.exe",
+    readBootstrapAsset: async (assetPath: string) => {
+      assert.equal(
+        assetPath,
+        "C:\\Program Files\\Kepos\\App\\kepos-bootstrap.json",
+      );
+      return [{ host: "windows-bootstrap.example", port: 49_737 }];
+    },
     loadConfig: async (configPath?: string) =>
       files.get(
         configPath ??
@@ -128,6 +136,12 @@ test("desktop Windows first launch and relaunch preserve injected filesystem sta
     "C:\\Users\\kepos\\AppData\\Local\\Kepos\\state\\subscriber",
     "C:\\Users\\kepos\\AppData\\Local\\Kepos\\state\\subscriber",
   ]);
+  assert.deepEqual(first.config, {
+    network: {
+      bootstrap: [{ host: "windows-bootstrap.example", port: 49_737 }],
+    },
+    subscriber: { enabled: true, gatewayPort: DEFAULT_GATEWAY_PORT, services: [] },
+  });
   assert.deepEqual(second.config, first.config);
   assert.equal(second.configPath, first.configPath);
   assert.equal(second.subscriber?.publicKey, first.subscriber?.publicKey);

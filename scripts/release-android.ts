@@ -4,6 +4,8 @@ import { access, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { loadRequiredKeposBootstrap } from "./bootstrap-config.js";
+import { verifyBootstrapAssetArchive } from "./release-bootstrap.js";
 import { reportAndroidApkSizes } from "./report-android-size.js";
 import {
   assertReleaseGitState,
@@ -120,6 +122,7 @@ export function createAndroidReleasePlan(options: {
         kind: "bundle",
         command: "npm",
         arguments: ["run", "android:bundle"],
+        environment: { KEPOS_BOOTSTRAP_REQUIRED: "1" },
       },
       {
         kind: "build",
@@ -244,6 +247,7 @@ async function runCommand(
 async function main(): Promise<void> {
   const repository = fileURLToPath(new URL("..", import.meta.url));
   const { tag, mode } = parseAndroidReleaseArguments(process.argv.slice(2));
+  const expectedBootstrap = await loadRequiredKeposBootstrap();
   const androidHome = process.env.ANDROID_HOME ?? process.env.ANDROID_SDK_ROOT;
   if (!androidHome) throw new Error("ANDROID_HOME or ANDROID_SDK_ROOT is required");
 
@@ -282,11 +286,23 @@ async function main(): Promise<void> {
     plan.alignedApk,
   ]);
 
-  const report = await executeAndroidRelease(plan, {
-    run: (command) => runCommand(repository, command),
-    remove: (file) => rm(file, { force: true }),
-    reportSizes: reportAndroidApkSizes,
-  });
+  let report: string;
+  try {
+    report = await executeAndroidRelease(plan, {
+      run: (command) => runCommand(repository, command),
+      remove: (file) => rm(file, { force: true }),
+      reportSizes: reportAndroidApkSizes,
+    });
+    await verifyBootstrapAssetArchive({
+      archivePath: plan.finalApk,
+      entryPath: "assets/kepos-bootstrap.json",
+      expected: expectedBootstrap,
+      label: "Android APK",
+    });
+  } catch (error) {
+    await rm(plan.finalApk, { force: true });
+    throw error;
+  }
   process.stdout.write(`${report}\nSigned APK: ${plan.finalApk}\n`);
 }
 
