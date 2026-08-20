@@ -10,6 +10,8 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { DESKTOP_BOOTSTRAP_ASSET } from "../apps/desktop/src/paths.js";
+
 import {
   desktopAppBundle,
   desktopBootstrapAssetPathForTarget,
@@ -256,7 +258,7 @@ test("macOS desktop build packages the bootstrap beside its executable", () => {
       "Kepos.app",
       "Contents",
       "Resources",
-      "kepos-bootstrap.json",
+      DESKTOP_BOOTSTRAP_ASSET,
     ),
   );
 });

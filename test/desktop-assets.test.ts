@@ -204,7 +204,7 @@ test("desktop bootstrap asset paths are fixed relative to the executable", () =>
       "/Applications/Kepos.app/Contents/MacOS/Kepos",
       "darwin",
     ),
-    "/Applications/Kepos.app/Contents/Resources/kepos-bootstrap.json",
+    `/Applications/Kepos.app/Contents/Resources/${DESKTOP_BOOTSTRAP_ASSET}`,
   );
   assert.equal(
     desktopBootstrapAssetPath(

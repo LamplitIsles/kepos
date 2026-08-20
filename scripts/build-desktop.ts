@@ -3,7 +3,10 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { desktopBootstrapAssetPath } from "../apps/desktop/src/paths.js";
+import {
+  DESKTOP_BOOTSTRAP_ASSET,
+  desktopBootstrapAssetPath,
+} from "../apps/desktop/src/paths.js";
 import { writeKeposBootstrapAsset } from "./bootstrap-config.js";
 
 export type DesktopTarget = "darwin-arm64" | "win32-x64";
@@ -364,7 +367,7 @@ async function validateDarwinOutput(repository: string): Promise<void> {
   const bundle = desktopAppBundle(repository);
   await requireFile(path.join(bundle, "Contents", "MacOS", "Kepos"));
   await requireFile(
-    path.join(bundle, "Contents", "Resources", "kepos-bootstrap.json"),
+    path.join(bundle, "Contents", "Resources", DESKTOP_BOOTSTRAP_ASSET),
   );
   const frameworks = await readdir(path.join(bundle, "Contents", "Frameworks"));
   for (const required of [
