@@ -23,7 +23,7 @@ export async function writeKeposBootstrapAsset(options: {
   platform?: NodeJS.Platform;
   mode?: number;
   required?: boolean;
-}): Promise<DhtAddress[] | undefined> {
+}): Promise<void> {
   const outputDirectory = path.dirname(options.outputPath);
   await mkdir(outputDirectory, { recursive: true });
   const temporaryDirectory = await mkdtemp(
@@ -33,9 +33,8 @@ export async function writeKeposBootstrapAsset(options: {
     temporaryDirectory,
     path.basename(options.outputPath),
   );
-  let bootstrap: DhtAddress[] | undefined;
   try {
-    bootstrap = await loadKeposBootstrap(
+    const bootstrap = await loadKeposBootstrap(
       undefined,
       options.environment,
       options.homeDirectory,
@@ -49,5 +48,4 @@ export async function writeKeposBootstrapAsset(options: {
   } finally {
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
-  return bootstrap;
 }

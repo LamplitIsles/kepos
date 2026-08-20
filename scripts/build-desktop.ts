@@ -385,8 +385,6 @@ export async function runDesktopBuild(
         required: requireBootstrap,
       });
       bootstrapSource = await readFile(stagingPath, "utf8");
-      const bootstrap = parseBootstrapAsset(bootstrapSource);
-      if (requireBootstrap) requireBootstrapAsset(bootstrap);
     } else if (options.bootstrapAssetPath !== undefined) {
       bootstrapSource = await readDesktopBootstrapAssetInput(
         options.bootstrapAssetPath,
