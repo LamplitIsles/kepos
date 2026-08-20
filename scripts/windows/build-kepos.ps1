@@ -608,12 +608,14 @@ try {
   New-Item -ItemType Directory -Path $NuGetCache -Force | Out-Null
   $env:BARE_WIN_UI_NUGET_CACHE = $NuGetCache
   # A tracked snapshot can carry older mtimes than the persistent cache. Drop
-  # only compiler PCH outputs so clang rebuilds them; retain downloaded SDKs.
+  # the compiler PCH sidecar and object together so clang rebuilds both; retain
+  # downloaded SDKs and the rest of the native cache.
   $cachedCMakeFiles = Join-Path $CanonicalNativeBuildRoot 'winui\CMakeFiles'
   Assert-SafeOwnedPath $CanonicalNativeBuildRoot $cachedCMakeFiles 'cached CMake files'
   if (Test-Path -LiteralPath $cachedCMakeFiles) {
     Assert-NoReparsePointsInTree $cachedCMakeFiles 'cached CMake files'
-    Get-ChildItem -LiteralPath $cachedCMakeFiles -Filter '*.pch' -File -Recurse -ErrorAction SilentlyContinue |
+    Get-ChildItem -LiteralPath $cachedCMakeFiles -File -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -match '^cmake_pch\.cxx\.(obj|pch|obj\.d)$' } |
       Remove-Item -Force
   }
   Assert-SafeOwnedPath $Repository $CanonicalNativeCheck 'native check output'
