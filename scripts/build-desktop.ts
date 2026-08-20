@@ -400,6 +400,10 @@ export async function runDesktopBuild(
       await run(repository, command, target);
     }
 
+    const outputPath = desktopBootstrapAssetPathForTarget(repository, target);
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, bootstrapSource, { mode: 0o644 });
+
     if (target === "win32-x64") {
       const runtime = await stageWindowsSelfContainedRuntime(repository);
       if (options.windowsProductFilesOutputPath !== undefined) {
@@ -417,9 +421,6 @@ export async function runDesktopBuild(
       );
     }
 
-    const outputPath = desktopBootstrapAssetPathForTarget(repository, target);
-    await mkdir(path.dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, bootstrapSource, { mode: 0o644 });
     await plan.validate(repository);
   } finally {
     await rm(stagingDirectory, { force: true, recursive: true });

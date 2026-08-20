@@ -64,6 +64,7 @@ test("Windows runtime staging preserves manifest-governed subdirectories", async
     const staged = await stageValidatedWindowsSelfContainedRuntime(source, app);
 
     assert.equal(staged.fileCount, 2);
+    assert.ok(staged.productFiles.includes("kepos-bootstrap.json"));
     assert.equal(
       await readFile(path.join(app, "en-us", "runtime.mui"), "utf8"),
       "locale",
