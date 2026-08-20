@@ -13,8 +13,9 @@
 
 - For ad hoc Windows probes and native build orchestration, place the complete
   operation in a local temporary `.ps1` file and run
-  `nuc-powershell /tmp/task.ps1`. Use stdin only for a short probe. Check that
-  the host-local wrapper exists instead of recreating its SSH/encoding logic.
+  `scripts/windows/nuc-powershell.sh /tmp/task.ps1`. Use stdin only for a short
+  probe. Use this checked-in wrapper instead of recreating its SSH/encoding
+  logic; the host-installed `nuc-powershell` command is an equivalent shortcut.
 - The wrapper reaches the NUC over the LAN, avoids WSL UNC working directories
   and nested SSH/cmd/PowerShell quoting, and runs the real PowerShell 7 with
   terminating errors and UTF-8 output from `C:\`.
