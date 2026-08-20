@@ -39,6 +39,7 @@ export interface DesktopBuildTools {
 export interface DesktopBuildOptions {
   bootstrapAssetPath?: string;
   requireBootstrap?: boolean;
+  windowsProductFilesOutputPath?: string;
 }
 
 export interface DesktopBuildPlan {
@@ -401,8 +402,18 @@ export async function runDesktopBuild(
 
     if (target === "win32-x64") {
       const runtime = await stageWindowsSelfContainedRuntime(repository);
+      if (options.windowsProductFilesOutputPath !== undefined) {
+        await mkdir(path.dirname(options.windowsProductFilesOutputPath), {
+          recursive: true,
+        });
+        await writeFile(
+          options.windowsProductFilesOutputPath,
+          `${JSON.stringify(runtime.productFiles, null, 2)}\n`,
+          { mode: 0o644 },
+        );
+      }
       process.stdout.write(
-        `Windows self-contained runtime staged: ${runtime.fileCount} files, manifest ${runtime.manifestSha256}\n`,
+        `Windows self-contained runtime staged: ${runtime.fileCount} runtime files, ${runtime.productFiles.length} product files, manifest ${runtime.manifestSha256}\n`,
       );
     }
 
@@ -591,6 +602,21 @@ export function requestedTarget(
   return validateDesktopTarget(value);
 }
 
+export function requestedWindowsProductFilesOutput(
+  arguments_: readonly string[],
+): string | undefined {
+  const index = arguments_.indexOf("--windows-product-files-output");
+  if (index === -1) return undefined;
+  const value = arguments_[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error("missing value for --windows-product-files-output");
+  }
+  if (arguments_.indexOf("--windows-product-files-output", index + 1) !== -1) {
+    throw new Error("windows product files output must be specified only once");
+  }
+  return value;
+}
+
 const repository = fileURLToPath(new URL("..", import.meta.url));
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const arguments_ = process.argv.slice(2);
@@ -600,6 +626,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     requireBootstrap:
       arguments_.filter((argument) => argument === "--require-bootstrap").length > 0 ||
       process.env.KEPOS_BOOTSTRAP_REQUIRED === "1",
+    windowsProductFilesOutputPath: requestedWindowsProductFilesOutput(arguments_),
   });
   process.stdout.write(`Desktop app ready: ${desktopBuildPlan(target).outputDirectory(repository)}\n`);
 }

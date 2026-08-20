@@ -20,6 +20,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'pch-cache.ps1')
 
 function Get-CanonicalPath {
   param([Parameter(Mandatory = $true)] [string]$Path)
@@ -230,43 +231,15 @@ function Get-PortableFileSet {
   $items = @(Get-ChildItem -LiteralPath $PackageRoot -Force -Recurse)
   if ($items.Count -eq 0) { throw "Windows portable app has no files: $PackageRoot" }
 
-  # The adapter manifest owns the runtime payload inventory. This function
-  # checks only the outer whole-directory product shape; final payload
-  # semantics are delegated to scripts/windows/self-contained-runtime.ts.
-  $relative = @($items | ForEach-Object {
+  # Only collect a reparse-free relative tree. The desktop build and adapter
+  # validator own product/runtime semantics; archive validation compares this
+  # exact source tree with the extracted tree.
+  return @($items | ForEach-Object {
       if ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
         throw "Windows portable app contains a link: $($_.FullName)"
       }
       Get-PortableRelativePath $PackageRoot $_
     } | Sort-Object)
-  foreach ($name in $relative) {
-    if (
-      $name -ne 'App' -and
-      $name -ne 'Assets' -and
-      $name -ne 'AppxManifest.xml' -and
-      $name -ne 'Assets\Logo.ico' -and
-      -not $name.StartsWith('App\')
-    ) {
-      throw "Windows portable app contains an unexpected outer entry: $name"
-    }
-  }
-  foreach ($name in @(
-    'AppxManifest.xml',
-    'Assets\Logo.ico',
-    'App\Kepos.exe',
-    'App\kepos-bootstrap.json',
-    'App\app.bundle',
-    'App\Microsoft.Web.WebView2.Core.dll',
-    'App\self-contained-runtime.json',
-    'App\Microsoft.WindowsAppRuntime.dll'
-  )) {
-    if (-not $relative.Contains($name)) { throw "Windows portable app is missing $name" }
-  }
-  if (-not ($relative | Where-Object { $_ -match '^App\\bare-win-ui-[^\\]+\.dll$' })) {
-    throw 'Windows portable app is missing the bare-win-ui runtime'
-  }
-  Assert-Pe64 (Join-Path $PackageRoot 'App\Kepos.exe')
-  return $relative
 }
 
 function Invoke-PortableSmoke {
@@ -412,6 +385,7 @@ function Invoke-PortableRelease {
   param(
     [Parameter(Mandatory = $true)] [string]$Repository,
     [Parameter(Mandatory = $true)] [string]$RunDirectory,
+    [Parameter(Mandatory = $true)] [string]$ProductFileSetPath,
     [Parameter(Mandatory = $true)] [string]$Logs,
     [Parameter(Mandatory = $true)] [string]$ArtifactName,
     [Parameter(Mandatory = $true)] [string]$Mode,
@@ -423,8 +397,13 @@ function Invoke-PortableRelease {
   if (Test-Path -LiteralPath $artifact) { throw "release output already exists: $artifact" }
   $sourceRoot = Join-Path $RunDirectory 'dist\desktop\Kepos'
   $runtimeSource = Join-Path $Repository 'vendor\holepunch\bare-win-ui\prebuilds\win32-x64\bare'
+  $sourceApp = Join-Path $sourceRoot 'App'
   Assert-SafeOwnedPath $RunDirectory $sourceRoot 'portable source'
+  Assert-SafeOwnedPath $RunDirectory $ProductFileSetPath 'product file set'
   Assert-SafeOwnedPath $Repository $runtimeSource 'native runtime source'
+  if (-not (Test-Path -LiteralPath $ProductFileSetPath -PathType Leaf)) {
+    throw "Windows product file set is missing: $ProductFileSetPath"
+  }
   $fileSet = @(Get-PortableFileSet $sourceRoot)
   $packageRoot = Join-Path $RunDirectory 'package'
   $packageApp = Join-Path $packageRoot 'Kepos'
@@ -465,7 +444,9 @@ function Invoke-PortableRelease {
     (Join-Path $Repository 'scripts\windows\self-contained-runtime.ts'),
     'validate-final',
     $runtimeSource,
+    $sourceApp,
     (Join-Path $extractedApp 'App'),
+    $ProductFileSetPath,
     $runtimeValidation
   )
   Assert-SelfContainedImports (Join-Path $extractedApp 'App\Kepos.exe')
@@ -524,11 +505,13 @@ try {
   $Artifact = Join-Path $RunDirectory 'dist\desktop'
   $RepositoryArtifact = Join-Path $Repository 'dist\desktop'
   $RevisionFile = Join-Path $RunDirectory 'build-revisions.txt'
+  $ProductFileSetPath = Join-Path $RunDirectory 'windows-product-files.json'
   $RunMarker = Join-Path $RunDirectory '.kepos-windows-workflow-run'
   Assert-SafeOwnedPath $Repository $RepositoryArtifact 'Repository artifact'
   Assert-SafeOwnedPath $RunDirectory $Artifact 'staged artifact'
   Assert-SafeOwnedPath $RunDirectory $Logs 'logs'
   Assert-SafeOwnedPath $RunDirectory $RevisionFile 'revision file'
+  Assert-SafeOwnedPath $RunDirectory $ProductFileSetPath 'product file set'
   Assert-SafeOwnedPath $WorkspaceRoot $RunMarker 'run marker'
 
   if (-not (Test-Path -LiteralPath $WorkspaceRoot -PathType Container)) { throw "Workspace root is missing: $WorkspaceRoot" }
@@ -614,9 +597,7 @@ try {
   Assert-SafeOwnedPath $CanonicalNativeBuildRoot $cachedCMakeFiles 'cached CMake files'
   if (Test-Path -LiteralPath $cachedCMakeFiles) {
     Assert-NoReparsePointsInTree $cachedCMakeFiles 'cached CMake files'
-    Get-ChildItem -LiteralPath $cachedCMakeFiles -File -Recurse -ErrorAction SilentlyContinue |
-      Where-Object { $_.Name -match '^cmake_pch\.cxx\.(obj|pch|obj\.d)$' } |
-      Remove-Item -Force
+    Remove-CachedCMakePchOutputs $cachedCMakeFiles | Out-Null
   }
   Assert-SafeOwnedPath $Repository $CanonicalNativeCheck 'native check output'
   Remove-SafeOwnedTree $Repository $CanonicalNativeCheck 'native check output'
@@ -712,7 +693,15 @@ try {
     "bare-app-kit=$BareAppKitRevision"
   ) | Set-Content -LiteralPath $RevisionFile -Encoding utf8
 
-  $DesktopBuildArguments = @('run', 'desktop:build', '--', '--target', 'win32-x64')
+  $DesktopBuildArguments = @(
+    'run',
+    'desktop:build',
+    '--',
+    '--target',
+    'win32-x64',
+    '--windows-product-files-output',
+    $ProductFileSetPath
+  )
   if (-not [string]::IsNullOrWhiteSpace($BootstrapAsset)) {
     $DesktopBuildArguments += @('--bootstrap-asset', $BootstrapAsset)
   }
@@ -822,7 +811,7 @@ try {
     Assert-SafeOwnedPath $RunDirectory $PackagedSmokeRoot 'packaged smoke root'
     Invoke-PortableSmoke $StagedExecutable $PackagedSmokeRoot (Join-Path $Logs 'packaged-smoke') $BootstrapAsset $Node
   } elseif ($Workflow -eq 'release') {
-    Invoke-PortableRelease $Repository $RunDirectory $Logs $ReleaseArtifactName $ReleaseMode $BootstrapAsset $Node
+    Invoke-PortableRelease $Repository $RunDirectory $ProductFileSetPath $Logs $ReleaseArtifactName $ReleaseMode $BootstrapAsset $Node
   }
   Write-Host "Windows desktop build complete: $Artifact"
 } catch {

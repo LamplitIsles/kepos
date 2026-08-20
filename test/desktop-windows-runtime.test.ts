@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import {
   appendFile,
+  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -76,15 +77,50 @@ test("Windows runtime staging preserves manifest-governed subdirectories", async
     const final = await validateFinalWindowsSelfContainedRuntime(
       source,
       app,
+      app,
+      staged.productFiles,
       validation,
     );
     assert.equal(final.fileCount, 2);
+    assert.equal(final.manifestSha256, staged.manifestSha256);
     assert.equal(
       await readFile(path.join(validation, "en-us", "runtime.mui"), "utf8"),
       "locale",
     );
   } finally {
     await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("Windows final runtime validation rejects extra product files", async () => {
+  for (const name of ["bare-crypto-999.0.0.dll", "unexpected-product.dll"]) {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "kepos-windows-final-product-"),
+    );
+    try {
+      const source = await makeRuntimeRoot(root);
+      const sourceApp = await makeProductApp(root);
+      const staged = await stageValidatedWindowsSelfContainedRuntime(
+        source,
+        sourceApp,
+      );
+      const finalApp = path.join(root, "final-app");
+      await cp(sourceApp, finalApp, { recursive: true });
+      await writeFile(path.join(finalApp, name), "injected product\n");
+
+      await assert.rejects(
+        validateFinalWindowsSelfContainedRuntime(
+          source,
+          sourceApp,
+          finalApp,
+          staged.productFiles,
+          path.join(root, "validation"),
+        ),
+        /unmanifested|product file set/i,
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   }
 });
 
