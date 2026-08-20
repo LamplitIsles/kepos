@@ -41,6 +41,17 @@ export function defaultKeposRoleStatePath(
   );
 }
 
+export function defaultKeposDiagnosticsDirectory(
+  environment: PlatformEnvironment = process.env,
+  homeDirectory = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return pathForPlatform(platform).join(
+    defaultKeposStateRoot(environment, homeDirectory, platform),
+    "diagnostics",
+  );
+}
+
 export function defaultKeposStateRoot(
   environment: PlatformEnvironment = process.env,
   homeDirectory = os.homedir(),

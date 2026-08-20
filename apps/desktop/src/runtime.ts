@@ -30,6 +30,14 @@ import {
 } from "../../../src/runtime/subscriber.js";
 import { loadPublisherState } from "../../../src/state/publisher.js";
 import { loadSubscriberConnectionState } from "../../../src/state/subscriber.js";
+import type { Observation } from "../../../src/mux/observability.js";
+import {
+  createDesktopConfigObservation,
+  createDesktopLifecycleObservation,
+  createDesktopRegistryObservation,
+  type DesktopDiagnosticObservation,
+  type DesktopObservationCallback,
+} from "./diagnostics-contract.js";
 import type {
   DesktopPublisherRole,
   DesktopService,
@@ -62,6 +70,7 @@ export interface StartDesktopRuntimeOptions {
   publisher?: StartDesktopPublisherOptions;
   subscriber?: StartDesktopSubscriberOptions;
   onSnapshot(snapshot: DesktopSnapshot): void;
+  onObservation?: DesktopObservationCallback;
 }
 
 export interface DesktopRuntimeConfiguration {
@@ -178,7 +187,90 @@ export async function startDesktopRuntime(
     ...(publisherRole ? { publisher: clonePublisherRole(publisherRole) } : {}),
   });
   const publish = (): void => options.onSnapshot(snapshot());
+  const subscriberAttemptLimit = 16;
+  const subscriberAttempts = new Map<
+    string,
+    { connected: boolean }
+  >();
+  let failedSubscriberSequences = 0;
+  let connectionHintVisible = false;
 
+  const setConnectionHint = (visible: boolean): void => {
+    if (connectionHintVisible === visible) return;
+    connectionHintVisible = visible;
+    if (!subscriberRole) return;
+    subscriberRole = visible
+      ? { ...subscriberRole, connectionHint: "udp-firewall-vpn-tun" }
+      : withoutConnectionHint(subscriberRole);
+    try {
+      publish();
+    } catch {
+      // A diagnostic hint must not affect transport behavior.
+    }
+  };
+
+  const applyConnectionHint = (
+    role: DesktopSubscriberRole,
+  ): DesktopSubscriberRole =>
+    connectionHintVisible
+      ? { ...role, connectionHint: "udp-firewall-vpn-tun" }
+      : withoutConnectionHint(role);
+
+  const handleSubscriberObservation = (observation: Observation): void => {
+    if (observation.role !== "subscriber") return;
+    const outerId = observation.outerId;
+    if (typeof outerId !== "string" || !/^outer-[0-9a-f]{16}$/.test(outerId)) {
+      return;
+    }
+    if (observation.event === "outer.attempt") {
+      subscriberAttempts.set(outerId, { connected: false });
+      if (subscriberAttempts.size > subscriberAttemptLimit) {
+        const oldest = subscriberAttempts.keys().next().value;
+        if (typeof oldest === "string") subscriberAttempts.delete(oldest);
+      }
+      return;
+    }
+    const attempt = subscriberAttempts.get(outerId);
+    if (!attempt) return;
+    if (observation.event === "outer.connected") {
+      attempt.connected = true;
+      failedSubscriberSequences = 0;
+      setConnectionHint(false);
+      return;
+    }
+    if (observation.event !== "outer.closed") return;
+    subscriberAttempts.delete(outerId);
+    if (attempt.connected) return;
+    failedSubscriberSequences++;
+    if (failedSubscriberSequences >= 3) setConnectionHint(true);
+  };
+
+  const reportObservation = (observation: DesktopDiagnosticObservation): void => {
+    if ("component" in observation && observation.component === "kepos") {
+      try {
+        handleSubscriberObservation(observation);
+      } catch {
+        // A hint classifier must not affect networking.
+      }
+    }
+    try {
+      options.onObservation?.(observation);
+    } catch {
+      // Diagnostics are best effort and never affect networking.
+    }
+  };
+  const roleObservation = options.onObservation
+    ? (observation: Observation): void => reportObservation(observation)
+    : undefined;
+  const reportDeviceObservation = (
+    observation: DesktopDiagnosticObservation,
+  ): void => {
+    try {
+      options.onObservation?.(observation);
+    } catch {
+      // Diagnostics are best effort and never affect runtime behavior.
+    }
+  };
   const preparePublisherRole = (): Promise<PublisherRuntimePolicy> => {
     if (!publisherOptions || !publisherRole) {
       return Promise.reject(new Error("desktop publisher is not configured"));
@@ -283,14 +375,36 @@ export async function startDesktopRuntime(
       runningPublisher = await dependencies.startPublisher({
         stateDir: publisherOptions.stateDir,
         dht: requireDht(dht),
+        ...(roleObservation ? { observe: roleObservation } : {}),
         ...(publisherOptions.policy ? { policy } : {}),
         ...(configPath
           ? {
-              persistAllowlist: (allow) =>
-                dependencies.persistPublisherAllowlist(
-                  configPath,
-                  allow,
-                ),
+              persistAllowlist: async (allow: string[]) => {
+                try {
+                  await dependencies.persistPublisherAllowlist(
+                    configPath,
+                    allow,
+                  );
+                  reportDeviceObservation(
+                    createDesktopConfigObservation(
+                      "save",
+                      "success",
+                      undefined,
+                      dependencies.now,
+                    ),
+                  );
+                } catch (error) {
+                  reportDeviceObservation(
+                    createDesktopConfigObservation(
+                      "save",
+                      "failed",
+                      error,
+                      dependencies.now,
+                    ),
+                  );
+                  throw error;
+                }
+              },
             }
           : {}),
       });
@@ -319,6 +433,7 @@ export async function startDesktopRuntime(
       runningSubscriber = await dependencies.startSubscriber({
         stateDir: subscriberOptions.stateDir,
         gatewayPort: subscriberOptions.gatewayPort,
+        ...(roleObservation ? { observe: roleObservation } : {}),
         gatewayHost: subscriberOptions.gatewayHost,
         gatewayDomain: subscriberOptions.gatewayDomain,
         services: subscriberOptions.services,
@@ -395,18 +510,29 @@ export async function startDesktopRuntime(
           status.connectionGeneration !== attemptGeneration ||
           observedGeneration !== attemptGeneration
         ) {
-          subscriberRole = createSubscriberRole(
-            status,
-            subscriberOptions.gatewayPort,
-            registry,
-            refreshedGeneration === status.connectionGeneration,
-            registryError,
+          subscriberRole = applyConnectionHint(
+            createSubscriberRole(
+              status,
+              subscriberOptions.gatewayPort,
+              registry,
+              refreshedGeneration === status.connectionGeneration,
+              registryError,
+            ),
           );
           return;
         }
         if (next.publisher.publisherKey !== runningSubscriber.publisherKey) {
           throw new Error("Home registry publisher does not match the connection");
         }
+        reportDeviceObservation(
+          createDesktopRegistryObservation(
+            "success",
+            attemptGeneration,
+            next.services.length,
+            undefined,
+            dependencies.now,
+          ),
+        );
         registry = next;
         refreshedGeneration = attemptGeneration;
         registryError = undefined;
@@ -422,15 +548,31 @@ export async function startDesktopRuntime(
           status.connectionGeneration !== attemptGeneration ||
           observedGeneration !== attemptGeneration
         ) {
-          subscriberRole = createSubscriberRole(
-            status,
-            subscriberOptions.gatewayPort,
-            registry,
-            refreshedGeneration === status.connectionGeneration,
-            registryError,
+          subscriberRole = applyConnectionHint(
+            createSubscriberRole(
+              status,
+              subscriberOptions.gatewayPort,
+              registry,
+              refreshedGeneration === status.connectionGeneration,
+              registryError,
+            ),
           );
           return;
         }
+        const registryOutcome =
+          error instanceof Error &&
+          error.message === "Home registry publisher does not match the connection"
+            ? "failed"
+            : "retry";
+        reportDeviceObservation(
+          createDesktopRegistryObservation(
+            registryOutcome,
+            attemptGeneration,
+            registry?.services.length ?? 0,
+            error,
+            dependencies.now,
+          ),
+        );
         registryError = errorMessage(error);
         scheduleRegistryRetry();
         if (
@@ -453,12 +595,14 @@ export async function startDesktopRuntime(
       }
     }
     if (stopped) return;
-    subscriberRole = createSubscriberRole(
-      status,
-      subscriberOptions.gatewayPort,
-      registry,
-      refreshedGeneration === status.connectionGeneration,
-      registryError,
+    subscriberRole = applyConnectionHint(
+      createSubscriberRole(
+        status,
+        subscriberOptions.gatewayPort,
+        registry,
+        refreshedGeneration === status.connectionGeneration,
+        registryError,
+      ),
     );
   }
 
@@ -631,6 +775,9 @@ export async function startDesktopRuntime(
       publisherPreparation = undefined;
     }
     if (subscriberChanged) {
+      subscriberAttempts.clear();
+      failedSubscriberSequences = 0;
+      connectionHintVisible = false;
       subscriberOptions = configuration.subscriber;
       subscriberLock = configuration.subscriber?.lock;
       subscriberRole = configuration.subscriber ? initialSubscriberRole() : undefined;
@@ -697,6 +844,9 @@ export async function startDesktopRuntime(
     dht = dependencies.createDht({ bootstrap });
   } catch (error) {
     appPhase = "running";
+    reportDeviceObservation(
+      createDesktopLifecycleObservation("running", dependencies.now),
+    );
     markTransportFailure(
       { bootstrap, publisher: publisherOptions, subscriber: subscriberOptions },
       error,
@@ -714,6 +864,9 @@ export async function startDesktopRuntime(
     publish();
     await Promise.allSettled([startPublisherRole(), startSubscriberRole()]);
     appPhase = "running";
+    reportDeviceObservation(
+      createDesktopLifecycleObservation("running", dependencies.now),
+    );
     publish();
   } catch (error) {
     await cleanupRoles();
@@ -787,7 +940,29 @@ export async function startDesktopRuntime(
       return task;
     },
     reconfigure(configuration): Promise<void> {
-      const task = reconfigureTail.then(() => applyConfiguration(configuration));
+      const task = reconfigureTail.then(async () => {
+        try {
+          await applyConfiguration(configuration);
+          reportDeviceObservation(
+            createDesktopConfigObservation(
+              "apply",
+              "success",
+              undefined,
+              dependencies.now,
+            ),
+          );
+        } catch (error) {
+          reportDeviceObservation(
+            createDesktopConfigObservation(
+              "apply",
+              "failed",
+              error,
+              dependencies.now,
+            ),
+          );
+          throw error;
+        }
+      });
       reconfigureTail = task.catch(() => undefined);
       return task;
     },
@@ -796,6 +971,9 @@ export async function startDesktopRuntime(
         if (stopped) return;
         stopped = true;
         appPhase = "stopping";
+        reportDeviceObservation(
+          createDesktopLifecycleObservation("stopping", dependencies.now),
+        );
         await reconfigureTail;
         if (publisherRole?.phase === "running") {
           publisherRole = { ...publisherRole, phase: "stopping" };
@@ -814,6 +992,9 @@ export async function startDesktopRuntime(
         const dhtFailure = await cleanupDht();
         failure ??= dhtFailure;
         appPhase = "stopped";
+        reportDeviceObservation(
+          createDesktopLifecycleObservation("stopped", dependencies.now),
+        );
         if (publisherRole) {
           publisherRole = {
             ...withoutActiveSubscribers(publisherRole),
@@ -891,6 +1072,13 @@ function initialSubscriberRole(): DesktopSubscriberRole {
     connection: "connecting",
     services: [],
   };
+}
+
+function withoutConnectionHint(
+  role: DesktopSubscriberRole,
+): DesktopSubscriberRole {
+  const { connectionHint: _connectionHint, ...withoutHint } = role;
+  return withoutHint;
 }
 
 function createSubscriberRole(

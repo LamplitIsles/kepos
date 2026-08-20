@@ -364,6 +364,15 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
     .subscriber-bootstrap input:focus { border-color: var(--green); }
     .subscriber-bootstrap .form-error { color: var(--danger); }
     .subscriber-bootstrap .action { justify-self: start; }
+    .connection-hint {
+      margin: -2px 0 18px;
+      padding: 12px 14px;
+      border: 1px solid rgba(255, 207, 105, .34);
+      background: rgba(255, 207, 105, .06);
+      color: var(--green-soft);
+      font-size: 10px;
+      line-height: 1.55;
+    }
 
     .service {
       display: grid;
@@ -481,6 +490,7 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
             <p class="form-error" data-role="subscriber-bootstrap-error" role="alert" aria-live="assertive" hidden></p>
             <button class="action" data-role="subscriber-bootstrap-submit" type="submit">Connect / Save</button>
           </form>
+          <div class="connection-hint" data-role="connection-hint" hidden>Connection attempts have failed repeatedly. Check whether a firewall, VPN, or TUN setting may be affecting UDP connectivity; this is a troubleshooting suggestion, not a packet-level diagnosis.</div>
           <div class="section-head"><strong>Services from this publisher</strong><span data-role="remote-service-label">0 available</span></div>
           <div class="services" data-role="services" aria-live="polite"><div class="empty">Finding your private services…</div></div>
         </section>
@@ -503,7 +513,7 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
             <article class="settings-panel"><p class="setting-label">Subscriber runtime</p><p class="setting-value" data-role="subscriber-runtime">Not configured</p><p class="setting-label">Local gateway</p><p class="setting-value" data-role="gateway">Not available</p></article>
             <article class="settings-panel"><p class="setting-label">Publisher runtime</p><p class="setting-value" data-role="publisher-runtime">Not configured</p><p class="setting-label">Transport</p><p class="setting-value">One shared HyperDHT node</p></article>
           </div>
-          <div class="runtime-actions"><button class="action quit" type="button" data-command="quit">Quit Kepos</button></div>
+          <div class="runtime-actions"><button class="action compact" type="button" data-action="copy-diagnostics">Copy diagnostics</button><button class="action quit" type="button" data-command="quit">Quit Kepos</button></div>
         </section>
       </div>
     </section>
@@ -517,6 +527,7 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
       let lastRelationshipView = "remote";
       let toastTimer;
       let subscriberBootstrapInFlight = false;
+      let diagnosticsPending = false;
 ${smokeAcknowledgementState}
       const relationshipButtons = Array.from(document.querySelectorAll('[data-relationship-tab]'));
       const settingsButton = document.querySelector('[data-view-tab="settings"]');
@@ -526,6 +537,8 @@ ${smokeAcknowledgementState}
       const publisherKeyInput = document.querySelector('[data-role="publisher-key"]');
       const subscriberBootstrapError = document.querySelector('[data-role="subscriber-bootstrap-error"]');
       const subscriberBootstrapSubmit = document.querySelector('[data-role="subscriber-bootstrap-submit"]');
+      const connectionHintNode = document.querySelector('[data-role="connection-hint"]');
+      const copyDiagnosticsButton = document.querySelector('[data-action="copy-diagnostics"]');
       const sharedServicesNode = document.querySelector('[data-role="shared-services"]');
       const remoteSurfaceNode = document.querySelector('[data-role="remote-surface"]');
       const hostedSurfaceNode = document.querySelector('[data-role="hosted-surface"]');
@@ -675,6 +688,7 @@ ${smokeAcknowledgementState}
 
       const render = () => {
         if (!snapshot) {
+          copyDiagnosticsButton.disabled = diagnosticsPending;
           applySelectedView();
           return;
         }
@@ -721,6 +735,7 @@ ${smokeAcknowledgementState}
           localSubscriberCopy.disabled = !subscriber.subscriberKey;
           subscriberRuntimeNode.textContent = subscriber.phase + ' · ' + subscriberStatusLabel(subscriber);
           gatewayNode.textContent = subscriber.gatewayPort ? 'localhost:' + subscriber.gatewayPort : 'Not available';
+          connectionHintNode.hidden = subscriber.connectionHint !== 'udp-firewall-vpn-tun';
           remoteServiceLabel.textContent = plural(availableServices.length, 'available', 'available');
           servicesNode.innerHTML = subscriber.error
             ? '<div class="error">' + escapeHtml(subscriber.error) + '</div>'
@@ -729,9 +744,12 @@ ${smokeAcknowledgementState}
         } else {
           subscriberBootstrapForm.hidden = true;
           subscriberBootstrapSubmit.disabled = true;
+          connectionHintNode.hidden = true;
           subscriberRuntimeNode.textContent = 'Not configured';
           gatewayNode.textContent = 'Not available';
         }
+
+        copyDiagnosticsButton.disabled = diagnosticsPending;
 
         if (publisher) {
           const localName = publisher.displayName || 'This device';
@@ -790,7 +808,8 @@ ${smokeAcknowledgementState}
         } else {
           const area = document.createElement('textarea');
           area.value = text; document.body.append(area); area.select();
-          document.execCommand('copy'); area.remove();
+          if (!document.execCommand('copy')) { area.remove(); throw new Error('clipboard copy failed'); }
+          area.remove();
         }
         showToast(label + ' copied');
       };
@@ -832,6 +851,16 @@ ${smokeAcknowledgementState}
       window.addEventListener("bare-native-message", (event) => {
         try {
           const next = JSON.parse(event.data);
+          if (next && next.type === "diagnosticsResult") {
+            diagnosticsPending = false;
+            render();
+            if (next.ok && typeof next.summary === 'string') {
+              void copy(next.summary, 'Diagnostics').catch(() => showToast('Copy failed'));
+            } else {
+              showToast('Diagnostics unavailable');
+            }
+            return;
+          }
           if (next && next.type === "snapshot") {
             snapshot = next;
             render();
@@ -845,6 +874,14 @@ ${smokeAcknowledgementAfterRender}
         if (!button || button.disabled) return;
         if (button.dataset.command === 'quit') { send({ type: "quit" }); return; }
         try {
+          if (button.dataset.action === 'copy-diagnostics') {
+            if (diagnosticsPending) return;
+            diagnosticsPending = true;
+            copyDiagnosticsButton.disabled = true;
+            showToast('Preparing diagnostics');
+            send({ type: "copyDiagnostics" });
+            return;
+          }
           if (button.dataset.action === 'copy-remote-publisher-key') {
             const key = snapshot && snapshot.subscriber && snapshot.subscriber.remotePublisher && snapshot.subscriber.remotePublisher.publisherKey;
             if (key) await copy(key, 'Publisher key');

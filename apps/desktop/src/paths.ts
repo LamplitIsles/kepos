@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   defaultKeposConfigPath,
+  defaultKeposDiagnosticsDirectory,
   defaultKeposRoleStatePath,
 } from "../../../src/platform/paths.js";
 
@@ -37,6 +38,16 @@ export function desktopBootstrapAssetPath(
     return pathApi.join(executableDirectory, DESKTOP_BOOTSTRAP_ASSET);
   }
   throw new Error(`unsupported desktop asset platform: ${platform}`);
+}
+
+export function defaultDesktopDiagnosticsDirectory(
+  context: DesktopPathsContext,
+): string {
+  return defaultKeposDiagnosticsDirectory(
+    context.environment,
+    context.homeDirectory,
+    context.platform,
+  );
 }
 
 export function defaultDesktopPaths(

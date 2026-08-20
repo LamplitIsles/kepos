@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { createDesktopDiagnosticSink } from "../apps/desktop/src/diagnostics.js";
 import {
   startDesktopHost,
   type DesktopHostDependencies,
@@ -79,6 +80,70 @@ test("desktop host acquires dual-role locks before one control window", async ()
     1,
   );
   assert.equal(harness.events.filter((event) => event === "exit:0").length, 1);
+});
+
+test("desktop host copies pre-command diagnostics through the controller", async () => {
+  const root = await mkdtemp(
+    path.join(tmpdir(), "kepos-desktop-host-diagnostics-"),
+  );
+  const diagnostics = createDesktopDiagnosticSink({
+    directory: root,
+    platform: "win32",
+  });
+  await diagnostics.ready;
+  const harness = createHarness();
+  let host: { shutdown(): Promise<void> } | undefined;
+  try {
+    host = await startDesktopHost(
+      {
+        ...subscriberOptions(),
+        diagnostics,
+      },
+      harness.dependencies,
+    );
+    diagnostics.observe({
+      component: "kepos",
+      timestamp: "2026-08-10T12:00:00.000Z",
+      elapsedMs: 1,
+      event: "channel.close",
+      role: "subscriber",
+      outerId: "outer-0123456789abcdef",
+      bytes: 123,
+    });
+
+    const webView = harness.webViews[0];
+    assert.ok(webView);
+    webView.emit("message", JSON.stringify({ type: "ready" }));
+    await harness.flushCommands();
+    webView.emit("message", JSON.stringify({ type: "copyDiagnostics" }));
+    await harness.flushCommands();
+
+    const result = JSON.parse(webView.messages.at(-1) ?? "null") as {
+      type?: string;
+      ok?: boolean;
+      summary?: string;
+    };
+    assert.deepEqual(
+      { type: result.type, ok: result.ok },
+      {
+        type: "diagnosticsResult",
+        ok: true,
+      },
+    );
+    assert.ok(result.summary);
+    const summary = JSON.parse(result.summary) as {
+      events: Array<{ outerId?: string }>;
+    };
+    assert.ok(
+      summary.events.some(
+        (event) => event.outerId === "outer-0123456789abcdef",
+      ),
+    );
+  } finally {
+    await host?.shutdown().catch(() => undefined);
+    await diagnostics.shutdown().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("desktop host records only the opt-in rendered-page acknowledgement", async () => {

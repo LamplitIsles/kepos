@@ -1,6 +1,15 @@
 import { appendFile, writeFile } from "node:fs/promises";
 
 import {
+  createNoopDesktopDiagnosticSink,
+  DESKTOP_DIAGNOSTIC_SUMMARY_MAX_BYTES,
+  type DesktopDiagnosticSink,
+} from "./diagnostics.js";
+import {
+  createDesktopConfigObservation,
+  createDesktopLifecycleObservation,
+} from "./diagnostics-contract.js";
+import {
   acquirePublisherRuntimeLock,
   acquireSubscriberRuntimeLock,
   type RuntimeLock,
@@ -49,6 +58,7 @@ export interface DesktopNativeWebView {
 export interface StartDesktopHostOptions {
   homeDirectory: string;
   loadOptions: () => Promise<DesktopOptions>;
+  diagnostics?: DesktopDiagnosticSink;
   onSnapshot?: (snapshot: DesktopSnapshot) => void;
   smokeRenderFile?: string;
   onSmokeRendered?: (acknowledgement: DesktopSmokeRenderAcknowledgement) => void;
@@ -85,16 +95,45 @@ export async function startDesktopHost(
   options: StartDesktopHostOptions,
   dependencies: DesktopHostDependencies,
 ): Promise<RunningDesktopHost> {
-  const singleton = await dependencies.acquireSingleton(options.homeDirectory);
+  const diagnostics =
+    options.diagnostics ?? createNoopDesktopDiagnosticSink();
+  const reportDiagnostic = (observation: Parameters<DesktopDiagnosticSink["observe"]>[0]): void => {
+    try {
+      diagnostics.observe(observation);
+    } catch {
+      // Diagnostics are best effort and never affect host startup.
+    }
+  };
+  const closeDiagnostics = async (): Promise<void> => {
+    try {
+      await diagnostics.shutdown();
+    } catch {
+      // Diagnostics are best effort and never affect host startup or shutdown.
+    }
+  };
+  reportDiagnostic(
+    createDesktopLifecycleObservation("starting"),
+  );
+
+  let singleton: RuntimeLock;
+  try {
+    singleton = await dependencies.acquireSingleton(options.homeDirectory);
+  } catch (error) {
+    await closeDiagnostics();
+    throw error;
+  }
   let startupOptions: DesktopOptions;
   try {
     startupOptions = await options.loadOptions();
+    reportDiagnostic(createDesktopConfigObservation("load", "success"));
   } catch (error) {
+    reportDiagnostic(createDesktopConfigObservation("load", "failed", error));
     try {
       await singleton.release();
     } catch {
       // Preserve the startup error after attempting singleton release.
     }
+    await closeDiagnostics();
     throw error;
   }
   let publisherLock: RuntimeLock | undefined;
@@ -122,6 +161,7 @@ export async function startDesktopHost(
         // Preserve the lock acquisition error after trying every prior release.
       }
     }
+    await closeDiagnostics();
     throw error;
   }
   let createdWindow: DesktopNativeWindow | undefined;
@@ -141,6 +181,7 @@ export async function startDesktopHost(
       subscriberLock,
       singleton,
     );
+    await closeDiagnostics();
     throw error;
   }
   const mainWindow = createdWindow;
@@ -188,8 +229,15 @@ export async function startDesktopHost(
           // The runtime owns release of every role lock on startup failure.
         }
       }
+      if (runtimeToStop === undefined) {
+        reportDiagnostic(createDesktopLifecycleObservation("stopping"));
+      }
       await cleanup(() => runtimeToStop?.stop());
       runtime = undefined;
+      if (runtimeToStop === undefined) {
+        reportDiagnostic(createDesktopLifecycleObservation("stopped"));
+      }
+      await cleanup(closeDiagnostics);
       await cleanup(() => {
         mainWebView.destroy();
       });
@@ -312,6 +360,10 @@ export async function startDesktopHost(
       requireRuntime(runtime).createPairingInvitation(),
     denyPairing: () => requireRuntime(runtime).denyPairing(),
     setSubscriberPublisher: connectSubscriber,
+    copyDiagnostics: () =>
+      diagnostics.createSummary(
+        DESKTOP_DIAGNOSTIC_SUMMARY_MAX_BYTES - 16 * 1024,
+      ),
     quit: shutdown,
   });
   const smokeRenderFile = options.smokeRenderFile;
@@ -366,6 +418,7 @@ export async function startDesktopHost(
       subscriberLock,
       singleton,
     );
+    await closeDiagnostics();
     throw error;
   }
   mainWindow.on("willClose", () => {
@@ -399,10 +452,16 @@ export async function startDesktopHost(
           }
         : {}),
       onSnapshot: (snapshot) => {
+        try {
+          diagnostics.updateSnapshot(snapshot);
+        } catch {
+          // Diagnostics are best effort and never affect runtime snapshots.
+        }
         if (liveTray) updateDesktopTray(liveTray, snapshot);
         controller.publish(snapshot);
         options.onSnapshot?.(snapshot);
       },
+      onObservation: reportDiagnostic,
     });
     startedRuntime = await runtimeStartTask;
   } catch {
