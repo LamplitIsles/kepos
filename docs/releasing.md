@@ -53,7 +53,7 @@ Android and macOS, then run the Windows build from the release Mac:
 ```sh
 npm run release:android -- v0.1.0
 npm run release:macos -- v0.1.0
-WINDOWS_USER=kepos npm run release:windows -- v0.1.0
+WINDOWS_USER=white npm run release:windows -- v0.1.0
 unset KEPOS_ANDROID_KEYSTORE KEPOS_ANDROID_KEY_ALIAS KEPOS_ANDROID_KEY_PASSWORD
 ```
 
@@ -76,7 +76,7 @@ is accepted. Failed runs retain logs under
 For a no-tag local rehearsal, use the isolated path:
 
 ```sh
-WINDOWS_USER=kepos npm run release:windows -- v0.1.0 --rehearsal
+WINDOWS_USER=white npm run release:windows -- v0.1.0 --rehearsal
 ```
 
 Rehearsal files are under `dist/release/rehearsal-v0.1.0/`; they are never
