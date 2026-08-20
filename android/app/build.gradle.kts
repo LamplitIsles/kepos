@@ -19,6 +19,7 @@ android {
     buildConfigField("int", "GATEWAY_PORT", "17480")
     buildConfigField("int", "MIHOMO_PORT", "17890")
     buildConfigField("int", "DSH_PORT", "13080")
+    buildConfigField("int", "OPENCLAW_PORT", "18789")
 
     ndk {
       abiFilters += "arm64-v8a"
@@ -44,6 +45,7 @@ android {
       buildConfigField("int", "GATEWAY_PORT", "18480")
       buildConfigField("int", "MIHOMO_PORT", "18490")
       buildConfigField("int", "DSH_PORT", "18380")
+      buildConfigField("int", "OPENCLAW_PORT", "19789")
     }
   }
 

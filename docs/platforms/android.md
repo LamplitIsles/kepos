@@ -46,6 +46,9 @@ use server `127.0.0.1`, port `17890`, with blank credentials while Kepos is
 running. Kepos does not carry Mihomo's UDP listener, so SOCKS5 UDP ASSOCIATE is
 outside the supported path.
 
+The fixed TCP listener at `127.0.0.1:18789` maps to publisher service
+`openclaw`. The existing dsh listener remains at `127.0.0.1:13080`.
+
 Keep the foreground service running. An explicit Stop remains in effect when
 the Activity reopens; Start clears that choice.
 
