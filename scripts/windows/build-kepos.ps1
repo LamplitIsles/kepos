@@ -815,7 +815,23 @@ try {
     Invoke-LoggedNative $BareMake 'bare-win-ui-test-build' @('build', '--build', $TestingBuild)
     Invoke-LoggedNative $BareMake 'bare-win-ui-test-install' @('install', '--build', $TestingBuild, '--prefix', (Join-Path $TestWinUi 'prebuilds'))
     Invoke-LoggedNative $BareBuild 'bare-win-ui-build' @('--base', $TestWinUi, '--host', 'win32-x64', '--runtime', (Join-Path $TestWinUi 'runtime.js'), '--out', $NativeCheck, (Join-Path $TestWinUi 'sample.js'))
-  $NativeExecutable = Get-ChildItem -LiteralPath $NativeCheck -Filter '*.exe' -Recurse | Select-Object -First 1
+    # The adapter sample is a separate executable, but it still needs the same
+    # self-contained Windows App Runtime files as the product. bare-build only
+    # copies the adapter's direct DLL, so complete the test output from the
+    # freshly installed, test-owned prebuild before launching it.
+    $NativeCheckApp = Join-Path $NativeCheck 'App'
+    $NativeRuntime = Join-Path $TestWinUi 'prebuilds\win32-x64\bare'
+    Assert-SafeOwnedPath $NativeCheck $NativeRuntime 'bare-win-ui test runtime'
+    Assert-SafeOwnedPath $NativeCheck $NativeCheckApp 'bare-win-ui test executable directory'
+    if (-not (Test-Path -LiteralPath $NativeRuntime -PathType Container)) { throw "bare-win-ui test runtime is missing: $NativeRuntime" }
+    New-Item -ItemType Directory -Path $NativeCheckApp -Force | Out-Null
+    foreach ($runtimeItem in Get-ChildItem -LiteralPath $NativeRuntime -Force) {
+      if (($runtimeItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "bare-win-ui test runtime contains a link: $($runtimeItem.FullName)"
+      }
+      Copy-Item -LiteralPath $runtimeItem.FullName -Destination (Join-Path $NativeCheckApp $runtimeItem.Name) -Recurse -Force
+    }
+  $NativeExecutable = Get-Item -LiteralPath (Join-Path $NativeCheck 'App\bare-win-ui.exe') -Force -ErrorAction SilentlyContinue
   if ($null -eq $NativeExecutable) { throw "bare-win-ui native check produced no executable under $NativeCheck" }
   # Inherit both probe streams so a child filling either pipe cannot deadlock
   # the bounded wait. Transcript captures console output; this result log is an
