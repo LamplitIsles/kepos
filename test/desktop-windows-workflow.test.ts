@@ -148,8 +148,14 @@ if [[ "\${3:-}" == "scripts/generate-bootstrap-asset.ts" ]]; then
   printf '%s\n' '[{"host":"bootstrap.example","port":49737}]' > "\${4}"
   exit 0
 fi
-if [[ "\${3:-}" == "--input-type=module" && "\${6:-}" == "v0.3.0-beta.1" && "\${7:-}" == "rehearsal" ]]; then
-  printf '%s\n' 'dist/release/rehearsal-v0.3.0-beta.1\tkepos-windows-x64.zip'
+if [[ "\${3:-}" == "--input-type=module" && "\${6:-}" == "v0.3.0-beta.1" ]]; then
+  if [[ "\${7:-}" == "rehearsal" ]]; then
+    printf '%s\n' 'dist/release/rehearsal-v0.3.0-beta.1\tkepos-windows-x64.zip'
+  elif [[ "\${7:-}" == "release" ]]; then
+    printf '%s\n' 'dist/release/v0.3.0-beta.1\tkepos-windows-x64.zip'
+  else
+    exit 92
+  fi
   exit 0
 fi
 printf '%s\n' 'unexpected fake node invocation' >&2
@@ -252,8 +258,22 @@ fi
       ),
       true,
     );
+    runGit(root, ["tag", "-a", "v0.3.0-beta.1", "-m", "v0.3.0-beta.1"]);
+    const formalBeta = spawnSync(
+      "bash",
+      ["scripts/windows/nuc-kep.sh", "v0.3.0-beta.1"],
+      { cwd: root, encoding: "utf8", env: environment },
+    );
+    assert.equal(formalBeta.status, 0, formalBeta.stderr || formalBeta.stdout);
+    assert.equal(
+      existsSync(
+        path.join(root, "dist/release/v0.3.0-beta.1/kepos-windows-x64.zip"),
+      ),
+      true,
+    );
+
     const remoteCommand = readFileSync(
-      path.join(fakeState, "ssh-command-2"),
+      path.join(fakeState, "ssh-command-6"),
       "utf8",
     );
     assert.match(remoteCommand, /BootstrapAsset/);
@@ -265,7 +285,7 @@ fi
       env: { ...environment, FAKE_NODE_FAIL: "1" },
     });
     assert.notEqual(failed.status, 0);
-    assert.equal(existsSync(path.join(fakeState, "ssh-command-5")), false);
+    assert.equal(existsSync(path.join(fakeState, "ssh-command-7")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

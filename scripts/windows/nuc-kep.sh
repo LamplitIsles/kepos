@@ -28,7 +28,7 @@ PARTIAL_ARTIFACT=""
 RELEASE_MODE="dogfood"
 RELEASE_TAG=""
 if [[ $# -gt 0 ]]; then
-  if [[ $# -ne 1 && $# -ne 2 ]] || [[ ${2:-} != "--rehearsal" ]]; then
+  if [[ $# -ne 1 && $# -ne 2 ]] || [[ $# -eq 2 && $2 != "--rehearsal" ]]; then
     printf '%s\n' 'usage: nuc-kep.sh [vMAJOR.MINOR.PATCH[-beta.N] [--rehearsal]]' >&2
     exit 2
   fi
