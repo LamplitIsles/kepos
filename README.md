@@ -75,9 +75,10 @@ operators still own DNS, same-node routing, firewall rules, and rollout.
 
 On Android, HTTP services use `http://<service-id>.localhost:17480/`. Registry
 entries without a built-in action use that HTTP fallback instead of being
-hidden. The one fixed raw listener, `127.0.0.1:17890`, maps to Mihomo's mixed
-port for HTTP proxy and SOCKS5 TCP clients; Kepos does not carry Mihomo's UDP
-listener.
+hidden. Fixed raw listeners map `127.0.0.1:17890` to Mihomo,
+`127.0.0.1:13080` to dsh, and `127.0.0.1:18789` to OpenClaw. Mihomo's
+mixed port supports HTTP proxy and SOCKS5 TCP clients; Kepos does not carry its
+UDP listener.
 
 ## The path through Kepos
 

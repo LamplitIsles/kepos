@@ -217,10 +217,11 @@ test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated ac
   );
 });
 
-test("Android maps its fixed raw listeners to Mihomo and dsh", () => {
-  assert.deepEqual(createAndroidSubscriberServices(17_890, 13_080), [
+test("Android maps its fixed raw listeners to Mihomo, dsh, and OpenClaw", () => {
+  assert.deepEqual(createAndroidSubscriberServices(17_890, 13_080, 18_789), [
     { id: "mihomo", localPort: 17_890 },
     { id: "dsh", localPort: 13_080 },
+    { id: "openclaw", localPort: 18_789 },
   ]);
 });
 

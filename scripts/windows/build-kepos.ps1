@@ -20,6 +20,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'pch-cache.ps1')
 
 function Get-CanonicalPath {
   param([Parameter(Mandatory = $true)] [string]$Path)
@@ -200,47 +201,45 @@ function Assert-Pe64 {
   if ($machine -ne 0x8664) { throw "Windows executable must be x64; machine was 0x$('{0:x4}' -f $machine)" }
 }
 
+function Get-ExecutableDependencies {
+  param([Parameter(Mandatory = $true)] [string]$Executable)
+  $dumpbin = Get-Command dumpbin.exe -CommandType Application -ErrorAction Stop
+  $output = @(& $dumpbin.Path /DEPENDENTS $Executable 2>&1)
+  if ($LASTEXITCODE -ne 0) {
+    throw "Unable to inspect executable imports: $Executable"
+  }
+  return ($output -join "`n")
+}
+
+function Assert-SelfContainedImports {
+  param([Parameter(Mandatory = $true)] [string]$Executable)
+  $dependencies = Get-ExecutableDependencies $Executable
+  if ($dependencies -notmatch '(?im)^\s*Microsoft\.WindowsAppRuntime\.dll\s*$') {
+    throw "Executable does not import Microsoft.WindowsAppRuntime.dll: $Executable"
+  }
+  if ($dependencies -match '(?im)Microsoft\.WindowsAppRuntime\.Bootstrap\.dll') {
+    throw "Executable imports the Bootstrap DLL: $Executable"
+  }
+  $runtime = Join-Path (Split-Path -Parent $Executable) 'Microsoft.WindowsAppRuntime.dll'
+  if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) {
+    throw "Executable import is not backed by a local Windows App Runtime DLL: $runtime"
+  }
+}
+
 function Get-PortableFileSet {
   param([Parameter(Mandatory = $true)] [string]$PackageRoot)
   $items = @(Get-ChildItem -LiteralPath $PackageRoot -Force -Recurse)
   if ($items.Count -eq 0) { throw "Windows portable app has no files: $PackageRoot" }
 
-  # This is deliberately an allowlist, not a catch-all DLL rule. Native
-  # dependency versions may change, but only the named runtime families may
-  # cross the release boundary.
-  $runtimeDll = '\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?'
-  $allowedEntries = @(
-    '^App$',
-    '^Assets$',
-    '^AppxManifest\.xml$',
-    '^Assets\\Logo\.ico$',
-    '^App\\Kepos\.exe$',
-    '^App\\kepos-bootstrap\.json$',
-    '^App\\app\.bundle$',
-    '^App\\Microsoft\.Web\.WebView2\.Core\.dll$',
-    '^App\\Microsoft\.WindowsAppRuntime\.Bootstrap\.dll$',
-    "^App\\bare-(abort|buffer|crypto|dns|fs|hrtime|inspect|lief|module-lexer|os|path|pipe|signals|stdio|structured-clone|subprocess|tcp|tty|type|url|win-ui)-$runtimeDll\.dll$",
-    "^App\\(sodium-native|udx-native)-$runtimeDll\.dll$"
-  )
-  $relative = @($items | ForEach-Object {
+  # Only collect a reparse-free relative tree. The desktop build and adapter
+  # validator own product/runtime semantics; archive validation compares this
+  # exact source tree with the extracted tree.
+  return @($items | ForEach-Object {
       if ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
         throw "Windows portable app contains a link: $($_.FullName)"
       }
       Get-PortableRelativePath $PackageRoot $_
     } | Sort-Object)
-  foreach ($name in $relative) {
-    if (-not ($allowedEntries | Where-Object { $name -match $_ })) {
-      throw "Windows portable app contains an unexpected entry: $name"
-    }
-  }
-  foreach ($name in @('AppxManifest.xml', 'Assets\Logo.ico', 'App\Kepos.exe', 'App\kepos-bootstrap.json', 'App\app.bundle', 'App\Microsoft.Web.WebView2.Core.dll', 'App\Microsoft.WindowsAppRuntime.Bootstrap.dll')) {
-    if (-not $relative.Contains($name)) { throw "Windows portable app is missing $name" }
-  }
-  if (-not ($relative | Where-Object { $_ -match '^App\\bare-win-ui-' })) {
-    throw 'Windows portable app is missing the bare-win-ui runtime'
-  }
-  Assert-Pe64 (Join-Path $PackageRoot 'App\Kepos.exe')
-  return $relative
 }
 
 function Invoke-PortableSmoke {
@@ -260,7 +259,8 @@ function Invoke-PortableSmoke {
   $quit = Join-Path $SmokeRoot 'quit.marker'
   # These roots intentionally begin empty. The app must create the subscriber
   # identity/configuration through its real bootstrap path before it can render
-  # the unconfigured snapshot.
+  # the unconfigured snapshot. The second launch proves that identity survives
+  # a clean quit and restart without importing live state.
   New-Item -ItemType Directory -Path $smokeHome, $appData, $localAppData, $webViewData, $Logs -Force | Out-Null
   $env:APPDATA = $appData
   $env:LOCALAPPDATA = $localAppData
@@ -268,76 +268,112 @@ function Invoke-PortableSmoke {
   $env:KEPOS_WINDOWS_SMOKE_READY_FILE = $ready
   $env:KEPOS_WINDOWS_SMOKE_RENDER_FILE = $rendered
   $env:KEPOS_WINDOWS_SMOKE_QUIT_FILE = $quit
-  $process = New-Object System.Diagnostics.Process
-  $process.StartInfo.FileName = $Executable
-  $process.StartInfo.Arguments = "--smoke-test --smoke-home `"$smokeHome`""
-  $process.StartInfo.WorkingDirectory = Split-Path -Parent $Executable
-  $process.StartInfo.UseShellExecute = $false
-  $process.StartInfo.RedirectStandardOutput = $false
-  $process.StartInfo.RedirectStandardError = $false
-  $processStarted = $false
+  $firstSubscriberKey = $null
   try {
-    if (-not $process.Start()) { throw 'Windows portable smoke process did not start' }
-    $processStarted = $true
-    if (-not $process.WaitForExit(45000)) {
-      & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-File (Join-Path $Logs 'smoke-timeout.log')
-      throw 'Windows portable smoke process timed out'
-    }
-    if ($process.ExitCode -ne 0) { throw "Windows portable smoke exited with code $($process.ExitCode)" }
     foreach ($marker in @($ready, $rendered, $quit)) {
-      if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
-        throw "Windows portable smoke is missing marker: $marker"
-      }
-    }
-    try {
-      $snapshot = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
-      if (
-        $snapshot.appPhase -ne 'running' -or
-        $null -eq $snapshot.subscriber -or
-        $snapshot.subscriber.phase -ne 'running' -or
-        $snapshot.subscriber.connection -ne 'unconfigured' -or
-        [string]::IsNullOrWhiteSpace([string]$snapshot.subscriber.subscriberKey)
-      ) {
-        throw 'ready marker did not contain a healthy unconfigured subscriber snapshot'
-      }
-
-      $acknowledgement = Get-Content -LiteralPath $rendered -Raw | ConvertFrom-Json
-      $expectedFields = @('connectFormVisible', 'connection', 'serviceCount', 'subscriberKeyPresent', 'type') | Sort-Object
-      $actualFields = @($acknowledgement.PSObject.Properties.Name) | Sort-Object
-      if (($expectedFields -join '|') -ne ($actualFields -join '|')) {
-        throw 'rendered acknowledgement contained unexpected fields'
-      }
-      if (
-        $acknowledgement.type -ne 'windows-smoke-rendered' -or
-        $acknowledgement.connection -ne 'unconfigured' -or
-        $acknowledgement.serviceCount -ne 0 -or
-        $acknowledgement.subscriberKeyPresent -ne $true -or
-        $acknowledgement.connectFormVisible -ne $true
-      ) {
-        throw 'rendered acknowledgement did not prove the unconfigured page state'
-      }
-
-      if (-not [string]::IsNullOrWhiteSpace($BootstrapAsset)) {
-        $configPath = Join-Path $appData 'Kepos\config.toml'
-        if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
-          throw 'Windows portable smoke did not create its first-run config'
+      $existing = Get-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+      if ($null -ne $existing) {
+        if ($existing.PSIsContainer -or (($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+          throw "Windows portable smoke marker is not a regular file: $marker"
         }
-        Invoke-LoggedNative $Node 'bootstrap-config' @(
-          '--import',
-          'tsx',
-          'scripts\verify-desktop-bootstrap.ts',
-          $BootstrapAsset,
-          $configPath
-        )
+        Remove-Item -LiteralPath $marker -Force
       }
-    } catch {
-      throw "Windows portable smoke bridge/render proof is invalid: $($_.Exception.Message)"
     }
+
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+      if ($attempt -gt 1) {
+        foreach ($marker in @($ready, $rendered, $quit)) {
+          $existing = Get-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+          if ($null -ne $existing) {
+            if ($existing.PSIsContainer -or (($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+              throw "Windows portable smoke marker is not a regular file: $marker"
+            }
+            Remove-Item -LiteralPath $marker -Force
+          }
+        }
+      }
+
+      $process = New-Object System.Diagnostics.Process
+      $process.StartInfo.FileName = $Executable
+      $process.StartInfo.Arguments = "--smoke-test --smoke-home `"$smokeHome`""
+      $process.StartInfo.WorkingDirectory = Split-Path -Parent $Executable
+      $process.StartInfo.UseShellExecute = $false
+      $process.StartInfo.RedirectStandardOutput = $false
+      $process.StartInfo.RedirectStandardError = $false
+      $processStarted = $false
+      try {
+        if (-not $process.Start()) { throw 'Windows portable smoke process did not start' }
+        $processStarted = $true
+        if (-not $process.WaitForExit(45000)) {
+          & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-File (Join-Path $Logs "smoke-timeout-$attempt.log")
+          throw 'Windows portable smoke process timed out'
+        }
+        if ($process.ExitCode -ne 0) { throw "Windows portable smoke exited with code $($process.ExitCode)" }
+        foreach ($marker in @($ready, $rendered, $quit)) {
+          if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+            throw "Windows portable smoke is missing marker: $marker"
+          }
+        }
+        try {
+          $snapshot = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
+          if (
+            $snapshot.appPhase -ne 'running' -or
+            $null -eq $snapshot.subscriber -or
+            $snapshot.subscriber.phase -ne 'running' -or
+            $snapshot.subscriber.connection -ne 'unconfigured' -or
+            [string]::IsNullOrWhiteSpace([string]$snapshot.subscriber.subscriberKey)
+          ) {
+            throw 'ready marker did not contain a healthy unconfigured subscriber snapshot'
+          }
+          $subscriberKey = [string]$snapshot.subscriber.subscriberKey
+          if ($attempt -eq 1) {
+            $firstSubscriberKey = $subscriberKey
+          } elseif ($subscriberKey -ne $firstSubscriberKey) {
+            throw 'Windows portable smoke changed the subscriber identity across restart'
+          }
+
+          $acknowledgement = Get-Content -LiteralPath $rendered -Raw | ConvertFrom-Json
+          $expectedFields = @('connectFormVisible', 'connection', 'serviceCount', 'subscriberKeyPresent', 'type') | Sort-Object
+          $actualFields = @($acknowledgement.PSObject.Properties.Name) | Sort-Object
+          if (($expectedFields -join '|') -ne ($actualFields -join '|')) {
+            throw 'rendered acknowledgement contained unexpected fields'
+          }
+          if (
+            $acknowledgement.type -ne 'windows-smoke-rendered' -or
+            $acknowledgement.connection -ne 'unconfigured' -or
+            $acknowledgement.serviceCount -ne 0 -or
+            $acknowledgement.subscriberKeyPresent -ne $true -or
+            $acknowledgement.connectFormVisible -ne $true
+          ) {
+            throw 'rendered acknowledgement did not prove the unconfigured page state'
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($BootstrapAsset)) {
+            $configPath = Join-Path $appData 'Kepos\config.toml'
+            if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+              throw 'Windows portable smoke did not create its first-run config'
+            }
+            Invoke-LoggedNative $Node "bootstrap-config-$attempt" @(
+              '--import',
+              'tsx',
+              'scripts\verify-desktop-bootstrap.ts',
+              $BootstrapAsset,
+              $configPath
+            )
+          }
+        } catch {
+          throw "Windows portable smoke bridge/render proof is invalid: $($_.Exception.Message)"
+        }
+        Write-Host "Windows portable smoke attempt ${attempt}: bridge, render, config, and Quit PASS"
+      } finally {
+        if ($processStarted -and -not $process.HasExited) {
+          & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-File (Join-Path $Logs "smoke-cleanup-$attempt.log")
+        }
+        $process.Dispose()
+      }
+    }
+    Write-Host 'Windows portable smoke restart identity: PASS'
   } finally {
-    if ($processStarted -and -not $process.HasExited) {
-      & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-File (Join-Path $Logs 'smoke-cleanup.log')
-    }
-    $process.Dispose()
     Remove-Item Env:KEPOS_WINDOWS_SMOKE_READY_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:KEPOS_WINDOWS_SMOKE_RENDER_FILE -ErrorAction SilentlyContinue
     Remove-Item Env:KEPOS_WINDOWS_SMOKE_QUIT_FILE -ErrorAction SilentlyContinue
@@ -347,7 +383,9 @@ function Invoke-PortableSmoke {
 
 function Invoke-PortableRelease {
   param(
+    [Parameter(Mandatory = $true)] [string]$Repository,
     [Parameter(Mandatory = $true)] [string]$RunDirectory,
+    [Parameter(Mandatory = $true)] [string]$ProductFileSetPath,
     [Parameter(Mandatory = $true)] [string]$Logs,
     [Parameter(Mandatory = $true)] [string]$ArtifactName,
     [Parameter(Mandatory = $true)] [string]$Mode,
@@ -358,14 +396,23 @@ function Invoke-PortableRelease {
   $artifact = Join-Path $RunDirectory $ArtifactName
   if (Test-Path -LiteralPath $artifact) { throw "release output already exists: $artifact" }
   $sourceRoot = Join-Path $RunDirectory 'dist\desktop\Kepos'
+  $runtimeSource = Join-Path $Repository 'vendor\holepunch\bare-win-ui\prebuilds\win32-x64\bare'
+  $sourceApp = Join-Path $sourceRoot 'App'
   Assert-SafeOwnedPath $RunDirectory $sourceRoot 'portable source'
+  Assert-SafeOwnedPath $RunDirectory $ProductFileSetPath 'product file set'
+  Assert-SafeOwnedPath $Repository $runtimeSource 'native runtime source'
+  if (-not (Test-Path -LiteralPath $ProductFileSetPath -PathType Leaf)) {
+    throw "Windows product file set is missing: $ProductFileSetPath"
+  }
   $fileSet = @(Get-PortableFileSet $sourceRoot)
   $packageRoot = Join-Path $RunDirectory 'package'
   $packageApp = Join-Path $packageRoot 'Kepos'
   $extracted = Join-Path $RunDirectory 'extracted'
+  $runtimeValidation = Join-Path $RunDirectory 'runtime-validation'
   Assert-SafeOwnedPath $RunDirectory $packageRoot 'release package'
   Assert-SafeOwnedPath $RunDirectory $extracted 'release extraction'
-  foreach ($directory in @($packageRoot, $extracted)) {
+  Assert-SafeOwnedPath $RunDirectory $runtimeValidation 'runtime validation'
+  foreach ($directory in @($packageRoot, $extracted, $runtimeValidation)) {
     if (Test-Path -LiteralPath $directory) { throw "release output already exists: $directory" }
   }
   $script:ReleasePackageOwned = $true
@@ -373,6 +420,7 @@ function Invoke-PortableRelease {
   foreach ($relative in $fileSet) {
     $source = Join-Path $sourceRoot $relative
     $target = Join-Path $packageApp $relative
+    Assert-SafeOwnedPath $packageRoot $target 'release package entry'
     if ((Get-Item -LiteralPath $source) -is [System.IO.DirectoryInfo]) {
       New-Item -ItemType Directory -Path $target -Force | Out-Null
       continue
@@ -389,6 +437,19 @@ function Invoke-PortableRelease {
   $extractedApp = Join-Path $extracted 'Kepos'
   $extractedSet = @(Get-PortableFileSet $extractedApp)
   if (($fileSet -join "`n") -ne ($extractedSet -join "`n")) { throw 'Windows ZIP changed the validated portable file set' }
+  $script:ReleaseValidationOwned = $true
+  Invoke-LoggedNative $Node 'self-contained-runtime-artifact' @(
+    '--import',
+    'tsx',
+    (Join-Path $Repository 'scripts\windows\self-contained-runtime.ts'),
+    'validate-final',
+    $runtimeSource,
+    $sourceApp,
+    (Join-Path $extractedApp 'App'),
+    $ProductFileSetPath,
+    $runtimeValidation
+  )
+  Assert-SelfContainedImports (Join-Path $extractedApp 'App\Kepos.exe')
   Invoke-LoggedNative $Node 'bootstrap-artifact' @(
     '--import',
     'tsx',
@@ -412,6 +473,7 @@ $ReleaseArtifactPath = $null
 $ReleaseArtifactOwned = $false
 $ReleasePackageOwned = $false
 $ReleaseExtractionOwned = $false
+$ReleaseValidationOwned = $false
 
 try {
   $WorkspaceRoot = Get-CanonicalPath $WorkspaceRoot
@@ -443,11 +505,13 @@ try {
   $Artifact = Join-Path $RunDirectory 'dist\desktop'
   $RepositoryArtifact = Join-Path $Repository 'dist\desktop'
   $RevisionFile = Join-Path $RunDirectory 'build-revisions.txt'
+  $ProductFileSetPath = Join-Path $RunDirectory 'windows-product-files.json'
   $RunMarker = Join-Path $RunDirectory '.kepos-windows-workflow-run'
   Assert-SafeOwnedPath $Repository $RepositoryArtifact 'Repository artifact'
   Assert-SafeOwnedPath $RunDirectory $Artifact 'staged artifact'
   Assert-SafeOwnedPath $RunDirectory $Logs 'logs'
   Assert-SafeOwnedPath $RunDirectory $RevisionFile 'revision file'
+  Assert-SafeOwnedPath $RunDirectory $ProductFileSetPath 'product file set'
   Assert-SafeOwnedPath $WorkspaceRoot $RunMarker 'run marker'
 
   if (-not (Test-Path -LiteralPath $WorkspaceRoot -PathType Container)) { throw "Workspace root is missing: $WorkspaceRoot" }
@@ -527,13 +591,13 @@ try {
   New-Item -ItemType Directory -Path $NuGetCache -Force | Out-Null
   $env:BARE_WIN_UI_NUGET_CACHE = $NuGetCache
   # A tracked snapshot can carry older mtimes than the persistent cache. Drop
-  # only compiler PCH outputs so clang rebuilds them; retain downloaded SDKs.
+  # the compiler PCH sidecar and object together so clang rebuilds both; retain
+  # downloaded SDKs and the rest of the native cache.
   $cachedCMakeFiles = Join-Path $CanonicalNativeBuildRoot 'winui\CMakeFiles'
   Assert-SafeOwnedPath $CanonicalNativeBuildRoot $cachedCMakeFiles 'cached CMake files'
   if (Test-Path -LiteralPath $cachedCMakeFiles) {
     Assert-NoReparsePointsInTree $cachedCMakeFiles 'cached CMake files'
-    Get-ChildItem -LiteralPath $cachedCMakeFiles -Filter '*.pch' -File -Recurse -ErrorAction SilentlyContinue |
-      Remove-Item -Force
+    Remove-CachedCMakePchOutputs $cachedCMakeFiles | Out-Null
   }
   Assert-SafeOwnedPath $Repository $CanonicalNativeCheck 'native check output'
   Remove-SafeOwnedTree $Repository $CanonicalNativeCheck 'native check output'
@@ -629,7 +693,15 @@ try {
     "bare-app-kit=$BareAppKitRevision"
   ) | Set-Content -LiteralPath $RevisionFile -Encoding utf8
 
-  $DesktopBuildArguments = @('run', 'desktop:build', '--', '--target', 'win32-x64')
+  $DesktopBuildArguments = @(
+    'run',
+    'desktop:build',
+    '--',
+    '--target',
+    'win32-x64',
+    '--windows-product-files-output',
+    $ProductFileSetPath
+  )
   if (-not [string]::IsNullOrWhiteSpace($BootstrapAsset)) {
     $DesktopBuildArguments += @('--bootstrap-asset', $BootstrapAsset)
   }
@@ -739,7 +811,7 @@ try {
     Assert-SafeOwnedPath $RunDirectory $PackagedSmokeRoot 'packaged smoke root'
     Invoke-PortableSmoke $StagedExecutable $PackagedSmokeRoot (Join-Path $Logs 'packaged-smoke') $BootstrapAsset $Node
   } elseif ($Workflow -eq 'release') {
-    Invoke-PortableRelease $RunDirectory $Logs $ReleaseArtifactName $ReleaseMode $BootstrapAsset $Node
+    Invoke-PortableRelease $Repository $RunDirectory $ProductFileSetPath $Logs $ReleaseArtifactName $ReleaseMode $BootstrapAsset $Node
   }
   Write-Host "Windows desktop build complete: $Artifact"
 } catch {
@@ -753,6 +825,9 @@ try {
     }
     if ($ReleaseExtractionOwned) {
       try { Remove-SafeOwnedTree $RunDirectory (Join-Path $RunDirectory 'extracted') 'release extraction' } catch { }
+    }
+    if ($ReleaseValidationOwned) {
+      try { Remove-SafeOwnedTree $RunDirectory (Join-Path $RunDirectory 'runtime-validation') 'runtime validation' } catch { }
     }
   }
   if ($TranscriptStarted) {

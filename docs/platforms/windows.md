@@ -2,10 +2,16 @@
 
 Kepos supports **Windows 11 x64** as a portable desktop application. Download
 `kepos-windows-x64.zip`, verify it, extract it to a new directory, and
-launch `Kepos\App\Kepos.exe`. The ZIP is unsigned by Authenticode: Windows
-SmartScreen may warn because the first release has no Microsoft publisher
-identity. Do not bypass a warning until the minisign and SHA-256 checks below
-succeed.
+launch `Kepos\App\Kepos.exe`. The ZIP includes the x64 self-contained Windows
+App Runtime tree, so Microsoft Windows App Runtime does not need to be
+installed separately. The app is a whole-directory product: keep every file
+under `Kepos\` together and do not move or distribute `Kepos.exe` alone.
+
+The WebView2 Runtime and Microsoft Visual C++ Redistributable remain system
+prerequisites; Kepos does not bundle either one. The ZIP is unsigned by
+Authenticode: Windows SmartScreen may warn because the first release has no
+Microsoft publisher identity. Do not bypass a warning until the minisign and
+SHA-256 checks below succeed.
 
 The ZIP is portable and does not install a service, login startup task, MSI,
 MSIX package, Store app, or updater. Kepos runs only in the logged-in desktop

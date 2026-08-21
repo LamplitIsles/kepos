@@ -20,6 +20,7 @@ import { generateBootstrapAsset } from "../scripts/generate-bootstrap-asset.js";
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const powerShellOnWsl = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
 const buildScript = path.join(repository, "scripts", "windows", "build-kepos.ps1");
+const pchCacheScript = path.join(repository, "scripts", "windows", "pch-cache.ps1");
 const controlScript = path.join(repository, "scripts", "windows", "nuc-kep.sh");
 const trackedManifestScript = path.join(
   repository,
@@ -359,6 +360,56 @@ test("Windows build PowerShell parses with the supported Windows PowerShell", (t
   );
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("Windows PCH cache probe removes only generated hxx outputs", (t) => {
+  const script = windowsPath(pchCacheScript);
+  if (!script) {
+    t.skip("the exact Windows PowerShell executable is unavailable");
+    return;
+  }
+
+  const root = mkdtempSync(path.join(os.tmpdir(), "kepos-windows-pch-cache-"));
+  const cache = path.join(root, "cache", "winui", "CMakeFiles");
+  const outside = path.join(root, "outside");
+  const powershell = process.platform === "win32" ? "powershell.exe" : powerShellOnWsl;
+  const toWindowsPath = (value: string): string => {
+    const converted = windowsPath(value);
+    assert.ok(converted, `could not convert test path to Windows form: ${value}`);
+    return converted;
+  };
+  const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+  const generated = [
+    path.join(cache, "cmake_pch.hxx.obj"),
+    path.join(cache, "cmake_pch.hxx.pch"),
+    path.join(cache, "nested", "cmake_pch.hxx.obj.d"),
+  ];
+
+  mkdirSync(path.join(cache, "nested"), { recursive: true });
+  mkdirSync(outside, { recursive: true });
+  for (const file of generated) writeFileSync(file, "generated\n");
+  writeFileSync(path.join(cache, "cmake_pch.cxx.pch"), "legacy\n");
+  writeFileSync(path.join(cache, "other.pch"), "unrelated\n");
+  writeFileSync(path.join(outside, "cmake_pch.hxx.pch"), "outside\n");
+
+  try {
+    const command = [
+      `. ${quote(toWindowsPath(script))}`,
+      `Remove-CachedCMakePchOutputs ${quote(toWindowsPath(cache))} | Out-Null`,
+    ].join("; ");
+    const result = spawnSync(
+      powershell,
+      ["-NoProfile", "-NonInteractive", "-Command", command],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    for (const file of generated) assert.equal(existsSync(file), false, file);
+    assert.equal(existsSync(path.join(cache, "cmake_pch.cxx.pch")), true);
+    assert.equal(existsSync(path.join(cache, "other.pch")), true);
+    assert.equal(existsSync(path.join(outside, "cmake_pch.hxx.pch")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("Windows workflow rejects reparse-point run directories", (t) => {

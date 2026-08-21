@@ -20,6 +20,7 @@ import {
   requireBootstrapAsset,
 } from "../src/bootstrap-asset.js";
 import { writeKeposBootstrapAsset } from "./bootstrap-config.js";
+import { stageWindowsSelfContainedRuntime } from "./windows/self-contained-runtime.js";
 
 export type DesktopTarget = "darwin-arm64" | "win32-x64";
 
@@ -38,6 +39,7 @@ export interface DesktopBuildTools {
 export interface DesktopBuildOptions {
   bootstrapAssetPath?: string;
   requireBootstrap?: boolean;
+  windowsProductFilesOutputPath?: string;
 }
 
 export interface DesktopBuildPlan {
@@ -401,6 +403,24 @@ export async function runDesktopBuild(
     const outputPath = desktopBootstrapAssetPathForTarget(repository, target);
     await mkdir(path.dirname(outputPath), { recursive: true });
     await writeFile(outputPath, bootstrapSource, { mode: 0o644 });
+
+    if (target === "win32-x64") {
+      const runtime = await stageWindowsSelfContainedRuntime(repository);
+      if (options.windowsProductFilesOutputPath !== undefined) {
+        await mkdir(path.dirname(options.windowsProductFilesOutputPath), {
+          recursive: true,
+        });
+        await writeFile(
+          options.windowsProductFilesOutputPath,
+          `${JSON.stringify(runtime.productFiles, null, 2)}\n`,
+          { mode: 0o644 },
+        );
+      }
+      process.stdout.write(
+        `Windows self-contained runtime staged: ${runtime.fileCount} runtime files, ${runtime.productFiles.length} product files, manifest ${runtime.manifestSha256}\n`,
+      );
+    }
+
     await plan.validate(repository);
   } finally {
     await rm(stagingDirectory, { force: true, recursive: true });
@@ -465,12 +485,13 @@ async function validateWindowsOutput(repository: string): Promise<void> {
   const output = path.join(app, "App");
   await requireFile(path.join(output, "Kepos.exe"));
   await requireFile(path.join(output, DESKTOP_BOOTSTRAP_ASSET));
+  await requireFile(path.join(output, "self-contained-runtime.json"));
+  await requireFile(path.join(output, "Microsoft.WindowsAppRuntime.dll"));
   await requireFile(path.join(app, "AppxManifest.xml"));
   await requireFile(path.join(app, "Assets", "Logo.ico"));
   for (const required of [
     "bare-win-ui-",
     "Microsoft.Web.WebView2.Core.dll",
-    "Microsoft.WindowsAppRuntime.Bootstrap.dll",
   ]) {
     const files = await readdir(output);
     if (
@@ -582,6 +603,21 @@ export function requestedTarget(
   return validateDesktopTarget(value);
 }
 
+export function requestedWindowsProductFilesOutput(
+  arguments_: readonly string[],
+): string | undefined {
+  const index = arguments_.indexOf("--windows-product-files-output");
+  if (index === -1) return undefined;
+  const value = arguments_[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error("missing value for --windows-product-files-output");
+  }
+  if (arguments_.indexOf("--windows-product-files-output", index + 1) !== -1) {
+    throw new Error("windows product files output must be specified only once");
+  }
+  return value;
+}
+
 const repository = fileURLToPath(new URL("..", import.meta.url));
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const arguments_ = process.argv.slice(2);
@@ -591,6 +627,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     requireBootstrap:
       arguments_.filter((argument) => argument === "--require-bootstrap").length > 0 ||
       process.env.KEPOS_BOOTSTRAP_REQUIRED === "1",
+    windowsProductFilesOutputPath: requestedWindowsProductFilesOutput(arguments_),
   });
   process.stdout.write(`Desktop app ready: ${desktopBuildPlan(target).outputDirectory(repository)}\n`);
 }

@@ -21,7 +21,8 @@ if (!stateDir) throw new Error("Android subscriber state directory is required")
 const gatewayPort = Number(Bare.argv[2] ?? "17480");
 const mihomoPort = Number(Bare.argv[3] ?? "17890");
 const dshPort = Number(Bare.argv[4] ?? "13080");
-const bootstrap = parseAndroidBootstrapAsset(Bare.argv[5] ?? "null");
+const openClawPort = Number(Bare.argv[5] ?? "18789");
+const bootstrap = parseAndroidBootstrapAsset(Bare.argv[6] ?? "null");
 if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65_535) {
   throw new Error("Android gateway port is invalid");
 }
@@ -35,8 +36,19 @@ if (
 if (!Number.isInteger(dshPort) || dshPort < 1 || dshPort > 65_535) {
   throw new Error("Android dsh port is invalid");
 }
+if (
+  !Number.isInteger(openClawPort) ||
+  openClawPort < 1 ||
+  openClawPort > 65_535
+) {
+  throw new Error("Android OpenClaw port is invalid");
+}
 const navidromeUrl = `http://navidrome.localhost:${gatewayPort}/`;
-const subscriberServices = createAndroidSubscriberServices(mihomoPort, dshPort);
+const subscriberServices = createAndroidSubscriberServices(
+  mihomoPort,
+  dshPort,
+  openClawPort,
+);
 const localPorts = new Map(
   subscriberServices.map(({ id, localPort }) => [id, localPort]),
 );
