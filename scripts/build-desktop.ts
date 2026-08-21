@@ -424,6 +424,7 @@ export async function runDesktopBuild(
     await writeFile(outputPath, bootstrapSource, { mode: 0o644 });
 
     if (target === "win32-x64") {
+      await stageWindowsInstallerFiles(repository);
       const runtime = await stageWindowsSelfContainedRuntime(repository);
       if (options.windowsProductFilesOutputPath !== undefined) {
         await mkdir(path.dirname(options.windowsProductFilesOutputPath), {
@@ -435,7 +436,6 @@ export async function runDesktopBuild(
           { mode: 0o644 },
         );
       }
-      await stageWindowsInstallerFiles(repository);
       process.stdout.write(
         `Windows self-contained runtime staged: ${runtime.fileCount} runtime files, ${runtime.productFiles.length} product files, manifest ${runtime.manifestSha256}\n`,
       );
