@@ -96,8 +96,9 @@ but it cannot replace or remove the installed `io.github.ttalab.kepos` app.
 npm run release:android -- v0.1.0
 ```
 
-This release-Mac command derives the app version from an exact
-`vMAJOR.MINOR.PATCH` tag, builds the optimized arm64 variant, zipaligns it,
+This release-Mac command derives the app version from an exact stable
+`vMAJOR.MINOR.PATCH` or beta `vMAJOR.MINOR.PATCH-beta.N` tag, builds the
+optimized arm64 variant, zipaligns it,
 signs it with the long-lived Kepos JKS, and checks the resulting certificate
 fingerprint against the public value in the repository. It writes the final
 versioned APK under `dist/release/` and reports its size against the debug APK.

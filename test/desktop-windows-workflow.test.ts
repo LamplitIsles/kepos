@@ -148,6 +148,10 @@ if [[ "\${3:-}" == "scripts/generate-bootstrap-asset.ts" ]]; then
   printf '%s\n' '[{"host":"bootstrap.example","port":49737}]' > "\${4}"
   exit 0
 fi
+if [[ "\${3:-}" == "--input-type=module" && "\${6:-}" == "v0.3.0-beta.1" && "\${7:-}" == "rehearsal" ]]; then
+  printf '%s\n' 'dist/release/rehearsal-v0.3.0-beta.1\tkepos-windows-x64.zip'
+  exit 0
+fi
 printf '%s\n' 'unexpected fake node invocation' >&2
 exit 92
 `,
@@ -165,7 +169,7 @@ count="\$((count + 1))"
 printf '%s' "\${count}" > "\${count_file}"
 printf '%s\n' "\${*:2}" > "\${FAKE_ROOT}/ssh-command-\${count}"
 cat > "\${FAKE_ROOT}/ssh-input-\${count}"
-if [[ \${count} -eq 2 ]]; then cp "\${FAKE_ROOT}/ssh-input-\${count}" "\${FAKE_ROOT}/archive.tar"; fi
+if (( count % 2 == 0 )); then cp "\${FAKE_ROOT}/ssh-input-\${count}" "\${FAKE_ROOT}/archive-\${count}.tar"; fi
 `,
   );
   chmodSync(fakeSsh, 0o755);
@@ -187,6 +191,12 @@ elif [[ "\${source}" == */dist/desktop ]]; then
   destination="\${destination%/}"
   mkdir -p "\${destination}/desktop"
   printf '%s\n' 'desktop' > "\${destination}/desktop/transfer.marker"
+elif [[ "\${source}" == *kepos-windows-x64.zip ]]; then
+  destination="\${destination%/}"
+  temporary="\$(mktemp -d)"
+  printf '%s\n' 'windows artifact' > "\${temporary}/payload.txt"
+  (cd "\${temporary}" && zip -q "\${destination}" payload.txt)
+  rm -rf "\${temporary}"
 else
   printf '%s\n' 'unexpected fake scp invocation' >&2
   exit 93
@@ -200,6 +210,7 @@ fi
   runGit(root, ["config", "user.name", "Workflow Test"]);
   runGit(root, ["add", ".gitignore", "tracked.txt", "scripts"]);
   runGit(root, ["commit", "--quiet", "-m", "fixture"]);
+  runGit(root, ["remote", "add", "origin", "https://example.invalid/kepos.git"]);
 
   const environment = {
     ...isolatedGitEnvironment,
@@ -215,7 +226,7 @@ fi
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
 
-    const archiveListing = spawnSync("tar", ["-tf", path.join(fakeState, "archive.tar")], {
+    const archiveListing = spawnSync("tar", ["-tf", path.join(fakeState, "archive-2.tar")], {
       encoding: "utf8",
     });
     assert.equal(archiveListing.status, 0, archiveListing.stderr);
@@ -224,6 +235,22 @@ fi
     assert.equal(
       readFileSync(path.join(fakeState, "remote-bootstrap.json"), "utf8"),
       '[{"host":"bootstrap.example","port":49737}]\n',
+    );
+
+    const beta = spawnSync(
+      "bash",
+      ["scripts/windows/nuc-kep.sh", "v0.3.0-beta.1", "--rehearsal"],
+      { cwd: root, encoding: "utf8", env: environment },
+    );
+    assert.equal(beta.status, 0, beta.stderr || beta.stdout);
+    assert.equal(
+      existsSync(
+        path.join(
+          root,
+          "dist/release/rehearsal-v0.3.0-beta.1/kepos-windows-x64.zip",
+        ),
+      ),
+      true,
     );
     const remoteCommand = readFileSync(
       path.join(fakeState, "ssh-command-2"),
@@ -238,7 +265,7 @@ fi
       env: { ...environment, FAKE_NODE_FAIL: "1" },
     });
     assert.notEqual(failed.status, 0);
-    assert.equal(existsSync(path.join(fakeState, "ssh-command-3")), false);
+    assert.equal(existsSync(path.join(fakeState, "ssh-command-5")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

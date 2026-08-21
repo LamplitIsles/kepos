@@ -29,14 +29,10 @@ RELEASE_MODE="dogfood"
 RELEASE_TAG=""
 if [[ $# -gt 0 ]]; then
   if [[ $# -ne 1 && $# -ne 2 ]] || [[ ${2:-} != "--rehearsal" ]]; then
-    printf '%s\n' 'usage: nuc-kep.sh [vMAJOR.MINOR.PATCH [--rehearsal]]' >&2
+    printf '%s\n' 'usage: nuc-kep.sh [vMAJOR.MINOR.PATCH[-beta.N] [--rehearsal]]' >&2
     exit 2
   fi
   RELEASE_TAG=$1
-  if [[ ! $RELEASE_TAG =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-    printf 'invalid release tag: %s\n' "$RELEASE_TAG" >&2
-    exit 2
-  fi
   RELEASE_MODE="release"
   [[ $# -eq 2 ]] && RELEASE_MODE="rehearsal"
 fi
@@ -47,20 +43,21 @@ if [[ -n $RELEASE_TAG ]]; then
 fi
 readonly BOOTSTRAP_INPUT_MODE
 if [[ -n $RELEASE_TAG ]]; then
-  if [[ $RELEASE_MODE == release ]]; then
-    RELEASE_DIRECTORY="${LOCAL_ROOT}/dist/release/${RELEASE_TAG}"
-  else
-    RELEASE_DIRECTORY="${LOCAL_ROOT}/dist/release/rehearsal-${RELEASE_TAG}"
-  fi
-  readonly RELEASE_DIRECTORY
-  readonly RELEASE_ARTIFACT_NAME="kepos-windows-x64.zip"
-  if ! (
+  if ! release_contract=$(
     cd "$LOCAL_ROOT"
-    node --import tsx --input-type=module -e 'import { parseReleaseTag } from "./scripts/release-version.ts"; parseReleaseTag(process.argv[1], process.argv[2]);' "$RELEASE_TAG" "$RELEASE_MODE"
+    node --import tsx --input-type=module -e 'import { parseReleaseTag } from "./scripts/release-version.ts"; const version = parseReleaseTag(process.argv[1], process.argv[2]); process.stdout.write(`${version.artifactDirectory}\t${version.windowsArtifactName}`);' "$RELEASE_TAG" "$RELEASE_MODE"
   ); then
     printf 'release tag is outside the shared artifact contract: %s\n' "$RELEASE_TAG" >&2
     exit 2
   fi
+  IFS=$'\t' read -r release_artifact_directory release_artifact_name <<< "$release_contract"
+  if [[ -z $release_artifact_directory || -z $release_artifact_name || $release_contract == *$'\n'* ]]; then
+    printf 'shared release contract returned invalid Windows metadata: %s\n' "$RELEASE_TAG" >&2
+    exit 2
+  fi
+  RELEASE_DIRECTORY="${LOCAL_ROOT}/${release_artifact_directory}"
+  readonly RELEASE_DIRECTORY
+  readonly RELEASE_ARTIFACT_NAME="$release_artifact_name"
   PARTIAL_ARTIFACT="$RELEASE_DIRECTORY/${RELEASE_ARTIFACT_NAME}.partial"
 else
   RELEASE_DIRECTORY=""

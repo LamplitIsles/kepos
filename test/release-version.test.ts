@@ -14,8 +14,11 @@ import {
 test("maps a release tag to the shared version and artifact contract", () => {
   assert.deepEqual(parseReleaseTag("v1.2.3", "release"), {
     tag: "v1.2.3",
+    channel: "stable",
     versionName: "1.2.3",
-    androidVersionCode: 1_002_003,
+    androidVersionCode: 100_200_399,
+    macosShortVersion: "1.2.3",
+    macosBuildVersion: "100200399",
     artifactDirectory: "dist/release/v1.2.3",
     androidArtifactName: "kepos-android-arm64.apk",
     macosArtifactName: "kepos-macos-arm64.zip",
@@ -29,19 +32,38 @@ test("maps a release tag to the shared version and artifact contract", () => {
 test("keeps v0.3.0 metadata tag-derived while asset names stay stable", () => {
   const version = parseReleaseTag("v0.3.0", "release");
 
+  assert.equal(version.channel, "stable");
   assert.equal(version.versionName, "0.3.0");
-  assert.equal(version.androidVersionCode, 3_000);
+  assert.equal(version.androidVersionCode, 300_099);
+  assert.equal(version.macosShortVersion, "0.3.0");
+  assert.equal(version.macosBuildVersion, "300099");
   assert.equal(version.artifactDirectory, "dist/release/v0.3.0");
   assert.equal(version.androidArtifactName, "kepos-android-arm64.apk");
   assert.equal(version.macosArtifactName, "kepos-macos-arm64.zip");
   assert.equal(version.windowsArtifactName, "kepos-windows-x64.zip");
 });
 
+test("orders beta builds before stable and the next patch", () => {
+  const beta = parseReleaseTag("v0.3.0-beta.1", "release");
+  const laterBeta = parseReleaseTag("v0.3.0-beta.98", "release");
+  const stable = parseReleaseTag("v0.3.0", "release");
+  const nextPatch = parseReleaseTag("v0.3.1-beta.1", "release");
+
+  assert.equal(beta.channel, "beta");
+  assert.equal(beta.versionName, "0.3.0-beta.1");
+  assert.equal(beta.androidVersionCode, 300_001);
+  assert.equal(beta.macosShortVersion, "0.3.0");
+  assert.equal(beta.macosBuildVersion, "300001");
+  assert.equal(beta.androidVersionCode < laterBeta.androidVersionCode, true);
+  assert.equal(laterBeta.androidVersionCode < stable.androidVersionCode, true);
+  assert.equal(stable.androidVersionCode < nextPatch.androidVersionCode, true);
+});
+
 test("isolates rehearsal artifacts from formal release artifacts", () => {
   const release = parseReleaseTag("v0.1.0", "release");
   const rehearsal = parseReleaseTag("v0.1.0", "rehearsal");
 
-  assert.equal(release.androidVersionCode, 1_000);
+  assert.equal(release.androidVersionCode, 100_099);
   assert.equal(rehearsal.artifactDirectory, "dist/release/rehearsal-v0.1.0");
   assert.equal(rehearsal.mode, "rehearsal");
   assert.notEqual(rehearsal.artifactDirectory, release.artifactDirectory);
@@ -63,10 +85,10 @@ test("reuses an empty artifact directory without overwriting an output", async (
   );
 });
 
-test("accepts the Android versionCode ceiling", () => {
+test("accepts the highest valid reserved version ordinal", () => {
   assert.equal(
-    parseReleaseTag("v2100.0.0", "release").androidVersionCode,
-    2_100_000_000,
+    parseReleaseTag("v20.999.999", "release").androidVersionCode,
+    2_099_999_999,
   );
 });
 
@@ -75,12 +97,19 @@ for (const tag of [
   "v01.0.0",
   "v1.01.0",
   "v1.0.01",
-  "v1.0.0-beta.1",
+  "v1.0.0-beta.0",
+  "v1.0.0-beta.99",
+  "v1.0.0-beta.01",
+  "v1.0.0-beta.1+build",
+  "v1.0.0-alpha.1",
+  "v1.0.0-rc.1",
   "v1.0.0+build",
   "v1.1000.0",
   "v1.0.1000",
   "v0.0.0",
-  "v2100.0.1",
+  "v0.0.0-beta.1",
+  "v21.0.0-beta.1",
+  "v20.999.999-beta.99",
   "v9007199254740992.0.0",
   "v1.2.3\n",
 ]) {

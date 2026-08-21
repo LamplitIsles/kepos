@@ -5,7 +5,10 @@ Android APK, an Apple Silicon macOS ZIP, and a Windows 11 x64 portable ZIP.
 `SHA256SUMS` covers exactly those three files and
 `SHA256SUMS.minisig` authenticates that manifest. Android uses the long-lived
 release certificate. macOS is ad-hoc signed and **not notarized**. Windows is
-not Authenticode-signed.
+not Authenticode-signed. Beta releases are GitHub prereleases; the website's
+`releases/latest/download` links remain stable-only and do not move to beta
+artifacts. The beta channel does not claim Windows 10 support; that remains
+outside the release contract until its external artifact matrix passes.
 
 ## Maintainer runbook
 
@@ -31,10 +34,15 @@ release machine's normal Kepos config must contain a non-empty
 `[network].bootstrap` array. Release and rehearsal commands fail before native
 packaging when that sanitized asset is missing or invalid; the writer reads
 only this network section and never copies the TOML into a build input or
-artifact. Confirm the requested version is new and that the local and remote
-tag do not already exist. Windows uses the exact command in the next section;
-it rejects a dirty worktree and, for a formal release, an unannotated or
-mismatched tag.
+artifact. Release tags are either canonical stable `vMAJOR.MINOR.PATCH` tags or
+`vMAJOR.MINOR.PATCH-beta.N` tags with beta numbers 1 through 98. The shared
+release parser assigns 100 build ordinals per base version: beta builds use
+`base * 100 + N`, and stable uses `base * 100 + 99`. Thus every beta precedes
+its stable release and the next patch beta. Android keeps the beta suffix in
+`versionName`; macOS uses the numeric base version and ordinal build number.
+Confirm the requested version is new and that the local and remote tag do not
+already exist. Windows uses the exact command in the next section; it rejects
+a dirty worktree and, for a formal release, an unannotated or mismatched tag.
 
 ### 2. Build the exact tagged artifacts
 
@@ -45,6 +53,9 @@ git tag -a v0.1.0 -m "v0.1.0"
 git show-ref --dereference refs/tags/v0.1.0
 git push origin v0.1.0
 ```
+
+For a formal beta, use the same annotated-tag gate with
+`v0.3.0-beta.1`; never reuse a beta number after a failed tag.
 
 Load Android keystore path, alias, and password from local secret storage.
 Never put passwords in arguments, tracked files, logs, or shell history. Build
@@ -81,6 +92,19 @@ WINDOWS_USER=white npm run release:windows -- v0.1.0 --rehearsal
 
 Rehearsal files are under `dist/release/rehearsal-v0.1.0/`; they are never
 accepted by the publisher.
+
+For the beta candidate, the exact no-tag rehearsal commands are:
+
+```sh
+npm run release:android -- v0.3.0-beta.1 --rehearsal
+npm run release:macos -- v0.3.0-beta.1 --rehearsal
+WINDOWS_USER=white npm run release:windows -- v0.3.0-beta.1 --rehearsal
+npm run release:manifest -- v0.3.0-beta.1 --rehearsal
+```
+
+These commands write only to `dist/release/rehearsal-v0.3.0-beta.1/`. They
+exercise the signed Android and macOS paths and the routed NUC Windows path,
+but never create or push a tag or release.
 
 ### 3. Manifest and independent verification
 
@@ -132,7 +156,16 @@ The draft must contain exactly these five assets: `kepos-android-arm64.apk`,
 
 ```sh
 npm run release:draft -- v0.1.0
-gh release view v0.1.0 --json tagName,targetCommitish,isDraft,assets
+gh release view v0.1.0 --json tagName,targetCommitish,isDraft,isPrerelease,assets
+```
+
+For a beta tag, use `v0.3.0-beta.1` in both commands. The draft command adds
+`--prerelease` only for beta tags and verifies `isDraft=true` plus
+`isPrerelease=true`; stable drafts must report `isPrerelease=false`.
+
+```sh
+npm run release:draft -- v0.3.0-beta.1
+gh release view v0.3.0-beta.1 --json tagName,targetCommitish,isDraft,isPrerelease,assets
 ```
 
 The script requires the existing remote annotated tag to peel to local `HEAD`,
@@ -147,11 +180,12 @@ gates pass:
 
 ```sh
 gh release edit v0.1.0 --draft=false --verify-tag
-gh release view v0.1.0 --json tagName,targetCommitish,isDraft,publishedAt,assets
+gh release view v0.1.0 --json tagName,targetCommitish,isDraft,isPrerelease,publishedAt,assets
 ```
 
-Confirm `isDraft=false`, the tagged target commit, and five public download
-URLs. Merging a pull request, creating a tag, or making a draft does not
+Confirm `isDraft=false`, `isPrerelease=false` for stable or `true` for beta,
+the tagged target commit, and five public download URLs. Merging a pull
+request, creating a tag, or making a draft does not
 deploy or publish a release.
 
 ## Verify a downloaded release
@@ -171,8 +205,9 @@ and `docs/platforms/windows.md`.
 ## Recovery and failure
 
 If a formal build fails after its tag is pushed, leave that tag and any assets
-unchanged. Fix the cause in a new pull request and restart from a new patch
-version; never move, delete, force-update, or reuse a published tag. Keep
+unchanged. Fix the cause in a new pull request and restart from a new stable
+patch or beta number; never move, delete, force-update, or reuse a published
+tag. Keep
 failure logs for diagnosis, but do not record credentials or private-key
 material.
 

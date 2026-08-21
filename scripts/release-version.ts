@@ -2,11 +2,15 @@ import { lstat, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 export type ReleaseMode = "release" | "rehearsal";
+export type ReleaseChannel = "stable" | "beta";
 
 export interface ReleaseVersion {
   tag: string;
+  channel: ReleaseChannel;
   versionName: string;
   androidVersionCode: number;
+  macosShortVersion: string;
+  macosBuildVersion: string;
   artifactDirectory: string;
   androidArtifactName: string;
   macosArtifactName: string;
@@ -18,8 +22,11 @@ export interface ReleaseVersion {
 
 export type GitRunner = (arguments_: string[]) => Promise<string>;
 
-const releaseTagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const releaseTagPattern =
+  /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.(0|[1-9]\d*))?$/;
 const maxAndroidVersionCode = 2_100_000_000n;
+const stableBuildOrdinal = 99n;
+const buildOrdinalsPerVersion = 100n;
 const releaseSecretVariables = [
   "KEPOS_ANDROID_KEYSTORE",
   "KEPOS_ANDROID_KEY_ALIAS",
@@ -66,7 +73,7 @@ export function parseReleaseTag(
   const match = releaseTagPattern.exec(tag);
   if (!match) throw new Error(`invalid release tag: ${JSON.stringify(tag)}`);
 
-  const [, majorText, minorText, patchText] = match;
+  const [, majorText, minorText, patchText, betaText] = match;
   const major = BigInt(majorText);
   const minor = BigInt(minorText);
   const patch = BigInt(patchText);
@@ -74,17 +81,32 @@ export function parseReleaseTag(
     throw new Error(`invalid release tag components: ${tag}`);
   }
 
-  const androidVersionCode = major * 1_000_000n + minor * 1_000n + patch;
+  const channel: ReleaseChannel = betaText === undefined ? "stable" : "beta";
+  const betaNumber = betaText === undefined ? stableBuildOrdinal : BigInt(betaText);
+  if (channel === "beta" && (betaNumber < 1n || betaNumber > 98n)) {
+    throw new Error(`invalid beta number in release tag: ${tag}`);
+  }
+
+  const base = major * 1_000_000n + minor * 1_000n + patch;
+  if (base <= 0n) throw new Error(`invalid release tag components: ${tag}`);
+  const androidVersionCode = base * buildOrdinalsPerVersion + betaNumber;
   if (androidVersionCode <= 0n || androidVersionCode > maxAndroidVersionCode) {
     throw new Error(`release tag is outside Android versionCode range: ${tag}`);
   }
 
-  const versionName = `${majorText}.${minorText}.${patchText}`;
+  const versionName = `${majorText}.${minorText}.${patchText}${
+    betaText === undefined ? "" : `-beta.${betaText}`
+  }`;
+  const macosShortVersion = `${majorText}.${minorText}.${patchText}`;
+  const macosBuildVersion = androidVersionCode.toString();
   const directoryName = mode === "rehearsal" ? `rehearsal-${tag}` : tag;
   return {
     tag,
+    channel,
     versionName,
     androidVersionCode: Number(androidVersionCode),
+    macosShortVersion,
+    macosBuildVersion,
     artifactDirectory: `dist/release/${directoryName}`,
     androidArtifactName: "kepos-android-arm64.apk",
     macosArtifactName: "kepos-macos-arm64.zip",

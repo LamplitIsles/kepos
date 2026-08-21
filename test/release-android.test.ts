@@ -60,6 +60,10 @@ test("parses one strict tag and an optional rehearsal flag", () => {
     parseAndroidReleaseArguments(["v1.2.3", "--rehearsal"]),
     { tag: "v1.2.3", mode: "rehearsal" },
   );
+  assert.deepEqual(parseAndroidReleaseArguments(["v0.3.0-beta.1"]), {
+    tag: "v0.3.0-beta.1",
+    mode: "release",
+  });
   assert.throws(() => parseAndroidReleaseArguments([]), /usage/i);
   assert.throws(
     () => parseAndroidReleaseArguments(["v1.2.3", "--unknown"]),
@@ -95,7 +99,7 @@ test("builds, aligns, signs, and verifies a versioned APK without exposing the p
       "assembleDebug",
       "assembleRelease",
       "-PkeposVersionName=1.2.3",
-      "-PkeposVersionCode=1002003",
+      "-PkeposVersionCode=100200399",
     ],
   });
   assert.deepEqual(plan.commands[3].arguments.slice(0, 5), [
@@ -131,6 +135,31 @@ test("builds, aligns, signs, and verifies a versioned APK without exposing the p
     path.join(
       repository,
       "dist/release/rehearsal-v1.2.3/kepos-android-arm64.apk",
+    ),
+  );
+});
+
+test("passes beta version metadata through to Gradle and the rehearsal directory", () => {
+  const plan = createAndroidReleasePlan({
+    repository,
+    androidHome,
+    keystore,
+    keyAlias: "kepos-release",
+    keyPassword: password,
+    expectedFingerprint: fingerprint,
+    tag: "v0.3.0-beta.1",
+    mode: "rehearsal",
+  });
+
+  assert.deepEqual(plan.commands[2].arguments.slice(-2), [
+    "-PkeposVersionName=0.3.0-beta.1",
+    "-PkeposVersionCode=300001",
+  ]);
+  assert.equal(
+    plan.finalApk,
+    path.join(
+      repository,
+      "dist/release/rehearsal-v0.3.0-beta.1/kepos-android-arm64.apk",
     ),
   );
 });

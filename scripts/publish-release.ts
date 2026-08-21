@@ -129,11 +129,63 @@ export async function publishRelease(
       "--draft",
       "--verify-tag",
       "--generate-notes",
+      ...(paths.version.channel === "beta" ? ["--prerelease"] : []),
       ...assets,
     ],
     allowFailure: false,
   });
   requireSuccess(createResult, "create GitHub release draft");
+
+  const inspection = await execution.run({
+    command: "gh",
+    arguments: [
+      "release",
+      "view",
+      options.tag,
+      "--json",
+      "tagName,isDraft,isPrerelease",
+    ],
+    allowFailure: false,
+  });
+  requireSuccess(inspection, "verify GitHub release draft metadata");
+  verifyCreatedReleaseDraft(
+    inspection.stdout,
+    options.tag,
+    paths.version.channel === "beta",
+  );
+}
+
+function verifyCreatedReleaseDraft(
+  output: string,
+  tag: string,
+  expectedPrerelease: boolean,
+): void {
+  let metadata: unknown;
+  try {
+    metadata = JSON.parse(output);
+  } catch (error) {
+    throw new Error("GitHub release metadata is not valid JSON", { cause: error });
+  }
+  if (
+    typeof metadata !== "object" ||
+    metadata === null ||
+    Array.isArray(metadata)
+  ) {
+    throw new Error("GitHub release metadata has an invalid shape");
+  }
+  const release = metadata as {
+    tagName?: unknown;
+    isDraft?: unknown;
+    isPrerelease?: unknown;
+  };
+  if (release.tagName !== tag || release.isDraft !== true) {
+    throw new Error(`GitHub release draft metadata does not match ${tag}`);
+  }
+  if (release.isPrerelease !== expectedPrerelease) {
+    throw new Error(
+      `GitHub release ${tag} prerelease state must be ${expectedPrerelease}`,
+    );
+  }
 }
 
 function requireSuccess(result: PublishCommandResult, action: string): void {
@@ -175,7 +227,7 @@ async function main(): Promise<void> {
   const repository = fileURLToPath(new URL("..", import.meta.url));
   const [tag, ...extra] = process.argv.slice(2);
   if (!tag || extra.length !== 0) {
-    throw new Error("usage: npm run release:draft -- vMAJOR.MINOR.PATCH");
+    throw new Error("usage: npm run release:draft -- vMAJOR.MINOR.PATCH[-beta.N]");
   }
   await assertReleaseGitState({
     tag,
