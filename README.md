@@ -15,10 +15,11 @@ on the devices that created them. The publisher decides who may connect and can
 apply a narrower allowlist to each service.
 
 > Kepos is a developer preview. Android APKs, Apple Silicon macOS ZIPs, and
-> Windows 11 x64 portable ZIPs are published for direct download with minisign
-> verification. They are not app-store releases; the macOS app is ad-hoc signed
-> and not notarized, and the Windows app is not Authenticode-signed and may
-> trigger SmartScreen.
+> Windows x64 portable ZIPs for Windows 10 x64 build 19045 (22H2) and later plus
+> Windows 11 x64 are published for direct download with minisign verification.
+> They are not app-store releases; the macOS app is ad-hoc signed and not
+> notarized, and the Windows app is not Authenticode-signed and may trigger
+> SmartScreen.
 
 ## Why Kepos exists
 
@@ -62,7 +63,7 @@ The implementation follows four rules:
 | Kubernetes path | Subscriber gateway | Pod-facing hostname routing exists; reusable manifests are not yet shipped here |
 | Android | Subscriber | Android 12+, `arm64-v8a`, sideload-only; one persistent Bare Worklet |
 | macOS | Publisher, subscriber, or both | Apple Silicon, ad-hoc-signed direct-download ZIP, native tray app |
-| Windows | Publisher, subscriber, or both | Windows 11 x64, unsigned portable ZIP, notification-area app |
+| Windows | Publisher, subscriber, or both | Windows 10 x64 build 19045+ and Windows 11 x64, unsigned portable ZIP with optional per-user install, notification-area app |
 
 The direct-download release includes `kepos-android-arm64.apk`,
 `kepos-macos-arm64.zip`, and `kepos-windows-x64.zip`. Verify `SHA256SUMS` with the

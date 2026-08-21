@@ -211,6 +211,55 @@ function Get-ExecutableDependencies {
   return ($output -join "`n")
 }
 
+function Invoke-IconResourceValidation {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Executable,
+    [Parameter(Mandatory = $true)] [string]$ScriptPath,
+    [Parameter(Mandatory = $true)] [string]$Logs,
+    [Parameter(Mandatory = $true)] [string]$Name
+  )
+  if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+    throw "Windows icon validation script is missing: $ScriptPath"
+  }
+  $powershell = Join-Path $PSHOME 'powershell.exe'
+  if (-not (Test-Path -LiteralPath $powershell -PathType Leaf)) { $powershell = 'powershell.exe' }
+  $log = Join-Path $Logs "$Name.log"
+  Write-Host "> $powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $ScriptPath -Mode Validate -Executable $Executable"
+  $previousErrorPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $ScriptPath -Mode Validate -Executable $Executable 2>&1 | Tee-Object -FilePath $log
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorPreference
+  }
+  if ($code -ne 0) { throw "$Name failed with exit code $code; see $log" }
+  Write-Host "${Name}: native icon resources PASS"
+}
+
+function Invoke-InstallerAcceptance {
+  param(
+    [Parameter(Mandatory = $true)] [string]$PayloadRoot,
+    [Parameter(Mandatory = $true)] [string]$RunRoot,
+    [Parameter(Mandatory = $true)] [string]$Repository,
+    [Parameter(Mandatory = $true)] [string]$Logs
+  )
+  $scriptPath = Join-Path $Repository 'scripts\windows\installer-acceptance.ps1'
+  $powershell = Join-Path $PSHOME 'powershell.exe'
+  if (-not (Test-Path -LiteralPath $powershell -PathType Leaf)) { $powershell = 'powershell.exe' }
+  $log = Join-Path $Logs 'installer-acceptance.log'
+  Write-Host "> $powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $scriptPath -PayloadRoot $PayloadRoot -RunRoot $RunRoot"
+  $previousErrorPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $scriptPath -PayloadRoot $PayloadRoot -RunRoot $RunRoot 2>&1 | Tee-Object -FilePath $log
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorPreference
+  }
+  if ($code -ne 0) { throw "installer acceptance failed with exit code $code; see $log" }
+}
+
 function Assert-SelfContainedImports {
   param([Parameter(Mandatory = $true)] [string]$Executable)
   $dependencies = Get-ExecutableDependencies $Executable
@@ -223,6 +272,17 @@ function Assert-SelfContainedImports {
   $runtime = Join-Path (Split-Path -Parent $Executable) 'Microsoft.WindowsAppRuntime.dll'
   if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) {
     throw "Executable import is not backed by a local Windows App Runtime DLL: $runtime"
+  }
+}
+
+function Assert-WindowsInstallerFiles {
+  param([Parameter(Mandatory = $true)] [string]$PackageRoot)
+  foreach ($file in @('Install.cmd', 'install.ps1', 'Uninstall.cmd', 'uninstall.ps1')) {
+    $path = Join-Path $PackageRoot $file
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+      throw "Windows portable package installer file is not a regular file: $path"
+    }
   }
 }
 
@@ -404,6 +464,7 @@ function Invoke-PortableRelease {
   if (-not (Test-Path -LiteralPath $ProductFileSetPath -PathType Leaf)) {
     throw "Windows product file set is missing: $ProductFileSetPath"
   }
+  Assert-WindowsInstallerFiles $sourceRoot
   $fileSet = @(Get-PortableFileSet $sourceRoot)
   $packageRoot = Join-Path $RunDirectory 'package'
   $packageApp = Join-Path $packageRoot 'Kepos'
@@ -435,8 +496,10 @@ function Invoke-PortableRelease {
   New-Item -ItemType Directory -Path $extracted -Force | Out-Null
   Expand-Archive -LiteralPath $artifact -DestinationPath $extracted -Force
   $extractedApp = Join-Path $extracted 'Kepos'
+  Assert-WindowsInstallerFiles $extractedApp
   $extractedSet = @(Get-PortableFileSet $extractedApp)
   if (($fileSet -join "`n") -ne ($extractedSet -join "`n")) { throw 'Windows ZIP changed the validated portable file set' }
+  Invoke-IconResourceValidation (Join-Path $extractedApp 'App\Kepos.exe') (Join-Path $Repository 'scripts\windows\icon-resources.ps1') $Logs 'icon-artifact'
   $script:ReleaseValidationOwned = $true
   Invoke-LoggedNative $Node 'self-contained-runtime-artifact' @(
     '--import',
@@ -817,15 +880,20 @@ try {
   Assert-NoReparsePointsInTree $RepositoryArtifact 'Repository desktop output'
   New-Item -ItemType Directory -Path (Join-Path $RunDirectory 'dist') -Force | Out-Null
   Copy-Item -LiteralPath $RepositoryArtifact -Destination $Artifact -Recurse -Force
-  $StagedExecutable = Join-Path $Artifact 'Kepos\App\Kepos.exe'
+  $StagedPackageRoot = Join-Path $Artifact 'Kepos'
+  Assert-WindowsInstallerFiles $StagedPackageRoot
+  $StagedExecutable = Join-Path $StagedPackageRoot 'App\Kepos.exe'
   if (-not (Test-Path -LiteralPath $StagedExecutable -PathType Leaf)) { throw "staged Kepos.exe was not produced: $StagedExecutable" }
+  Invoke-IconResourceValidation $StagedExecutable (Join-Path $Repository 'scripts\windows\icon-resources.ps1') $Logs 'icon-staged'
   Get-ChildItem -LiteralPath $Artifact -File -Recurse | Select-Object FullName, Length | Format-Table -AutoSize | Out-File (Join-Path $Logs 'artifact-files.txt')
   if ($Workflow -eq 'dogfood') {
     $PackagedSmokeRoot = Join-Path $RunDirectory 'packaged-smoke'
     Assert-SafeOwnedPath $RunDirectory $PackagedSmokeRoot 'packaged smoke root'
     Invoke-PortableSmoke $StagedExecutable $PackagedSmokeRoot (Join-Path $Logs 'packaged-smoke') $BootstrapAsset $Node
+    Invoke-InstallerAcceptance $StagedPackageRoot $RunDirectory $Repository $Logs
   } elseif ($Workflow -eq 'release') {
     Invoke-PortableRelease $Repository $RunDirectory $ProductFileSetPath $Logs $ReleaseArtifactName $ReleaseMode $BootstrapAsset $Node
+    Invoke-InstallerAcceptance (Join-Path $RunDirectory 'extracted\Kepos') $RunDirectory $Repository $Logs
   }
   Write-Host "Windows desktop build complete: $Artifact"
 } catch {

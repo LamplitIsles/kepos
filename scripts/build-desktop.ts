@@ -1,4 +1,5 @@
 import {
+  copyFile,
   lstat,
   mkdir,
   readFile,
@@ -25,6 +26,13 @@ import { stageWindowsSelfContainedRuntime } from "./windows/self-contained-runti
 export type DesktopTarget = "darwin-arm64" | "win32-x64";
 
 const desktopTargets: readonly DesktopTarget[] = ["darwin-arm64", "win32-x64"];
+
+export const WINDOWS_INSTALLER_FILES = [
+  "Install.cmd",
+  "install.ps1",
+  "Uninstall.cmd",
+  "uninstall.ps1",
+] as const;
 
 export interface DesktopBuildCommand {
   command: string;
@@ -315,6 +323,17 @@ function windowsPlan(
         winUi,
       ],
     },
+    {
+      command: "powershell",
+      arguments: [
+        "-Mode",
+        "EmbedAndValidate",
+        "-Executable",
+        path.join(desktopWindowsApp(repository), "App", "Kepos.exe"),
+        "-Icon",
+        path.join(repository, "apps", "desktop", "assets", "Kepos.ico"),
+      ],
+    },
   ];
 }
 
@@ -416,6 +435,7 @@ export async function runDesktopBuild(
           { mode: 0o644 },
         );
       }
+      await stageWindowsInstallerFiles(repository);
       process.stdout.write(
         `Windows self-contained runtime staged: ${runtime.fileCount} runtime files, ${runtime.productFiles.length} product files, manifest ${runtime.manifestSha256}\n`,
       );
@@ -489,6 +509,9 @@ async function validateWindowsOutput(repository: string): Promise<void> {
   await requireFile(path.join(output, "Microsoft.WindowsAppRuntime.dll"));
   await requireFile(path.join(app, "AppxManifest.xml"));
   await requireFile(path.join(app, "Assets", "Logo.ico"));
+  for (const installerFile of WINDOWS_INSTALLER_FILES) {
+    await requireFile(path.join(app, installerFile));
+  }
   for (const required of [
     "bare-win-ui-",
     "Microsoft.Web.WebView2.Core.dll",
@@ -515,6 +538,17 @@ async function requireFile(file: string): Promise<void> {
   }
 }
 
+async function stageWindowsInstallerFiles(repository: string): Promise<void> {
+  const destinationRoot = desktopWindowsApp(repository);
+  for (const file of WINDOWS_INSTALLER_FILES) {
+    const source = path.join(repository, "scripts", "windows", file);
+    const destination = path.join(destinationRoot, file);
+    await requireFile(source);
+    await mkdir(destinationRoot, { recursive: true });
+    await copyFile(source, destination);
+  }
+}
+
 function commandPath(repository: string, command: string): string {
   return path.join(repository, "node_modules", ".bin", command);
 }
@@ -526,6 +560,10 @@ const windowsCommandEntrypoints: Readonly<Record<string, string>> = {
   "bare-link": "bare-link/bin.js",
 };
 
+const windowsNativeCommands: Readonly<Record<string, string>> = {
+  powershell: "powershell.exe",
+};
+
 async function run(
   repository: string,
   build: DesktopBuildCommand,
@@ -533,12 +571,25 @@ async function run(
 ): Promise<void> {
   const windows = target === "win32-x64";
   const windowsEntrypoint = windowsCommandEntrypoints[build.command];
-  if (windows && windowsEntrypoint === undefined) {
+  const windowsNativeCommand = windowsNativeCommands[build.command];
+  if (windows && windowsEntrypoint === undefined && windowsNativeCommand === undefined) {
     throw new Error(`unsupported Windows desktop build command: ${build.command}`);
   }
-  const command = windows ? process.execPath : commandPath(repository, build.command);
+  const command = windows
+    ? windowsNativeCommand ?? process.execPath
+    : commandPath(repository, build.command);
   const arguments_ = windows
-    ? [path.join(repository, "node_modules", windowsEntrypoint), ...build.arguments]
+    ? windowsNativeCommand !== undefined
+      ? [
+          "-NoLogo",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          path.join(repository, "scripts", "windows", "icon-resources.ps1"),
+          ...build.arguments,
+        ]
+      : [path.join(repository, "node_modules", windowsEntrypoint!), ...build.arguments]
     : build.arguments;
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, arguments_, {

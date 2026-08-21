@@ -21,6 +21,12 @@ const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const powerShellOnWsl = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
 const buildScript = path.join(repository, "scripts", "windows", "build-kepos.ps1");
 const pchCacheScript = path.join(repository, "scripts", "windows", "pch-cache.ps1");
+const windowsInstallerScripts = [
+  "icon-resources.ps1",
+  "install.ps1",
+  "uninstall.ps1",
+  "installer-acceptance.ps1",
+];
 const controlScript = path.join(repository, "scripts", "windows", "nuc-kep.sh");
 const trackedManifestScript = path.join(
   repository,
@@ -406,6 +412,27 @@ test("Windows build PowerShell parses with the supported Windows PowerShell", (t
     { encoding: "utf8" },
   );
 
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("Windows installer and icon PowerShell scripts parse with Windows PowerShell", (t) => {
+  const scripts = [buildScript, ...windowsInstallerScripts.map((name) => path.join(repository, "scripts", "windows", name))];
+  const windowsScripts = scripts.map(windowsPath);
+  if (windowsScripts.some((script) => !script)) {
+    t.skip("the exact Windows PowerShell executable is unavailable");
+    return;
+  }
+
+  const powershell = process.platform === "win32" ? "powershell.exe" : powerShellOnWsl;
+  const quote = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+  const command = windowsScripts
+    .map((script) => `[System.Management.Automation.Language.Parser]::ParseFile(${quote(script!)}, [ref]$tokens, [ref]$errors) > $null; if ($errors.Count -gt 0) { $errors | Out-Host; exit 1 }`)
+    .join("; ");
+  const result = spawnSync(
+    powershell,
+    ["-NoProfile", "-NonInteractive", "-Command", `$tokens = $null; $errors = $null; ${command}`],
+    { encoding: "utf8" },
+  );
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 

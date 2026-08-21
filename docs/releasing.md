@@ -1,14 +1,14 @@
 # Release and artifact verification
 
 Kepos publishes three direct-download binaries for a release: an arm64
-Android APK, an Apple Silicon macOS ZIP, and a Windows 11 x64 portable ZIP.
+Android APK, an Apple Silicon macOS ZIP, and a Windows x64 portable ZIP for
+Windows 10 x64 build 19045 (22H2) and later plus Windows 11 x64.
 `SHA256SUMS` covers exactly those three files and
 `SHA256SUMS.minisig` authenticates that manifest. Android uses the long-lived
 release certificate. macOS is ad-hoc signed and **not notarized**. Windows is
 not Authenticode-signed. Beta releases are GitHub prereleases; the website's
 `releases/latest/download` links remain stable-only and do not move to beta
-artifacts. The beta channel does not claim Windows 10 support; that remains
-outside the release contract until its external artifact matrix passes.
+artifacts.
 
 ## Maintainer runbook
 
@@ -73,15 +73,16 @@ separately generated `kepos-bootstrap.json` sidecar to `nuc-kep`, invokes
 `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`, builds in the
 NTFS `C:\kb` workspace, and copies back only the verified
 `kepos-windows-x64.zip`. The ZIP has one top-level `Kepos` directory:
-`AppxManifest.xml` and `Assets\Logo.ico` are beside `App\Kepos.exe` and its
+`AppxManifest.xml`, `Assets\Logo.ico`, `Install.cmd`, `install.ps1`,
+`Uninstall.cmd`, and `uninstall.ps1` are beside `App\Kepos.exe` and its
 explicitly allowlisted runtime files. The remote side resolves the annotated
-tag against the release Mac `HEAD`, validates the exact layout and x64 PE
-architecture, extracts into fresh empty test-owned directories, and launches the
+tag against the release Mac `HEAD`, validates the exact layout, x64 PE
+architecture, embedded icon, and installer file set, extracts into fresh
+empty test-owned directories, and launches the
 packaged app with test-owned state to prove a real first-run render over the
-WebView bridge: the app bootstraps its own subscriber identity, records the
-rendered-page acknowledgement, reports a healthy unconfigured subscriber
-snapshot, and quits cleanly (ready, rendered, and quit markers) before the ZIP
-is accepted. Failed runs retain logs under
+WebView bridge. It then runs the real CMD installer, shortcut, upgrade, repair,
+running-process refusal, rollback, uninstall, deferred-cleanup, and
+mutable-state-preservation matrix before the ZIP is accepted. Failed runs retain logs under
 `dist/windows/<run-id>/logs` but remove partial publishable ZIPs.
 
 For a no-tag local rehearsal, use the isolated path:
