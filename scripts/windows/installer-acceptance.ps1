@@ -149,7 +149,7 @@ function Invoke-InstalledSmoke {
   )
   Assert-File $Executable
   New-Item -ItemType Directory -Path $SmokeRoot, $AppData, $LocalAppData -Force | Out-Null
-  $home = Join-Path $SmokeRoot 'home'
+  $smokeHome = Join-Path $SmokeRoot 'home'
   $webViewData = Join-Path $SmokeRoot 'WebView2'
   $ready = Join-Path $SmokeRoot 'ready.marker'
   $rendered = Join-Path $SmokeRoot 'rendered.marker'
@@ -157,11 +157,11 @@ function Invoke-InstalledSmoke {
   foreach ($marker in @($ready, $rendered, $quit)) {
     if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
   }
-  New-Item -ItemType Directory -Path $home, $webViewData -Force | Out-Null
+  New-Item -ItemType Directory -Path $smokeHome, $webViewData -Force | Out-Null
 
   $startInfo = New-Object System.Diagnostics.ProcessStartInfo
   $startInfo.FileName = $Executable
-  $startInfo.Arguments = "--smoke-test --smoke-home $(Get-QuotedCmdPart $home)"
+  $startInfo.Arguments = "--smoke-test --smoke-home $(Get-QuotedCmdPart $smokeHome)"
   $startInfo.WorkingDirectory = Split-Path -Parent $Executable
   $startInfo.UseShellExecute = $false
   $startInfo.RedirectStandardOutput = $false
