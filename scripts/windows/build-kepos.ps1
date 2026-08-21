@@ -188,19 +188,6 @@ function Get-PortableRelativePath {
   return $File.FullName.Substring($prefix.Length).Replace('/', '\')
 }
 
-function Assert-Pe64 {
-  param([Parameter(Mandatory = $true)] [string]$Executable)
-  $bytes = [System.IO.File]::ReadAllBytes($Executable)
-  if ($bytes.Length -lt 64) { throw "Windows executable is truncated: $Executable" }
-  $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3c)
-  if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length) { throw "Windows executable has an invalid PE header: $Executable" }
-  if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) {
-    throw "Windows executable is not a PE image: $Executable"
-  }
-  $machine = [System.BitConverter]::ToUInt16($bytes, $peOffset + 4)
-  if ($machine -ne 0x8664) { throw "Windows executable must be x64; machine was 0x$('{0:x4}' -f $machine)" }
-}
-
 function Get-ExecutableDependencies {
   param([Parameter(Mandatory = $true)] [string]$Executable)
   $dumpbin = Get-Command dumpbin.exe -CommandType Application -ErrorAction Stop
@@ -499,7 +486,9 @@ function Invoke-PortableRelease {
   Assert-WindowsInstallerFiles $extractedApp
   $extractedSet = @(Get-PortableFileSet $extractedApp)
   if (($fileSet -join "`n") -ne ($extractedSet -join "`n")) { throw 'Windows ZIP changed the validated portable file set' }
-  Invoke-IconResourceValidation (Join-Path $extractedApp 'App\Kepos.exe') (Join-Path $Repository 'scripts\windows\icon-resources.ps1') $Logs 'icon-artifact'
+  $extractedExecutable = Join-Path $extractedApp 'App\Kepos.exe'
+  & (Join-Path $Repository 'scripts\windows\assert-pe64.ps1') -Executable $extractedExecutable
+  Invoke-IconResourceValidation $extractedExecutable (Join-Path $Repository 'scripts\windows\icon-resources.ps1') $Logs 'icon-artifact'
   $script:ReleaseValidationOwned = $true
   Invoke-LoggedNative $Node 'self-contained-runtime-artifact' @(
     '--import',
@@ -900,6 +889,7 @@ try {
   Assert-WindowsInstallerFiles $StagedPackageRoot
   $StagedExecutable = Join-Path $StagedPackageRoot 'App\Kepos.exe'
   if (-not (Test-Path -LiteralPath $StagedExecutable -PathType Leaf)) { throw "staged Kepos.exe was not produced: $StagedExecutable" }
+  & (Join-Path $Repository 'scripts\windows\assert-pe64.ps1') -Executable $StagedExecutable
   Invoke-IconResourceValidation $StagedExecutable (Join-Path $Repository 'scripts\windows\icon-resources.ps1') $Logs 'icon-staged'
   Get-ChildItem -LiteralPath $Artifact -File -Recurse | Select-Object FullName, Length | Format-Table -AutoSize | Out-File (Join-Path $Logs 'artifact-files.txt')
   if ($Workflow -eq 'dogfood') {
