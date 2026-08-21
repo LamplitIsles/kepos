@@ -85,7 +85,7 @@ public static class KeposWindowsIconResources
         return UpdateResource(update, MakeIntResource(14), MakeIntResource(resourceId), 0, data, checked((uint)data.Length));
     }
 
-    public static bool End(IntPtr update, bool discard)
+    public static bool Finish(IntPtr update, bool discard)
     {
         return EndUpdateResource(update, discard);
     }
@@ -317,13 +317,13 @@ function Embed-IconResources {
     if (-not [KeposWindowsIconResources]::UpdateGroup($update, 1, $group)) {
       throw "UpdateResourceW failed for RT_GROUP_ICON (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
     }
-    if (-not [KeposWindowsIconResources]::End($update, $false)) {
+    if (-not [KeposWindowsIconResources]::Finish($update, $false)) {
       throw "EndUpdateResourceW failed for $ExecutablePath (Win32 error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
     }
     $finished = $true
   } finally {
     if (-not $finished) {
-      [KeposWindowsIconResources]::End($update, $true) | Out-Null
+      [KeposWindowsIconResources]::Finish($update, $true) | Out-Null
     }
   }
 }
