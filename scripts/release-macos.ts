@@ -53,7 +53,8 @@ export function macosReleaseEnvironment(
 
 export interface MacosReleasePaths {
   repository: string;
-  versionName: string;
+  macosShortVersion: string;
+  macosBuildVersion: string;
   artifactDirectory: string;
   app: string;
   executable: string;
@@ -80,7 +81,7 @@ export function parseMacosReleaseArguments(arguments_: string[]): {
   const rehearsal = arguments_.includes("--rehearsal");
   const positional = arguments_.filter((argument) => argument !== "--rehearsal");
   if (positional.length !== 1) {
-    throw new Error("usage: npm run release:macos -- vMAJOR.MINOR.PATCH [--rehearsal]");
+    throw new Error("usage: npm run release:macos -- vMAJOR.MINOR.PATCH[-beta.N] [--rehearsal]");
   }
   return { tag: positional[0], mode: rehearsal ? "rehearsal" : "release" };
 }
@@ -102,7 +103,8 @@ export function createMacosReleasePaths(options: {
   const unpackedApp = path.join(options.unpackDirectory, "Kepos.app");
   return {
     repository: options.repository,
-    versionName: version.versionName,
+    macosShortVersion: version.macosShortVersion,
+    macosBuildVersion: version.macosBuildVersion,
     artifactDirectory: path.join(options.repository, version.artifactDirectory),
     app,
     executable: path.join(app, "Contents/MacOS/Kepos"),
@@ -161,7 +163,7 @@ export function macosSigningCommands(
         "-replace",
         "CFBundleShortVersionString",
         "-string",
-        paths.versionName,
+        paths.macosShortVersion,
         paths.plist,
       ],
     },
@@ -172,7 +174,7 @@ export function macosSigningCommands(
         "-replace",
         "CFBundleVersion",
         "-string",
-        paths.versionName,
+        paths.macosBuildVersion,
         paths.plist,
       ],
     },
@@ -263,7 +265,12 @@ export async function releaseMacos(
     const frameworks = await execution.listFrameworks(paths.frameworksDirectory);
     for (const command of macosSigningCommands(paths, frameworks)) {
       const output = await execution.run(command);
-      validateMacosCommandOutput(command.kind, output, paths.versionName);
+      validateMacosCommandOutput(
+        command.kind,
+        output,
+        paths.macosShortVersion,
+        paths.macosBuildVersion,
+      );
     }
     await execution.removeTree(paths.unpackDirectory);
     return paths;
@@ -277,7 +284,8 @@ export async function releaseMacos(
 function validateMacosCommandOutput(
   kind: MacosReleaseCommandKind,
   output: string,
-  versionName: string,
+  macosShortVersion: string,
+  macosBuildVersion: string,
 ): void {
   if (kind === "architecture" || kind === "inspect-archive-architecture") {
     if (output.trim() !== "arm64") {
@@ -292,8 +300,11 @@ function validateMacosCommandOutput(
     return;
   }
   if (kind.includes("inspect") && kind.includes("version")) {
-    if (output.trim() !== versionName) {
-      throw new Error(`macOS release version must be ${versionName}`);
+    const expected = kind.includes("short")
+      ? macosShortVersion
+      : macosBuildVersion;
+    if (output.trim() !== expected) {
+      throw new Error(`macOS release version must be ${expected}`);
     }
   }
 }

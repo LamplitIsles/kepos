@@ -15,9 +15,10 @@ import { test } from "node:test";
 import {
   createReleaseManifest,
   parseManifestReleaseArguments,
+  releaseArtifactPaths,
 } from "../scripts/release-manifest.js";
 
-async function fixture(): Promise<{
+async function fixture(tag = "v1.2.3"): Promise<{
   repository: string;
   directory: string;
   apk: string;
@@ -26,7 +27,7 @@ async function fixture(): Promise<{
   cleanup(): Promise<void>;
 }> {
   const repository = await mkdtemp(path.join(os.tmpdir(), "kepos-manifest-test-"));
-  const directory = path.join(repository, "dist/release/rehearsal-v1.2.3");
+  const directory = path.join(repository, `dist/release/rehearsal-${tag}`);
   await mkdir(directory, { recursive: true });
   const apk = path.join(directory, "kepos-android-arm64.apk");
   const zip = path.join(directory, "kepos-macos-arm64.zip");
@@ -53,18 +54,38 @@ test("parses one strict tag and an optional rehearsal flag", () => {
     parseManifestReleaseArguments(["v1.2.3", "--rehearsal"]),
     { tag: "v1.2.3", mode: "rehearsal" },
   );
+  assert.deepEqual(parseManifestReleaseArguments(["v0.3.0-beta.1"]), {
+    tag: "v0.3.0-beta.1",
+    mode: "release",
+  });
   assert.throws(() => parseManifestReleaseArguments([]), /usage/i);
 });
 
-test("writes stable checksums, signs them, and verifies both layers", async () => {
-  const files = await fixture();
+test("uses the beta artifact directory with the stable asset names", () => {
+  const paths = releaseArtifactPaths({
+    repository: "/tmp/kepos-manifest-repository",
+    tag: "v0.3.0-beta.1",
+    mode: "rehearsal",
+  });
+
+  assert.equal(
+    paths.directory,
+    "/tmp/kepos-manifest-repository/dist/release/rehearsal-v0.3.0-beta.1",
+  );
+  assert.equal(path.basename(paths.apk), "kepos-android-arm64.apk");
+  assert.equal(path.basename(paths.macosZip), "kepos-macos-arm64.zip");
+  assert.equal(path.basename(paths.windowsZip), "kepos-windows-x64.zip");
+});
+
+test("writes beta checksums, signs them, and verifies both layers", async () => {
+  const files = await fixture("v0.3.0-beta.1");
   const secretKey = path.join(path.dirname(files.repository), "minisign.key");
   const commands: Array<{ command: string; arguments: string[] }> = [];
   try {
     const result = await createReleaseManifest(
       {
         repository: files.repository,
-        tag: "v1.2.3",
+        tag: "v0.3.0-beta.1",
         mode: "rehearsal",
         secretKey,
       },
@@ -87,10 +108,10 @@ test("writes stable checksums, signs them, and verifies both layers", async () =
         `${digest("macos artifact")}  kepos-macos-arm64.zip\n` +
         `${digest("windows artifact")}  kepos-windows-x64.zip\n`,
     );
-    assert.deepEqual(commands.map(({ arguments: commandArguments }) => commandArguments[0]), [
-      "-S",
-      "-V",
-    ]);
+    assert.deepEqual(
+      commands.map(({ arguments: commandArguments }) => commandArguments[0]),
+      ["-S", "-V"],
+    );
     assert.equal(commands[0].arguments.includes(secretKey), true);
     assert.doesNotMatch(JSON.stringify(commands), /password/i);
   } finally {

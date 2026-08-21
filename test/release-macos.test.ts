@@ -23,6 +23,10 @@ test("parses one strict tag and an optional rehearsal flag", () => {
     parseMacosReleaseArguments(["--rehearsal", "v1.2.3"]),
     { tag: "v1.2.3", mode: "rehearsal" },
   );
+  assert.deepEqual(parseMacosReleaseArguments(["v0.3.0-beta.1"]), {
+    tag: "v0.3.0-beta.1",
+    mode: "release",
+  });
   assert.throws(() => parseMacosReleaseArguments([]), /usage/i);
   assert.throws(
     () => parseMacosReleaseArguments(["v1.2.3", "--unknown"]),
@@ -79,6 +83,18 @@ test("signs frameworks in sorted inner-to-outer order before read-only checks", 
   ]);
   assert.equal(commands[3].arguments.at(-1), frameworks[1]);
   assert.equal(commands[4].arguments.at(-1), frameworks[0]);
+  assert.deepEqual(commands[1].arguments.slice(0, 4), [
+    "-replace",
+    "CFBundleShortVersionString",
+    "-string",
+    "1.2.3",
+  ]);
+  assert.deepEqual(commands[2].arguments.slice(0, 4), [
+    "-replace",
+    "CFBundleVersion",
+    "-string",
+    "100200399",
+  ]);
   assert.deepEqual(commands[5], {
     kind: "sign-app",
     command: "codesign",
@@ -89,6 +105,40 @@ test("signs frameworks in sorted inner-to-outer order before read-only checks", 
       commandArguments.includes("--force"),
     ),
     false,
+  );
+});
+
+test("uses numeric macOS bundle versions for beta artifacts", () => {
+  const paths = createMacosReleasePaths({
+    repository,
+    unpackDirectory,
+    tag: "v0.3.0-beta.1",
+    mode: "rehearsal",
+  });
+  const commands = macosSigningCommands(paths, [
+    path.join(paths.frameworksDirectory, "bare-app-kit.framework"),
+  ]);
+
+  assert.equal(paths.macosShortVersion, "0.3.0");
+  assert.equal(paths.macosBuildVersion, "300001");
+  assert.deepEqual(commands[1].arguments.slice(0, 4), [
+    "-replace",
+    "CFBundleShortVersionString",
+    "-string",
+    "0.3.0",
+  ]);
+  assert.deepEqual(commands[2].arguments.slice(0, 4), [
+    "-replace",
+    "CFBundleVersion",
+    "-string",
+    "300001",
+  ]);
+  assert.equal(
+    paths.macosZip,
+    path.join(
+      repository,
+      "dist/release/rehearsal-v0.3.0-beta.1/kepos-macos-arm64.zip",
+    ),
   );
 });
 
@@ -131,7 +181,8 @@ test("builds before enumeration and validates the archive round trip", async () 
         events.push(command.kind);
         if (command.kind.includes("architecture")) return "arm64\n";
         if (command.kind.includes("signature")) return "Signature=adhoc\n";
-        if (command.kind.includes("version")) return "1.2.3\n";
+        if (command.kind.includes("version-short")) return "1.2.3\n";
+        if (command.kind.includes("version-build")) return "100200399\n";
         return "";
       },
       listFrameworks: async (directory) => {

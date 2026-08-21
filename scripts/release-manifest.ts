@@ -38,7 +38,7 @@ export function parseManifestReleaseArguments(arguments_: string[]): {
   const rehearsal = arguments_.includes("--rehearsal");
   const positional = arguments_.filter((argument) => argument !== "--rehearsal");
   if (positional.length !== 1) {
-    throw new Error("usage: npm run release:manifest -- vMAJOR.MINOR.PATCH [--rehearsal]");
+    throw new Error("usage: npm run release:manifest -- vMAJOR.MINOR.PATCH[-beta.N] [--rehearsal]");
   }
   return { tag: positional[0], mode: rehearsal ? "rehearsal" : "release" };
 }

@@ -10,14 +10,14 @@ import {
   publishRelease,
 } from "../scripts/publish-release.js";
 
-async function fixture(): Promise<{
+async function fixture(tag = "v1.2.3"): Promise<{
   repository: string;
   directory: string;
   assets: string[];
   cleanup(): Promise<void>;
 }> {
   const repository = await mkdtemp(path.join(os.tmpdir(), "kepos-publish-test-"));
-  const directory = path.join(repository, "dist/release/v1.2.3");
+  const directory = path.join(repository, `dist/release/${tag}`);
   await mkdir(path.join(repository, "release"), { recursive: true });
   await mkdir(directory, { recursive: true });
   const apkName = "kepos-android-arm64.apk";
@@ -86,6 +86,17 @@ test("verifies five fixed assets and creates only a GitHub draft", async () => {
             };
           }
           if (command.command === "gh" && command.arguments[1] === "view") {
+            if (command.arguments.some((argument) => argument.includes("isPrerelease"))) {
+              return {
+                exitCode: 0,
+                stdout: JSON.stringify({
+                  tagName: "v1.2.3",
+                  isDraft: true,
+                  isPrerelease: false,
+                }),
+                stderr: "",
+              };
+            }
             return { exitCode: 1, stdout: "", stderr: "release not found" };
           }
           return { exitCode: 0, stdout: "", stderr: "" };
@@ -110,7 +121,66 @@ test("verifies five fixed assets and creates only a GitHub draft", async () => {
       ],
       allowFailure: false,
     });
-    assert.doesNotMatch(JSON.stringify(create), /\*|--clobber/);
+    assert.doesNotMatch(JSON.stringify(create), /\*|--clobber|--prerelease/);
+  } finally {
+    await files.cleanup();
+  }
+});
+
+test("creates beta drafts as prereleases and verifies the GitHub state", async () => {
+  const files = await fixture("v0.3.0-beta.1");
+  const head = "a".repeat(40);
+  const commands: Array<{ command: string; arguments: string[] }> = [];
+  try {
+    await publishRelease(
+      { repository: files.repository, tag: "v0.3.0-beta.1", mode: "release" },
+      {
+        run: async (command) => {
+          commands.push(command);
+          if (command.command === "git" && command.arguments[0] === "rev-parse") {
+            return { exitCode: 0, stdout: `${head}\n`, stderr: "" };
+          }
+          if (command.command === "git") {
+            return {
+              exitCode: 0,
+              stdout:
+                `${"b".repeat(40)}\trefs/tags/v0.3.0-beta.1\n` +
+                `${head}\trefs/tags/v0.3.0-beta.1^{}\n`,
+              stderr: "",
+            };
+          }
+          if (command.command === "gh" && command.arguments[1] === "view") {
+            if (command.arguments.some((argument) => argument.includes("isPrerelease"))) {
+              return {
+                exitCode: 0,
+                stdout: JSON.stringify({
+                  tagName: "v0.3.0-beta.1",
+                  isDraft: true,
+                  isPrerelease: true,
+                }),
+                stderr: "",
+              };
+            }
+            return { exitCode: 1, stdout: "", stderr: "release not found" };
+          }
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+      },
+    );
+
+    const create = commands.find(
+      ({ command, arguments: commandArguments }) =>
+        command === "gh" && commandArguments[1] === "create",
+    );
+    assert.ok(create);
+    assert.equal(create.arguments.includes("--prerelease"), true);
+    const inspection = commands.find(
+      ({ command, arguments: commandArguments }) =>
+        command === "gh" &&
+        commandArguments[1] === "view" &&
+        commandArguments.some((argument) => argument.includes("isPrerelease")),
+    );
+    assert.ok(inspection);
   } finally {
     await files.cleanup();
   }
