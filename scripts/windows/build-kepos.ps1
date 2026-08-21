@@ -819,7 +819,7 @@ try {
     # self-contained Windows App Runtime files as the product. bare-build only
     # copies the adapter's direct DLL, so complete the test output from the
     # freshly installed, test-owned prebuild before launching it.
-    $NativeCheckApp = Join-Path $NativeCheck 'App'
+    $NativeCheckApp = Join-Path $NativeCheck 'bare-win-ui\App'
     $NativeRuntime = Join-Path $TestWinUi 'prebuilds\win32-x64\bare'
     Assert-SafeOwnedPath $NativeCheck $NativeRuntime 'bare-win-ui test runtime'
     Assert-SafeOwnedPath $NativeCheck $NativeCheckApp 'bare-win-ui test executable directory'
@@ -831,7 +831,7 @@ try {
       }
       Copy-Item -LiteralPath $runtimeItem.FullName -Destination (Join-Path $NativeCheckApp $runtimeItem.Name) -Recurse -Force
     }
-  $NativeExecutable = Get-Item -LiteralPath (Join-Path $NativeCheck 'App\bare-win-ui.exe') -Force -ErrorAction SilentlyContinue
+  $NativeExecutable = Get-Item -LiteralPath (Join-Path $NativeCheck 'bare-win-ui\App\bare-win-ui.exe') -Force -ErrorAction SilentlyContinue
   if ($null -eq $NativeExecutable) { throw "bare-win-ui native check produced no executable under $NativeCheck" }
   # Inherit both probe streams so a child filling either pipe cannot deadlock
   # the bounded wait. Transcript captures console output; this result log is an
