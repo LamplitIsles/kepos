@@ -501,6 +501,7 @@ npm run kepos -- subscriber run \
               </p>
             </header>
 
+            <p class="docs-compare-legend"><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span>Documented capability</span></span><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span>Not in the current documented model</span></span></p>
             <p class="docs-table-hint">On narrow screens, scroll horizontally to see all columns.</p>
             <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: horizontal table overflow needs keyboard scrolling -->
             <section class="docs-table-wrap" aria-label="Kepos and Holesail comparison" tabindex="0">
@@ -515,36 +516,46 @@ npm run kepos -- subscriber run \
                 </thead>
                 <tbody>
                   <tr>
-                    <th scope="row">Unit of sharing</th>
-                    <td>A persistent publisher/subscriber device relationship with a named service registry.</td>
-                    <td>The official workflow starts a server for a local port and gives a client a connection key or QR flow.</td>
+                    <th scope="row">Direct encrypted P2P</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Authenticated HyperDHT connection.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Direct encrypted tunnel.</span></span></td>
                   </tr>
                   <tr>
-                    <th scope="row">Authorization</th>
-                    <td>Separate device-owned identities, a pinned publisher key, publisher allowlists, and optional per-service allowlists.</td>
-                    <td>The documented connection-key model lets the holder of the key connect to the shared tunnel.</td>
+                    <th scope="row">Persistent device relationship</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Separate publisher and subscriber identities.</span></span></td>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> The documented model uses a shared tunnel key.</span></span></td>
                   </tr>
                   <tr>
-                    <th scope="row">Multiple services</th>
-                    <td>Several named services can use independent channels over one authenticated outer connection and appear through native actions or local listeners.</td>
-                    <td>The documented quickstart is port-oriented: start a port with <code>holesail --live &lt;PORT&gt;</code>, then connect with the resulting key.</td>
+                    <th scope="row">Named multi-service registry</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Named services share one outer connection.</span></span></td>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> The documented quickstart is one local port per tunnel.</span></span></td>
                   </tr>
                   <tr>
-                    <th scope="row">Protocol boundary</th>
-                    <td>The current Kepos service path is TCP-only, including its split local TCP byte-stream proxy.</td>
-                    <td>Holesail's official repository and docs explicitly describe TCP and UDP support.</td>
+                    <th scope="row">Per-service allowlists</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Services may narrow the publisher allowlist.</span></span></td>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Authorization is documented at the tunnel key.</span></span></td>
                   </tr>
                   <tr>
-                    <th scope="row">Best fit</th>
-                    <td>Long-lived trusted devices sharing named services with visible local presentation and per-service policy.</td>
-                    <td>A quick direct tunnel for a chosen port, including use cases that need UDP.</td>
+                    <th scope="row">TCP service path</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Local TCP ends at each Kepos peer.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> TCP tunnels are supported.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">UDP service path</th>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Kepos services are currently TCP-only.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Official docs include UDP tunnels.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">One-command port sharing</th>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Kepos starts from a device and service policy.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Start with <code>holesail --live &lt;PORT&gt;</code>.</span></span></td>
                   </tr>
                 </tbody>
               </table>
             </section>
             <p>
-              These are different tools for different needs, not a benchmark or a claim of affiliation. Read Holesail's
-              current primary sources for its own behavior:
+              Choose Kepos for long-lived devices and named service policy; choose Holesail for a quick port tunnel or
+              UDP. The indicators describe current documented capabilities, not a quality score. Sources:
             </p>
             <ul class="docs-source-list">
               <li><a href="https://github.com/holesail/holesail" target="_blank" rel="noreferrer">Holesail official repository</a> — overview and API flags.</li>
