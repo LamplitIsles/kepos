@@ -7,6 +7,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, "index.html"),
         docs: resolve(import.meta.dirname, "docs/index.html"),
+        verify: resolve(import.meta.dirname, "docs/verify/index.html"),
         notFound: resolve(import.meta.dirname, "404.html"),
       },
     },

@@ -64,12 +64,12 @@
             <p>Start here</p>
             <a href="#start" data-section-link="start" aria-current="location">Overview</a>
             <a href="#platforms" data-section-link="platforms">Platforms and install</a>
-            <a href="#verify" data-section-link="verify">Verify downloads</a>
           </div>
           <div class="docs-nav-group">
             <p>Roles</p>
             <a href="#subscriber" data-section-link="subscriber">Subscriber</a>
-            <a href="#publisher" data-section-link="publisher">Publisher</a>
+            <a href="#publisher-desktop" data-section-link="publisher-desktop">Publisher (Desktop)</a>
+            <a href="#publisher-cli" data-section-link="publisher-cli">Publisher (CLI)</a>
           </div>
           <div class="docs-nav-group">
             <p>Trust and boundaries</p>
@@ -80,7 +80,6 @@
           <div class="docs-nav-group">
             <p>Problem solving</p>
             <a href="#troubleshooting" data-section-link="troubleshooting">Troubleshooting</a>
-            <a href="#advanced" data-section-link="advanced">Advanced publishers</a>
           </div>
         </nav>
       </details>
@@ -93,12 +92,12 @@
               <p>Start here</p>
               <a href="#start" data-section-link="start" aria-current="location">Overview</a>
               <a href="#platforms" data-section-link="platforms">Platforms and install</a>
-              <a href="#verify" data-section-link="verify">Verify downloads</a>
             </div>
             <div class="docs-nav-group">
               <p>Roles</p>
               <a href="#subscriber" data-section-link="subscriber">Subscriber</a>
-              <a href="#publisher" data-section-link="publisher">Publisher</a>
+              <a href="#publisher-desktop" data-section-link="publisher-desktop">Publisher (Desktop)</a>
+              <a href="#publisher-cli" data-section-link="publisher-cli">Publisher (CLI)</a>
             </div>
             <div class="docs-nav-group">
               <p>Trust and boundaries</p>
@@ -109,7 +108,6 @@
             <div class="docs-nav-group">
               <p>Problem solving</p>
               <a href="#troubleshooting" data-section-link="troubleshooting">Troubleshooting</a>
-              <a href="#advanced" data-section-link="advanced">Advanced publishers</a>
             </div>
           </nav>
         </aside>
@@ -125,9 +123,9 @@
             </p>
 
             <nav class="docs-entry-list" aria-label="Getting started paths">
-              <a href="#publisher">
+              <a href="#publisher-desktop">
                 <span class="docs-entry-number">01</span>
-                <span><strong>Share services from this device</strong><small>Set up a publisher, choose services, and approve a subscriber.</small></span>
+                <span><strong>Share services from this device</strong><small>Set up a desktop publisher, choose services, and approve a subscriber.</small></span>
                 <i data-lucide="arrow-right" aria-hidden="true"></i>
               </a>
               <a href="#subscriber">
@@ -209,6 +207,10 @@
               </table>
             </section>
             <p class="docs-status"><i data-lucide="circle-check" aria-hidden="true"></i><span data-platform-recommendation role="status">All three downloads stay available.</span></p>
+            <p class="docs-related">
+              Optional: <a href="/docs/verify/">verify a downloaded release</a> before opening it. The reference covers
+              the release manifest, SHA-256 checks, and Minisign signature.
+            </p>
 
             <h3 id="android-install">Android subscriber</h3>
             <p>
@@ -220,8 +222,7 @@
             <h3 id="macos-install">Apple Silicon macOS</h3>
             <p>
               Unzip the release and open <code>Kepos.app</code>. The app is ad-hoc signed and not notarized, so macOS
-              Gatekeeper may warn on first launch. Complete release verification before continuing; this is a local
-              preview, not a Developer ID or Mac App Store package.
+              Gatekeeper may warn on first launch. This is a local preview, not a Developer ID or Mac App Store package.
             </p>
 
             <h3 id="windows-install">Windows desktop</h3>
@@ -236,57 +237,14 @@
             <aside class="docs-callout docs-warning">
               <p>
                 Android is sideload-only. macOS is ad-hoc signed and not notarized. Windows is not Authenticode-signed.
-                These warnings describe packaging; they do not replace checksum and signature verification.
-              </p>
-            </aside>
-          </section>
-
-          <section class="docs-section" id="verify" aria-labelledby="verify-title" data-section="verify">
-            <header class="docs-section-heading">
-              <p class="docs-kicker">02 / Trust the download</p>
-              <h2 id="verify-title">Verify before opening the app</h2>
-              <p>
-                The versionless links above point to GitHub's latest stable release, not prereleases. Verification is
-                recommended, but you can understand the setup path before installing Minisign.
-              </p>
-            </header>
-
-            <ol class="docs-steps">
-              <li>
-                <h3>Keep one release together</h3>
-                <p>Download the artifact, <code>SHA256SUMS</code>, and <code>SHA256SUMS.minisig</code> from the same stable GitHub release.</p>
-              </li>
-              <li>
-                <h3>Verify the manifest</h3>
-                <p>Use the public key committed at <code>release/minisign.pub</code>. Do not trust a manifest whose signature fails.</p>
-                <pre class="docs-code"><code>minisign -Vm SHA256SUMS \
-  -x SHA256SUMS.minisig \
-  -p /path/to/kepos/release/minisign.pub</code></pre>
-              </li>
-              <li>
-                <h3>Check the artifact digest</h3>
-                <p>On macOS or Linux, compare each downloaded file with the signed manifest:</p>
-                <pre class="docs-code"><code>shasum -a 256 -c SHA256SUMS</code></pre>
-                <p>On Windows, hash the ZIP and compare its output with the matching line:</p>
-                <pre class="docs-code"><code>Get-FileHash .\kepos-windows-x64.zip -Algorithm SHA256
-Get-Content .\SHA256SUMS</code></pre>
-              </li>
-            </ol>
-
-            <aside class="docs-callout">
-              <p>
-                Android uses the long-lived release certificate. macOS is ad-hoc signed and not notarized. Windows
-                binaries are not Authenticode-signed. A platform warning is expected; a failed Minisign or SHA-256
-                check is not. The complete
-                <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/releasing.md" target="_blank" rel="noreferrer">release and artifact verification procedure</a>
-                is maintained in the repository.
+                These are packaging warnings; a failed release check is not an expected packaging warning.
               </p>
             </aside>
           </section>
 
           <section class="docs-section" id="subscriber" aria-labelledby="subscriber-title" data-section="subscriber">
             <header class="docs-section-heading">
-              <p class="docs-kicker">03 / Connecting device</p>
+              <p class="docs-kicker">02 / Connecting device</p>
               <h2 id="subscriber-title">Connect as a subscriber</h2>
               <p>
                 A subscriber does not publish a port of its own. It owns a separate device identity, pins the intended
@@ -341,26 +299,27 @@ Get-Content .\SHA256SUMS</code></pre>
             <aside class="docs-callout">
               <p>
                 Pairing is not key copying. The QR carries a short-lived invitation. The subscriber's secret identity
-                remains on the subscriber; the publisher persists only the subscriber's public key after approval.
+                remains on the subscriber; the publisher persists only the subscriber public key after approval.
               </p>
             </aside>
           </section>
 
-          <section class="docs-section" id="publisher" aria-labelledby="publisher-title" data-section="publisher">
+          <section class="docs-section" id="publisher-desktop" aria-labelledby="publisher-desktop-title" data-section="publisher-desktop">
             <header class="docs-section-heading">
-              <p class="docs-kicker">04 / Service owner</p>
-              <h2 id="publisher-title">Share from a publisher</h2>
+              <p class="docs-kicker">03 / Service owner</p>
+              <h2 id="publisher-desktop-title">Publisher (Desktop)</h2>
               <p>
-                A desktop publisher owns the service policy and the allowlist. Start with macOS or Windows for the
-                graphical relationship view; use the advanced path for a headless host.
+                Use the packaged macOS or Windows app when the service owner wants a graphical relationship view. The
+                desktop app reads its publisher policy from TOML and keeps the publisher identity on that machine.
               </p>
             </header>
 
-            <h3 id="publisher-services">Choose the services</h3>
+            <h3 id="publisher-desktop-config">Configure the packaged app</h3>
             <p>
-              The current desktop preview reads publisher policy from Kepos TOML. It does not include a graphical
-              service editor. Create publisher state once with the supported setup command, then list the loopback TCP
-              targets to publish. An empty publisher allowlist denies every subscriber until pairing approves one.
+              The packaged app uses the normal Kepos configuration file: <code>~/.config/kepos/config.toml</code> on
+              macOS unless <code>XDG_CONFIG_HOME</code> is set, and <code>%APPDATA%\Kepos\config.toml</code> on
+              Windows. Edit the file before launch when you need to enable publishing or change the services. There is
+              no graphical service editor in this preview.
             </p>
             <pre class="docs-code"><code>[publisher]
 enabled = true
@@ -371,41 +330,115 @@ allow = []
 id = "navidrome"
 name = "Navidrome"
 target_port = 4533</code></pre>
-            <p>If publisher state does not exist, create it from the repository checkout and keep it on the publisher device:</p>
+            <p>
+              List loopback TCP targets that already run on the publisher device. An empty <code>allow</code> list
+              starts in deny-all mode; approving a device later adds its public key to the running policy.
+            </p>
+
+            <h3 id="publisher-desktop-identity">Let startup create the identity</h3>
+            <p>
+              When <code>enabled = true</code>, desktop startup derives publisher setup from the display name, allowlist,
+              and services in this configuration. If publisher identity is absent, the app creates it automatically
+              before starting the role. On later launches it validates the existing policy and reuses the same identity;
+              it never silently replaces a seed. Keep that identity on the publisher device and do not copy secret files
+              to another machine.
+            </p>
+
+            <h3 id="publisher-desktop-pairing">Launch and approve a device</h3>
+            <ol class="docs-steps">
+              <li>
+                <h3>Keep the app running</h3>
+                <p>Open Kepos and leave it in the macOS menu bar or Windows notification area while it publishes.</p>
+              </li>
+              <li>
+                <h3>Choose Add device</h3>
+                <p>Generate the invitation and let the subscriber scan it. The invitation expires after two minutes.</p>
+              </li>
+              <li>
+                <h3>Inspect, then Allow</h3>
+                <p>Check the label, platform hint, and public-key fingerprint. Allow persists the subscriber public key, updates the live allowlist, and promotes the same connection without restarting.</p>
+              </li>
+            </ol>
+
+            <aside class="docs-callout docs-warning">
+              <p>
+                Closing the desktop window hides it. Choose <strong>Quit Kepos</strong> to stop publishing. If the
+                configuration and identity are already present, relaunching preserves them rather than creating a new
+                publisher.
+              </p>
+            </aside>
+
+            <p class="docs-related">
+              Operators who need a headless host should use the separate <a href="#publisher-cli">Publisher (CLI)</a>
+              guide instead.
+            </p>
+          </section>
+
+          <section class="docs-section" id="publisher-cli" aria-labelledby="publisher-cli-title" data-section="publisher-cli">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">04 / Headless service owner</p>
+              <h2 id="publisher-cli-title">Publisher (CLI)</h2>
+              <p>
+                Use this path for repository checkouts, Nix or container hosts, and other headless environments. It
+                owns explicit state directories, manual public-key exchange, and command-line lifecycle management.
+              </p>
+            </header>
+
+            <h3 id="publisher-cli-checkout">Check out and initialize</h3>
+            <p>From a Kepos repository checkout, create publisher state with the CLI setup command:</p>
             <pre class="docs-code"><code>npm run kepos -- setup publisher \
   --state &lt;publisher-state-directory&gt; \
   --display-name Home \
   --service navidrome:Navidrome:4533</code></pre>
-
-            <h3 id="publisher-pairing">Approve a device</h3>
-            <ol class="docs-steps">
-              <li>
-                <h3>Start the desktop</h3>
-                <p>The hosted relationship shows the publisher key, connected subscribers, and the services published here.</p>
-              </li>
-              <li>
-                <h3>Choose Add device</h3>
-                <p>Generate the invitation and let the subscriber scan it. The invitation expires after two minutes, and an unknown device can read only the pairing channel while it waits.</p>
-              </li>
-              <li>
-                <h3>Inspect, then Allow</h3>
-                <p>Check the label, platform hint, and public-key fingerprint. Allow persists the subscriber public key, updates the live allowlist, and promotes the same connection without a restart or second pairing connection.</p>
-              </li>
-            </ol>
-
-            <h3 id="publisher-policy">Policy changes</h3>
             <p>
-              Desktop pairing is live: its approval updates the running desktop publisher and its TOML-owned policy. A
-              headless publisher reads TOML at startup, so restart <code>publisher run</code> after changing an allowlist
-              or service. Never copy a publisher seed or subscriber secret key to make a second device.
+              The command writes the publisher manifest and identity into the explicit state directory. Repeat it only
+              with the same display name, services, and allowlist; an existing identity is validated, not rotated.
+            </p>
+
+            <h3 id="publisher-cli-config">Manage TOML and manual keys</h3>
+            <p>
+              A headless TOML policy can keep the publisher role enabled, define the allowlist, and describe the TCP
+              services. For a manual subscriber, create its identity, send only its public key to the publisher, then
+              pin the publisher public key on the subscriber:
+            </p>
+            <pre class="docs-code"><code>npm run kepos -- setup subscriber \
+  --state &lt;subscriber-state-directory&gt;
+
+npm run kepos -- publisher key \
+  --state &lt;publisher-state-directory&gt;
+
+npm run kepos -- subscriber set-publisher \
+  --state &lt;subscriber-state-directory&gt; \
+  --label Home \
+  --publisher-key &lt;publisher-public-key&gt;</code></pre>
+            <p>
+              Keep publisher seeds and subscriber secret keys on their originating devices. State directories are
+              private identity storage, not configuration snippets to copy between hosts.
+            </p>
+
+            <h3 id="publisher-cli-run">Run and update a headless publisher</h3>
+            <pre class="docs-code"><code>npm run kepos -- publisher run \
+  --state &lt;publisher-state-directory&gt; \
+  --config &lt;config.toml&gt;</code></pre>
+            <p>
+              The headless process reads its policy at startup. Restart <code>publisher run</code> after changing an
+              allowlist or service policy. Use the repository's Nix, container, Windows, and NUC deployment guides
+              for process supervision and platform-specific lifecycle details.
             </p>
 
             <aside class="docs-callout docs-warning">
               <p>
-                Closing the desktop window hides it. Keep Kepos alive in the macOS menu bar or Windows notification area
-                while a publisher or subscriber is in use; choose <strong>Quit Kepos</strong> to stop the roles.
+                CLI initialization is intentionally separate from packaged desktop startup. Do not use a repository
+                checkout or a command-line state directory to repair a desktop identity; fix the desktop TOML and let
+                the packaged app validate its own state.
               </p>
             </aside>
+            <p id="architecture" class="docs-related">
+              For role commands, Nix and container deployment, Windows packaging, and the transport model, read the
+              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/architecture.md" target="_blank" rel="noreferrer">developer architecture guide</a>,
+              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/cli.md" target="_blank" rel="noreferrer">CLI guide</a>, and
+              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/deployment.md" target="_blank" rel="noreferrer">deployment guide</a>.
+            </p>
           </section>
 
           <section class="docs-section" id="trust" aria-labelledby="trust-title" data-section="trust">
@@ -429,16 +462,16 @@ target_port = 4533</code></pre>
               </div>
               <div>
                 <dt>No secret copies</dt>
-                <dd>Keep publisher seeds and subscriber secret keys in the state directory that generated them. Do not put state files in logs.</dd>
+                <dd>Keep publisher seeds and subscriber secret keys in the private storage that generated them. Do not put identity files in logs.</dd>
               </div>
             </dl>
 
             <h3 id="identity-lifecycle">What startup owns</h3>
             <p>
-              A packaged desktop first run creates its default config and subscriber identity only when those pieces are
-              absent. Android creates and preserves its subscriber identity in app-private storage. Existing state is
-              validated and reused; setup does not rotate it. Publisher state is created separately by publisher setup
-              and is also preserved by the desktop runtime.
+              A packaged desktop first run creates its default config and enabled role identities only when those pieces
+              are absent. It creates publisher identity from enabled publisher policy and creates subscriber identity for
+              the subscriber role. Android creates and preserves its subscriber identity in app-private storage.
+              Existing state is validated and reused; setup does not rotate it.
             </p>
             <p>
               In the manual flow, share the subscriber public key with the publisher and enter or pin the publisher
@@ -590,8 +623,8 @@ target_port = 4533</code></pre>
             <h3 id="troubleshoot-warnings">Installation warnings</h3>
             <p>
               Android sideload prompts, macOS Gatekeeper warnings, and Windows SmartScreen warnings are expected for
-              these release boundaries. Finish the Minisign and SHA-256 checks first. Windows also needs WebView2 and
-              the Microsoft Visual C++ Redistributable; the release ZIP does not bundle them.
+              these release boundaries. Windows also needs WebView2 and the Microsoft Visual C++ Redistributable; the
+              release ZIP does not bundle them.
             </p>
 
             <h3 id="troubleshoot-diagnostics">Copy sanitized diagnostics</h3>
@@ -613,55 +646,6 @@ target_port = 4533</code></pre>
               The repository's
               <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/cli.md" target="_blank" rel="noreferrer">CLI and network guide</a>
               records state paths, listener behavior, observations, and current transport limits.
-            </p>
-          </section>
-
-          <section class="docs-section" id="advanced" aria-labelledby="advanced-title" data-section="advanced">
-            <header class="docs-section-heading">
-              <p class="docs-kicker">09 / Advanced publishers</p>
-              <h2 id="advanced-title">Manual keys and headless hosts</h2>
-              <p>
-                Use this path for CLI, Nix, container, or NUC publishers that do not have the desktop Add device
-                surface. It is an explicit public-key flow, not a second graphical onboarding product.
-              </p>
-            </header>
-
-            <h3 id="manual-pairing">Manual public-key flow</h3>
-            <ol class="docs-steps">
-              <li>
-                <h3>Create the subscriber identity</h3>
-                <pre class="docs-code"><code>npm run kepos -- setup subscriber \
-  --state &lt;subscriber-state-directory&gt;</code></pre>
-                <p>Copy only the printed subscriber public key to the publisher operator.</p>
-              </li>
-              <li>
-                <h3>Allow the subscriber</h3>
-                <p>Add that public key to the publisher's <code>allow</code> list and configure each TCP service. An empty list is deny-all.</p>
-              </li>
-              <li>
-                <h3>Pin the publisher</h3>
-                <pre class="docs-code"><code>npm run kepos -- publisher key \
-  --state &lt;publisher-state-directory&gt;
-
-npm run kepos -- subscriber set-publisher \
-  --state &lt;subscriber-state-directory&gt; \
-  --label Home \
-  --publisher-key &lt;publisher-public-key&gt;</code></pre>
-              </li>
-              <li>
-                <h3>Run the roles</h3>
-                <p>Start the publisher and subscriber with their existing state directories. Restart a headless publisher after TOML policy edits.</p>
-              </li>
-            </ol>
-
-            <aside class="docs-callout docs-warning">
-              <p>Publisher seeds, subscriber secret keys, and whole identity directories belong only on the device that created them.</p>
-            </aside>
-            <p id="architecture" class="docs-related">
-              For role commands, Nix and container deployment, Windows packaging, and the transport model, read the
-              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/architecture.md" target="_blank" rel="noreferrer">developer architecture guide</a>,
-              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/cli.md" target="_blank" rel="noreferrer">CLI guide</a>, and
-              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/deployment.md" target="_blank" rel="noreferrer">deployment guide</a>.
             </p>
           </section>
         </article>

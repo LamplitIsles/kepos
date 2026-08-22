@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
-const publicPages = ["index.html", "docs/index.html"] as const;
+const publicPages = ["index.html", "docs/index.html", "docs/verify/index.html"] as const;
 
 function readProjectFile(path: string): string | null {
   const fullPath = resolve(root, path);
@@ -119,18 +119,25 @@ describe("Kepos public website", () => {
     const docs = page("docs/index.html");
     const vite = readProjectFile("vite.config.ts");
     const sitemap = readProjectFile("public/sitemap.xml");
+    const verify = page("docs/verify/index.html");
     const builtDocs = readProjectFile("dist/docs/index.html");
+    const builtVerify = readProjectFile("dist/docs/verify/index.html");
 
     expect(vite).not.toBeNull();
     expect(sitemap).not.toBeNull();
     expect(builtDocs).not.toBeNull();
-    if (!vite || !sitemap || !builtDocs) return;
+    expect(builtVerify).not.toBeNull();
+    if (!vite || !sitemap || !builtDocs || !builtVerify) return;
 
     expect(vite).toContain('docs: resolve(import.meta.dirname, "docs/index.html")');
+    expect(vite).toContain('verify: resolve(import.meta.dirname, "docs/verify/index.html")');
     expect(sitemap).toContain("https://kepos.guion.io/docs/");
+    expect(sitemap).toContain("https://kepos.guion.io/docs/verify/");
     expect(builtDocs).toContain("Kepos docs");
-    expect(builtDocs).toContain('id="publisher"');
+    expect(builtDocs).toContain('id="publisher-desktop"');
+    expect(builtDocs).toContain('id="publisher-cli"');
     expect(builtDocs).toContain('id="subscriber"');
+    expect(builtVerify).toContain("Verify a downloaded release");
     expect(docs).toMatch(/href="\/"[^>]*aria-label="Kepos home"/);
 
     for (const id of [
@@ -138,9 +145,9 @@ describe("Kepos public website", () => {
       "android-install",
       "macos-install",
       "windows-install",
-      "verify",
       "subscriber",
-      "publisher",
+      "publisher-desktop",
+      "publisher-cli",
       "first-service",
       "trust",
       "philosophy",
@@ -152,6 +159,21 @@ describe("Kepos public website", () => {
     }
 
     expect(docs.match(/data-platform-download="(?:android|macos|windows)"/g)?.length).toBe(3);
+    expect(docs).not.toMatch(/data-section-link="verify"|href="#verify"/);
+    expect(docs.match(/href="\/docs\/verify\/"/g)?.length).toBe(1);
+
+    const desktopPublisher = docs.match(
+      /<section[^>]*id="publisher-desktop"[\s\S]*?<section[^>]*id="publisher-cli"/,
+    )?.[0];
+    expect(desktopPublisher).toBeTruthy();
+    expect(desktopPublisher).not.toMatch(/repository checkout|npm run kepos|setup publisher|state-directory|--state/i);
+
+    const cliPublisher = docs.match(/<section[^>]*id="publisher-cli"[\s\S]*?<section[^>]*id="trust"/)?.[0];
+    expect(cliPublisher).toMatch(/repository checkout|npm run kepos|setup publisher|state-directory/i);
+
+    expect(verify).toMatch(/minisign -Vm SHA256SUMS/);
+    expect(verify).toMatch(/shasum -a 256 -c SHA256SUMS/);
+    expect(verify).toMatch(/Get-FileHash/);
   });
 
   it("keeps desktop and mobile documentation navigation on the same section contract", () => {
