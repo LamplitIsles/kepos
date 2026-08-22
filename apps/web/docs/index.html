@@ -135,19 +135,12 @@
               </a>
             </nav>
 
-            <aside class="docs-callout docs-note">
-              <p>macOS and Windows can act as publishers, subscribers, or both. Android is a subscriber-only app.</p>
-            </aside>
           </header>
 
           <section class="docs-section" id="platforms" aria-labelledby="platforms-title" data-section="platforms">
             <header class="docs-section-heading">
               <p class="docs-kicker">01 / Install</p>
               <h2 id="platforms-title">Platforms and installation</h2>
-              <p>
-                The recommendation follows a recognized browser platform; it never hides a choice or redirects a
-                download.
-              </p>
             </header>
 
             <p class="docs-table-hint">On narrow screens, scroll horizontally to see all columns.</p>
@@ -207,10 +200,7 @@
               </table>
             </section>
             <p class="docs-status"><i data-lucide="circle-check" aria-hidden="true"></i><span data-platform-recommendation role="status">All three downloads stay available.</span></p>
-            <p class="docs-related">
-              Optional: <a href="/docs/verify/">verify a downloaded release</a> before opening it. The reference covers
-              the release manifest, SHA-256 checks, and Minisign signature.
-            </p>
+            <p class="docs-related"><a href="/docs/verify/">Optional: verify the download</a></p>
 
             <h3 id="android-install">Android subscriber</h3>
             <p>
@@ -234,12 +224,6 @@
               preview.
             </p>
 
-            <aside class="docs-callout docs-warning">
-              <p>
-                Android is sideload-only. macOS is ad-hoc signed and not notarized. Windows is not Authenticode-signed.
-                These are packaging warnings; a failed release check is not an expected packaging warning.
-              </p>
-            </aside>
           </section>
 
           <section class="docs-section" id="subscriber" aria-labelledby="subscriber-title" data-section="subscriber">
@@ -298,9 +282,6 @@
             </p>
             <pre class="docs-code"><code>ssh -p &lt;configured-local-port&gt; 127.0.0.1</code></pre>
 
-            <aside class="docs-callout">
-              <p>Keep secret identity files on their originating devices; see <a href="#trust">Trust and identities</a>.</p>
-            </aside>
           </section>
 
           <section class="docs-section" id="publisher-desktop" aria-labelledby="publisher-desktop-title" data-section="publisher-desktop">
@@ -432,11 +413,6 @@ npm run kepos -- subscriber run \
               process supervision and platform-specific lifecycle details.
             </p>
 
-            <aside class="docs-callout docs-warning">
-              <p>
-                Keep packaged desktop state on its desktop path; use this CLI flow only for headless hosts.
-              </p>
-            </aside>
             <p id="architecture" class="docs-related">
               For role commands, Nix and container deployment, Windows packaging, and the transport model, read the
               <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/architecture.md" target="_blank" rel="noreferrer">developer architecture guide</a>,
@@ -476,11 +452,6 @@ npm run kepos -- subscriber run \
               storage: publisher state holds its seed and subscriber state holds its key pair and publisher contact.
               Packaged startup behavior is described in <a href="#publisher-desktop-identity">Publisher (Desktop)</a>;
               Android keeps its subscriber identity in app-private storage across an in-place update.
-            </p>
-            <p>
-              Manual exchange puts the subscriber public key in the publisher allowlist and pins the publisher public key
-              on the subscriber. The supported Android QR path automates that exchange without transferring secret
-              material.
             </p>
             <aside class="docs-callout">
               <p>Trust in one publisher does not turn the subscriber into a member of a LAN or expose unlisted ports.</p>
@@ -640,12 +611,6 @@ npm run kepos -- subscriber run \
               still be unable to open one service.
             </p>
 
-            <h3 id="troubleshoot-warnings">Installation warnings</h3>
-            <p>
-              Android sideload prompts, macOS Gatekeeper warnings, and Windows SmartScreen warnings are expected for
-              these release boundaries. Windows also needs WebView2 and the Microsoft Visual C++ Redistributable; the
-              release ZIP does not bundle them.
-            </p>
 
             <h3 id="troubleshoot-diagnostics">Copy sanitized diagnostics</h3>
             <p>
@@ -655,13 +620,6 @@ npm run kepos -- subscriber run \
               bug report.
             </p>
 
-            <aside class="docs-callout docs-warning">
-              <p>
-                Kepos does not provide relay fallback, generic firewall bypass, UDP service transport, or a virtual
-                subnet. If the current UDP direct path is unavailable, the safe next action is diagnosis, not a claim
-                that another path will take over.
-              </p>
-            </aside>
             <p class="docs-related">
               The repository's
               <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/cli.md" target="_blank" rel="noreferrer">CLI and network guide</a>

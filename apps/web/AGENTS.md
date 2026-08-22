@@ -21,6 +21,6 @@
 
 ## Product boundaries
 
-- Keep the site as one scrolling page.
+- Keep the landing page as one scrolling page. Public user documentation may use static routes under `/docs/`.
 - Do not publish install commands until they are supported by the project.
 - Do not imply that Kepos is affiliated with or endorsed by Holepunch, Pear, Keet, or Tether.

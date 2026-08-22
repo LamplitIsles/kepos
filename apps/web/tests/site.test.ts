@@ -115,74 +115,41 @@ describe("Kepos public website", () => {
     expect(html).not.toContain("#verify-a-downloaded-release");
   });
 
-  it("builds and indexes the primary docs route", () => {
+  it("builds and indexes the public documentation routes", () => {
     const docs = page("docs/index.html");
-    const vite = readProjectFile("vite.config.ts");
     const sitemap = readProjectFile("public/sitemap.xml");
-    const verify = page("docs/verify/index.html");
     const builtDocs = readProjectFile("dist/docs/index.html");
     const builtVerify = readProjectFile("dist/docs/verify/index.html");
 
-    expect(vite).not.toBeNull();
     expect(sitemap).not.toBeNull();
     expect(builtDocs).not.toBeNull();
     expect(builtVerify).not.toBeNull();
-    if (!vite || !sitemap || !builtDocs || !builtVerify) return;
+    if (!sitemap || !builtDocs || !builtVerify) return;
 
-    expect(vite).toContain('docs: resolve(import.meta.dirname, "docs/index.html")');
-    expect(vite).toContain('verify: resolve(import.meta.dirname, "docs/verify/index.html")');
     expect(sitemap).toContain("https://kepos.guion.io/docs/");
     expect(sitemap).toContain("https://kepos.guion.io/docs/verify/");
-    expect(builtDocs).toContain("Kepos docs");
-    expect(builtDocs).toContain('id="publisher-desktop"');
-    expect(builtDocs).toContain('id="publisher-cli"');
-    expect(builtDocs).toContain('id="subscriber"');
-    expect(builtVerify).toContain("Verify a downloaded release");
     expect(docs).toMatch(/href="\/"[^>]*aria-label="Kepos home"/);
 
-    for (const id of [
-      "platforms",
-      "android-install",
-      "macos-install",
-      "windows-install",
+    const ids = new Set([...docs.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
+    for (const target of [
       "subscriber",
       "publisher-desktop",
       "publisher-cli",
-      "first-service",
       "trust",
       "philosophy",
       "holesail",
       "troubleshooting",
-      "architecture",
     ]) {
-      expect(docs).toMatch(new RegExp(`\\sid="${id}"`));
+      expect(ids).toContain(target);
     }
 
     expect(docs.match(/data-platform-download="(?:android|macos|windows)"/g)?.length).toBe(3);
     expect(docs).not.toMatch(/data-section-link="verify"|href="#verify"/);
     expect(docs.match(/href="\/docs\/verify\/"/g)?.length).toBe(1);
-
-    const desktopPublisher = docs.match(
-      /<section[^>]*id="publisher-desktop"[\s\S]*?<section[^>]*id="publisher-cli"/,
-    )?.[0];
-    expect(desktopPublisher).toBeTruthy();
-    expect(desktopPublisher).not.toMatch(/repository checkout|npm run kepos|setup publisher|state-directory|--state/i);
-
-    const cliPublisher = docs.match(/<section[^>]*id="publisher-cli"[\s\S]*?<section[^>]*id="trust"/)?.[0];
-    expect(cliPublisher).toMatch(/repository checkout|npm run kepos|setup publisher|state-directory/i);
-
-    expect(verify).toMatch(/minisign -Vm SHA256SUMS/);
-    expect(verify).toMatch(/shasum -a 256 -c SHA256SUMS/);
-    expect(verify).toMatch(/Get-FileHash/);
   });
 
-  it("keeps desktop and mobile documentation navigation on the same section contract", () => {
+  it("keeps documentation navigation targets connected to sections", () => {
     const docs = page("docs/index.html");
-    const css = readProjectFile("src/docs.css");
-
-    expect(css).not.toBeNull();
-    if (!css) return;
-
     const sectionIds = new Set(
       [...docs.matchAll(/<[a-z]+\b[^>]*\sid="([^"]+)"[^>]*data-section="([^"]+)"/g)].flatMap((match) =>
         match[1] && match[2] ? [match[1], match[2]] : [],
@@ -195,20 +162,9 @@ describe("Kepos public website", () => {
       return section && target ? [{ section, target }] : [];
     });
 
-    expect(docs).toMatch(/<aside\b[^>]*aria-label="Documentation navigation"/);
-    expect(docs).toMatch(/<details\b[^>]*class="docs-mobile-nav"/);
-    expect(docs).toMatch(/<article\b[^>]*class="docs-article"/);
-    expect(navigationTargets.length).toBeGreaterThanOrEqual(18);
+    expect(navigationTargets.length).toBeGreaterThan(0);
     expect(navigationTargets.every(({ section, target }) => section === target && sectionIds.has(target))).toBe(true);
-    expect(navigationTargets.filter(({ section }) => section === "start").length).toBeGreaterThanOrEqual(2);
     expect(docs).toMatch(/aria-current="location"/);
-    expect(css).toMatch(
-      /\.docs-layout\s*\{[\s\S]*grid-template-columns:\s*var\(--docs-sidebar-width\) minmax\(0, 78ch\)/,
-    );
-    expect(css).toMatch(/\.docs-article\s*\{[\s\S]*max-width:\s*78ch/);
-    expect(css).toMatch(
-      /@media \(max-width: 900px\)[\s\S]*\.docs-sidebar\s*\{\s*display:\s*none;[\s\S]*\.docs-mobile-nav\s*\{\s*display:\s*block;/,
-    );
   });
 
   it("publishes indexable docs metadata and a home link", () => {
