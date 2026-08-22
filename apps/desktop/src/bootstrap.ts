@@ -112,6 +112,18 @@ export async function ensureDesktopBootstrap(
     };
   }
 
+  return {
+    config,
+    configPath: paths.configPath,
+    ...(await ensureDesktopRoleState(config, context)),
+  };
+}
+
+export async function ensureDesktopRoleState(
+  config: KeposConfig,
+  context: DesktopBootstrapContext,
+): Promise<Pick<DesktopBootstrapResult, "publisher" | "subscriber">> {
+  const paths = defaultDesktopPaths(context);
   const publisher =
     config.publisher?.enabled === true
       ? await (context.ensurePublisher ?? ensurePublisher)({
@@ -128,8 +140,6 @@ export async function ensureDesktopBootstrap(
         })
       : undefined;
   return {
-    config,
-    configPath: paths.configPath,
     ...(publisher ? { publisher } : {}),
     ...(subscriber ? { subscriber } : {}),
   };

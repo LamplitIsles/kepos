@@ -665,7 +665,7 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
   ]);
 });
 
-test("explicit desktop config does not invoke default bootstrap", async () => {
+test("missing explicit desktop config does not create defaults", async () => {
   let saved = false;
   let setup = false;
   await assert.rejects(
@@ -685,4 +685,47 @@ test("explicit desktop config does not invoke default bootstrap", async () => {
   );
   assert.equal(saved, false);
   assert.equal(setup, false);
+});
+
+test("explicit desktop config prepares enabled role identities", async () => {
+  const publisherStates: string[] = [];
+  const subscriberStates: string[] = [];
+  const options = await loadDesktopOptions(
+    ["--config", "/tmp/explicit-kepos.toml"],
+    {
+      homeDirectory: "/Users/kepos",
+      environment: { XDG_STATE_HOME: "/tmp/kepos-explicit-state" },
+      platform: "darwin",
+      loadConfig: async () => ({
+        publisher: {
+          enabled: true,
+          displayName: "Explicit home",
+          allow: [],
+          services: [],
+        },
+        subscriber: {
+          enabled: true,
+          gatewayPort: DEFAULT_GATEWAY_PORT,
+          services: [],
+        },
+      }),
+      ensurePublisher: async ({ stateDir }) => {
+        publisherStates.push(stateDir);
+        return { created: true, publisherKey: "aa".repeat(32) };
+      },
+      setupSubscriber: async ({ stateDir }) => {
+        subscriberStates.push(stateDir);
+        return { created: true, configured: false, publicKey: subscriberKey };
+      },
+    },
+  );
+
+  assert.deepEqual(publisherStates, [
+    "/tmp/kepos-explicit-state/kepos-neo/publisher",
+  ]);
+  assert.deepEqual(subscriberStates, [
+    "/tmp/kepos-explicit-state/kepos-neo/subscriber",
+  ]);
+  assert.equal(options.publisher?.configPath, "/tmp/explicit-kepos.toml");
+  assert.equal(options.subscriber?.subscriberSetup?.publicKey, subscriberKey);
 });

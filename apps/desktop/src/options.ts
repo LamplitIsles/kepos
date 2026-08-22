@@ -5,7 +5,10 @@ import {
   saveKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
-import { ensureDesktopBootstrap } from "./bootstrap.js";
+import {
+  ensureDesktopBootstrap,
+  ensureDesktopRoleState,
+} from "./bootstrap.js";
 import { defaultDesktopPaths } from "./paths.js";
 import { DEFAULT_GATEWAY_PORT } from "../../../src/home/gateway.js";
 import type { DhtAddress } from "../../../src/mux/hyperdht.js";
@@ -73,24 +76,22 @@ export async function loadDesktopOptions(
   if (configOption && arguments_.length !== 2) {
     throw new Error("--config requires exactly one path");
   }
-  if (configOption) {
-    const configPath = arguments_[1];
-    const config = await (context.loadConfig ?? loadKeposConfig)(
-      configPath,
-      context.environment,
-      context.homeDirectory,
-      context.platform,
-    );
-    return parseDesktopOptions([], {
-      homeDirectory: context.homeDirectory,
-      environment: context.environment,
-      config,
-      configPath,
-      platform: context.platform,
-    });
-  }
-
-  const bootstrapped = await ensureDesktopBootstrap(context);
+  const bootstrapped = configOption
+    ? await (async () => {
+        const configPath = arguments_[1];
+        const config = await (context.loadConfig ?? loadKeposConfig)(
+          configPath,
+          context.environment,
+          context.homeDirectory,
+          context.platform,
+        );
+        return {
+          config,
+          configPath,
+          ...(config ? await ensureDesktopRoleState(config, context) : {}),
+        };
+      })()
+    : await ensureDesktopBootstrap(context);
   const options = parseDesktopOptions([], {
     homeDirectory: context.homeDirectory,
     environment: context.environment,
