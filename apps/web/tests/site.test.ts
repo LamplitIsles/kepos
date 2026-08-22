@@ -97,7 +97,7 @@ describe("Kepos public website", () => {
     for (const [artifact, platform] of downloads) {
       expect(html).toContain(`https://github.com/LamplitIsles/kepos/releases/latest/download/${artifact}`);
       const anchors = [...html.matchAll(new RegExp(`<a\\b[^>]*href="[^"]*${artifact}"[^>]*>`, "g"))];
-      expect(anchors.length).toBeGreaterThanOrEqual(2);
+      expect(anchors.length).toBeGreaterThanOrEqual(1);
       for (const [anchor] of anchors) {
         const accessibleName = anchor.match(/\saria-label="([^"]+)"/i)?.[1];
         expect(accessibleName).toMatch(platform);

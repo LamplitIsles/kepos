@@ -4,10 +4,10 @@ For end-user installation, pairing, and troubleshooting, start with the [public 
 
 Kepos supports **Windows 10 x64 build 19045 (22H2) and later, and Windows 11
 x64** as a portable desktop application with an optional per-user scripted
-install. Download `kepos-windows-x64.zip`, verify it, and keep the extracted
-`Kepos\` directory together. The ZIP contains the x64 self-contained Windows
-App Runtime tree, so Microsoft Windows App Runtime does not need to be
-installed separately. The WebView2 Runtime and Microsoft Visual C++
+install. Download `kepos-windows-x64.zip` and keep the extracted `Kepos\`
+directory together. Optional end-user verification is linked below. The ZIP
+contains the x64 self-contained Windows App Runtime tree, so Microsoft Windows
+App Runtime does not need to be installed separately. The WebView2 Runtime and Microsoft Visual C++
 Redistributable remain system prerequisites; Kepos does not bundle either one.
 
 The ZIP has two supported paths:
@@ -60,21 +60,9 @@ allow the app on the networks where the logged-in session needs DHT
 connectivity, or it will remain offline. Kepos does not open a public TCP
 service port.
 
-## Verify and run a download
+## Extract and run a download
 
-Download all five assets from one GitHub release: the Android APK, macOS ZIP,
-Windows ZIP, `SHA256SUMS`, and `SHA256SUMS.minisig`. Obtain
-`release/minisign.pub` from the same Kepos source tag. In PowerShell, from the
-download directory, verify the manifest before trusting its checksums:
-
-```powershell
-minisign.exe -Vm SHA256SUMS -x SHA256SUMS.minisig -p C:\path\to\minisign.pub
-Get-FileHash .\kepos-windows-x64.zip -Algorithm SHA256
-Get-Content .\SHA256SUMS
-```
-
-Confirm the displayed Windows ZIP digest exactly matches its line in
-`SHA256SUMS`. Then extract into a fresh directory; do not extract over an old
+Extract each release ZIP into a fresh directory; do not extract over an old
 Kepos folder:
 
 ```powershell
@@ -86,11 +74,10 @@ Expand-Archive .\kepos-windows-x64.zip -DestinationPath .\Kepos-vX.Y.Z
 .\Kepos-vX.Y.Z\Kepos\Install.cmd
 ```
 
-If SmartScreen blocks a verified download, use the Windows **More info** and
-**Run anyway** controls only after checking the release signature and digest.
-The archive and executable are unsigned by Authenticode, so this warning is
-expected and is not evidence that the ZIP is corrupt.
-
+SmartScreen may show **More info** and **Run anyway** for this
+unsigned-by-Authenticode preview. The warning is expected and does not indicate
+a corrupt ZIP; optional end-user SHA-256 and Minisign verification is in the
+[public verification reference](https://kepos.guion.io/docs/verify/).
 ## Uninstall
 
 Quit from the notification-area menu first. Run **Uninstall Kepos** from the

@@ -110,15 +110,21 @@ external URL opening.
 
 A desktop can run publisher-only, subscriber-only, or both. Each role has its
 own state directory and runtime lock. A publisher's **Add device** invitation
-is a two-minute QR flow. The subscriber connects to the invited publisher key
-with its existing identity. The publisher sees the candidate fingerprint and
-must approve it before the connection is promoted to the normal registry and
-service protocols.
+is a two-minute QR flow for an Android subscriber. Android connects with its
+existing identity; the publisher sees the candidate fingerprint and must
+approve it before the connection is promoted to the normal registry and service
+protocols. A desktop subscriber currently uses the manual path: copy its public
+key into the desktop publisher's TOML allowlist, restart after that policy edit,
+copy the publisher public key, and enter it in **Connect this subscriber**. The
+desktop app does not receive the QR invitation through a deep link.
 
-The packaged first run creates a default config and subscriber identity when
-they are absent, and preserves existing config and identity state. Publisher
-state is created separately by the supported publisher setup flow. A config or
-identity is never silently replaced to make startup succeed.
+The packaged first run creates a default config and enabled role identities when
+they are absent. When publisher startup is enabled, it creates missing publisher
+state from the TOML display name, allowlist, and service policy. If publisher
+state already exists, startup validates the state files themselves and reuses
+their seed and public key; mutable TOML policy may change without rewriting
+that identity. CLI `setup publisher` retains its strict idempotency. A config
+or identity is never silently replaced to make startup succeed.
 
 The desktop process hides rather than quits when its main window closes. Tray
 or menu-bar **Open Kepos** restores the window; **Quit Kepos** stops publisher,
@@ -172,8 +178,9 @@ identity.
 
 A headless publisher reads its policy at startup. Changing its TOML allowlist
 or service policy requires a publisher restart. Desktop **Add device** is a
-special live path: approval persists the new public key, updates the in-memory
-allowlist, and promotes the final connection without a second NAT traversal.
+special live Android pairing path: approval persists the new public key, updates
+the in-memory allowlist, and promotes the final connection without a second NAT
+traversal. A manual desktop policy edit still needs a restart.
 
 ## Diagnostics and safety
 

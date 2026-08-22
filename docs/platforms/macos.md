@@ -96,8 +96,9 @@ for the local publisher.
 - SSH copies a loopback command.
 - Dagger copies an environment variable that points the CLI at the remote
   engine.
-- **Add device** creates a two-minute QR and shows the authenticated candidate
-  fingerprint before approval.
+- **Add device** creates a two-minute QR for an Android subscriber and shows the
+  authenticated candidate fingerprint before approval. Desktop subscribers use
+  the manual public-key flow in the [public guide](https://kepos.guion.io/docs/).
 
 Allow writes the configured TOML allowlist atomically, updates the live
 publisher, and promotes the same peer connection. Unknown candidates cannot

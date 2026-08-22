@@ -1044,9 +1044,8 @@ svg.lucide {
 }
 
 .repository-card,
-.quickstart-card {
+.docs-route-card {
   position: relative;
-  display: grid;
   min-height: 420px;
   padding: clamp(30px, 4vw, 52px);
   border-right: 1px solid var(--pear-line);
@@ -1054,23 +1053,28 @@ svg.lucide {
 }
 
 .repository-card {
+  display: grid;
   transition:
     background-color 180ms ease,
     color 180ms ease;
 }
 
-.repository-card:hover {
+.repository-card:hover,
+.docs-route-card:hover {
   background: var(--pear-green);
   color: var(--pear-black);
 }
 
 .repository-card:hover > small,
-.repository-card:hover > svg {
+.repository-card:hover > svg,
+.docs-route-card:hover > small,
+.docs-route-card:hover > svg,
+.docs-route-card:hover > span {
   color: var(--pear-black);
 }
 
 .repository-card > svg,
-.quickstart-card > svg {
+.docs-route-card > svg {
   position: absolute;
   top: clamp(30px, 4vw, 52px);
   right: clamp(30px, 4vw, 52px);
@@ -1079,7 +1083,7 @@ svg.lucide {
 }
 
 .repository-card > strong,
-.quickstart-card > strong {
+.docs-route-card > strong {
   align-self: end;
   font-family: var(--display);
   font-size: clamp(42px, 5vw, 66px);
@@ -1089,38 +1093,42 @@ svg.lucide {
   overflow-wrap: anywhere;
 }
 
-.quickstart-card > strong {
-  white-space: nowrap;
-}
-
-.repository-card > small {
-  align-self: end;
+.repository-card > small,
+.docs-route-card > small {
   color: var(--pear-green);
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.1em;
 }
 
-.quickstart-card {
-  overflow: hidden;
+.repository-card > small {
+  align-self: end;
+}
+
+.docs-route-card {
+  display: flex;
+  flex-direction: column;
   background:
     repeating-linear-gradient(135deg, transparent 0 12px, rgba(183, 238, 69, 0.025) 12px 13px), var(--pear-panel);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
 }
 
-.release-links {
-  display: flex;
-  align-self: end;
-  gap: 18px;
-  margin-top: 24px;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+.docs-route-card > strong {
+  margin-top: auto;
 }
 
-.release-links a {
-  color: var(--pear-green);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 5px;
+.docs-route-card > span {
+  max-width: 32ch;
+  margin: 18px 0;
+  color: var(--pear-muted);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.docs-route-card > small {
+  margin-top: 0;
 }
 
 .landing-footer {
@@ -1482,7 +1490,7 @@ svg.lucide {
   }
 
   .repository-card,
-  .quickstart-card {
+  .docs-route-card {
     min-height: 330px;
     padding: 28px 24px;
     border-top: 1px solid var(--pear-line);
@@ -1492,12 +1500,12 @@ svg.lucide {
     font-size: 45px;
   }
 
-  .quickstart-card > strong {
+  .docs-route-card > strong {
     font-size: clamp(34px, 10vw, 40px);
   }
 
   .repository-card > svg,
-  .quickstart-card > svg {
+  .docs-route-card > svg {
     top: 28px;
     right: 24px;
   }

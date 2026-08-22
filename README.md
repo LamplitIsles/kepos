@@ -56,8 +56,9 @@ prereleases:
 - [Apple Silicon macOS ZIP](https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-macos-arm64.zip) — publisher and subscriber
 - [Windows x64 ZIP](https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-windows-x64.zip) — publisher and subscriber
 
-Download `SHA256SUMS` and `SHA256SUMS.minisig` from the same release and follow
-[release and artifact verification](docs/releasing.md) before opening a binary.
+Optional: download `SHA256SUMS` and `SHA256SUMS.minisig` from the same release and
+follow the [public release verification reference](https://kepos.guion.io/docs/verify/).
+The maintainer-only [release procedure](docs/releasing.md) is separate.
 
 ## Develop
 
@@ -107,7 +108,7 @@ operation; do not use the deploy command for ordinary development.
 - [Android subscriber](docs/platforms/android.md)
 - [macOS desktop](docs/platforms/macos.md)
 - [Windows desktop](docs/platforms/windows.md)
-- [Release and artifact verification](docs/releasing.md)
+- [Maintainer release procedure](docs/releasing.md)
 - [How Kepos grew from Hypertele](docs/hypertele-provenance.md)
 - [Architecture decisions](docs/adr/)
 - [Physical and field evidence](docs/evidence/)
