@@ -51,6 +51,29 @@ function Get-QuotedCmdPart {
   return '"' + $Value.Replace('"', '\"') + '"'
 }
 
+function Remove-TestJunction {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Root,
+    [string]$Path
+  )
+  if ([string]::IsNullOrWhiteSpace($Path)) { return }
+  $rootPath = Get-FullPath $Root
+  $junctionPath = Get-FullPath $Path
+  $prefix = $rootPath.TrimEnd('\', '/') + '\'
+  if (-not $junctionPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "test junction must remain inside the acceptance root: $junctionPath"
+  }
+  $item = Get-Item -LiteralPath $junctionPath -Force -ErrorAction SilentlyContinue
+  if ($null -eq $item) { return }
+  if (-not $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0)) {
+    throw "acceptance cleanup refuses a non-junction path: $junctionPath"
+  }
+  & cmd.exe /d /s /c ("rmdir {0}" -f (Get-QuotedCmdPart $junctionPath)) | Out-Null
+  if ($LASTEXITCODE -ne 0 -or (Test-Path -LiteralPath $junctionPath)) {
+    throw "could not remove test junction: $junctionPath"
+  }
+}
+
 function Invoke-CmdEntry {
   param(
     [Parameter(Mandatory = $true)] [string]$Entry,
@@ -261,6 +284,8 @@ $startUninstallShortcut = Join-Path $startMenu 'Uninstall Kepos.lnk'
 $desktopShortcut = Join-Path $desktop 'Kepos.lnk'
 $previousPause = $env:KEPOS_INSTALLER_NO_PAUSE
 $runningProcess = $null
+$linkedInstall = $null
+$linkedPayloadAssets = $null
 
 try {
   New-Item -ItemType Directory -Path $acceptanceRoot -Force | Out-Null
@@ -347,17 +372,22 @@ try {
   Invoke-CmdEntry $installEntry @('-LocalAppData', $linkedLocal, '-AppData', (Join-Path $acceptanceRoot 'linked profile\AppData'), '-Desktop', (Join-Path $acceptanceRoot 'linked profile\Desktop'), '-StartMenu', (Join-Path $acceptanceRoot 'linked profile\Programs'), '-TestRoot', $acceptanceRoot) -ExpectFailure
   Assert-BytesEqual $linkedBytes $linkedSentinel 'reparse-point destination'
   Write-Host 'Reparse-point destination refusal: PASS'
+  Remove-TestJunction $acceptanceRoot $linkedInstall
+  $linkedInstall = $null
 
   $linkedPayload = Join-Path $acceptanceRoot 'linked payload\Kepos'
   $linkedPayloadOutside = Join-Path $acceptanceRoot 'linked payload outside'
   Copy-Payload $sourceWithSpaces $linkedPayload
   New-Item -ItemType Directory -Path $linkedPayloadOutside -Force | Out-Null
-  Remove-Item -LiteralPath (Join-Path $linkedPayload 'Assets') -Recurse -Force
-  & cmd.exe /d /s /c ("mklink /J `"{0}`" `"{1}`"" -f (Join-Path $linkedPayload 'Assets'), $linkedPayloadOutside) | Out-Null
+  $linkedPayloadAssets = Join-Path $linkedPayload 'Assets'
+  Remove-Item -LiteralPath $linkedPayloadAssets -Recurse -Force
+  & cmd.exe /d /s /c ("mklink /J `"{0}`" `"{1}`"" -f $linkedPayloadAssets, $linkedPayloadOutside) | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'could not create payload junction for acceptance' }
   Invoke-CmdEntry (Join-Path $linkedPayload 'Install.cmd') $arguments -ExpectFailure
   Assert-File (Join-Path $install '.kepos-owner')
   Write-Host 'Reparse-point payload refusal: PASS'
+  Remove-TestJunction $acceptanceRoot $linkedPayloadAssets
+  $linkedPayloadAssets = $null
 
   $malformedPayload = Join-Path $acceptanceRoot 'malformed payload\Kepos'
   Copy-Payload $sourceWithSpaces $malformedPayload
@@ -399,5 +429,10 @@ try {
   if ($null -ne $runningProcess) {
     Stop-TestProcess $runningProcess
   }
+  $junctionCleanupErrors = @()
+  foreach ($junction in @($linkedPayloadAssets, $linkedInstall)) {
+    try { Remove-TestJunction $acceptanceRoot $junction } catch { $junctionCleanupErrors += $_.Exception.Message }
+  }
   if ($null -ne $previousPause) { $env:KEPOS_INSTALLER_NO_PAUSE = $previousPause } else { Remove-Item Env:KEPOS_INSTALLER_NO_PAUSE -ErrorAction SilentlyContinue }
+  if ($junctionCleanupErrors.Count -gt 0) { throw ($junctionCleanupErrors -join '; ') }
 }

@@ -901,6 +901,7 @@ try {
     Invoke-PortableRelease $Repository $RunDirectory $ProductFileSetPath $Logs $ReleaseArtifactName $ReleaseMode $BootstrapAsset $Node
     Invoke-InstallerAcceptance (Join-Path $RunDirectory 'extracted\Kepos') $RunDirectory $Repository $Logs
   }
+  Assert-NoReparsePointsInTree $RunDirectory 'completed Windows run directory'
   Write-Host "Windows desktop build complete: $Artifact"
 } catch {
   $ExitCode = 1
