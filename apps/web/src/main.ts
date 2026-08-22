@@ -88,16 +88,19 @@ document.documentElement.dataset.recommendedPlatform = recommendedPlatform;
 const sectionLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>("[data-section-link]"));
 const pageSections = Array.from(document.querySelectorAll<HTMLElement>("[data-section]"));
 const siteHeader = document.querySelector<HTMLElement>(".site-header");
+const sectionActivationOffset = document.body.classList.contains("docs-page") ? 32 : 0;
 
 if ("IntersectionObserver" in window && sectionLinks.length > 0 && pageSections.length > 0) {
   const updateCurrentSection = () => {
-    const activeSectionId = findActiveSectionId(
-      pageSections.map((section) => ({
-        id: section.id,
-        top: section.getBoundingClientRect().top,
-      })),
-      siteHeader?.offsetHeight ?? 80,
-    );
+    const activationLine = (siteHeader?.offsetHeight ?? 80) + sectionActivationOffset;
+    const activeSectionId =
+      findActiveSectionId(
+        pageSections.map((section) => ({
+          id: section.id,
+          top: section.getBoundingClientRect().top,
+        })),
+        activationLine,
+      ) ?? pageSections[0]?.id;
 
     for (const link of sectionLinks) {
       const isCurrent = link.dataset.sectionLink === activeSectionId;
@@ -115,7 +118,7 @@ if ("IntersectionObserver" in window && sectionLinks.length > 0 && pageSections.
   const observeSections = () => {
     observer?.disconnect();
     observer = new IntersectionObserver(updateCurrentSection, {
-      rootMargin: createNavigationRootMargin(siteHeader?.offsetHeight ?? 80),
+      rootMargin: createNavigationRootMargin((siteHeader?.offsetHeight ?? 80) + sectionActivationOffset),
       threshold: 0,
     });
 
@@ -125,4 +128,11 @@ if ("IntersectionObserver" in window && sectionLinks.length > 0 && pageSections.
 
   observeSections();
   window.addEventListener("resize", observeSections);
+}
+
+const mobileNavigation = document.querySelector<HTMLDetailsElement>(".docs-mobile-nav");
+for (const link of mobileNavigation?.querySelectorAll<HTMLAnchorElement>("a[href^='#']") ?? []) {
+  link.addEventListener("click", () => {
+    if (mobileNavigation) mobileNavigation.open = false;
+  });
 }

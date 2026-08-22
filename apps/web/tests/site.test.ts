@@ -154,6 +154,41 @@ describe("Kepos public website", () => {
     expect(docs.match(/data-platform-download="(?:android|macos|windows)"/g)?.length).toBe(3);
   });
 
+  it("keeps desktop and mobile documentation navigation on the same section contract", () => {
+    const docs = page("docs/index.html");
+    const css = readProjectFile("src/docs.css");
+
+    expect(css).not.toBeNull();
+    if (!css) return;
+
+    const sectionIds = new Set(
+      [...docs.matchAll(/<[a-z]+\b[^>]*\sid="([^"]+)"[^>]*data-section="([^"]+)"/g)].flatMap((match) =>
+        match[1] && match[2] ? [match[1], match[2]] : [],
+      ),
+    );
+    const navigationTargets = [...docs.matchAll(/<a\b[^>]*>/g)].flatMap((match) => {
+      const tag = match[0] ?? "";
+      const section = tag.match(/\sdata-section-link="([^"]+)"/)?.[1];
+      const target = tag.match(/\shref="#([^"]+)"/)?.[1];
+      return section && target ? [{ section, target }] : [];
+    });
+
+    expect(docs).toMatch(/<aside\b[^>]*aria-label="Documentation navigation"/);
+    expect(docs).toMatch(/<details\b[^>]*class="docs-mobile-nav"/);
+    expect(docs).toMatch(/<article\b[^>]*class="docs-article"/);
+    expect(navigationTargets.length).toBeGreaterThanOrEqual(18);
+    expect(navigationTargets.every(({ section, target }) => section === target && sectionIds.has(target))).toBe(true);
+    expect(navigationTargets.filter(({ section }) => section === "start").length).toBeGreaterThanOrEqual(2);
+    expect(docs).toMatch(/aria-current="location"/);
+    expect(css).toMatch(
+      /\.docs-layout\s*\{[\s\S]*grid-template-columns:\s*var\(--docs-sidebar-width\) minmax\(0, 78ch\)/,
+    );
+    expect(css).toMatch(/\.docs-article\s*\{[\s\S]*max-width:\s*78ch/);
+    expect(css).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*\.docs-sidebar\s*\{\s*display:\s*none;[\s\S]*\.docs-mobile-nav\s*\{\s*display:\s*block;/,
+    );
+  });
+
   it("publishes indexable docs metadata and a home link", () => {
     const html = page("docs/index.html");
 
