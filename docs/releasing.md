@@ -69,7 +69,11 @@ unset KEPOS_ANDROID_KEYSTORE KEPOS_ANDROID_KEY_ALIAS KEPOS_ANDROID_KEY_PASSWORD
 ```
 
 `release:windows` transfers only the tracked source snapshot plus one
-separately generated `kepos-bootstrap.json` sidecar to `nuc-kep`, invokes
+separately generated `kepos-bootstrap.json` sidecar to `nuc-kep`. Dogfood and
+rehearsal launches reuse `C:\\kb\\runs\\test`; formal releases reuse the separate
+`C:\\kb\\runs\\formal` path. Keeping each executable path stable preserves its
+Windows Firewall identity across runs while each invocation still replaces the
+entire test-owned directory and uses isolated state. The workflow invokes
 `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`, builds in the
 NTFS `C:\kb` workspace, and copies back only the verified
 `kepos-windows-x64.zip`. The ZIP has one top-level `Kepos` directory:
