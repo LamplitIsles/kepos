@@ -12,6 +12,7 @@ import type { DhtAddress } from "../../../src/mux/hyperdht.js";
 import type { Route } from "../../../src/mux/route.js";
 import type { PublisherRuntimePolicy } from "../../../src/runtime/publisher.js";
 import type { SubscriberService } from "../../../src/runtime/subscriber.js";
+import { setupPublisher } from "../../../src/state/publisher.js";
 import { setupSubscriber } from "../../../src/state/subscriber.js";
 
 export interface DesktopSubscriberSetup {
@@ -56,6 +57,7 @@ export interface LoadDesktopOptionsContext {
   executablePath?: string;
   loadConfig?: typeof loadKeposConfig;
   saveConfig?: typeof saveKeposConfig;
+  setupPublisher?: typeof setupPublisher;
   setupSubscriber?: typeof setupSubscriber;
   platform?: NodeJS.Platform;
 }
