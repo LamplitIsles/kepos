@@ -188,19 +188,6 @@ function Get-PortableRelativePath {
   return $File.FullName.Substring($prefix.Length).Replace('/', '\')
 }
 
-function Assert-Pe64 {
-  param([Parameter(Mandatory = $true)] [string]$Executable)
-  $bytes = [System.IO.File]::ReadAllBytes($Executable)
-  if ($bytes.Length -lt 64) { throw "Windows executable is truncated: $Executable" }
-  $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3c)
-  if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length) { throw "Windows executable has an invalid PE header: $Executable" }
-  if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) {
-    throw "Windows executable is not a PE image: $Executable"
-  }
-  $machine = [System.BitConverter]::ToUInt16($bytes, $peOffset + 4)
-  if ($machine -ne 0x8664) { throw "Windows executable must be x64; machine was 0x$('{0:x4}' -f $machine)" }
-}
-
 function Get-ExecutableDependencies {
   param([Parameter(Mandatory = $true)] [string]$Executable)
   $dumpbin = Get-Command dumpbin.exe -CommandType Application -ErrorAction Stop
@@ -209,6 +196,55 @@ function Get-ExecutableDependencies {
     throw "Unable to inspect executable imports: $Executable"
   }
   return ($output -join "`n")
+}
+
+function Invoke-IconResourceValidation {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Executable,
+    [Parameter(Mandatory = $true)] [string]$ScriptPath,
+    [Parameter(Mandatory = $true)] [string]$Logs,
+    [Parameter(Mandatory = $true)] [string]$Name
+  )
+  if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+    throw "Windows icon validation script is missing: $ScriptPath"
+  }
+  $powershell = Join-Path $PSHOME 'powershell.exe'
+  if (-not (Test-Path -LiteralPath $powershell -PathType Leaf)) { $powershell = 'powershell.exe' }
+  $log = Join-Path $Logs "$Name.log"
+  Write-Host "> $powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $ScriptPath -Mode Validate -Executable $Executable"
+  $previousErrorPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $ScriptPath -Mode Validate -Executable $Executable 2>&1 | Tee-Object -FilePath $log
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorPreference
+  }
+  if ($code -ne 0) { throw "$Name failed with exit code $code; see $log" }
+  Write-Host "${Name}: native icon resources PASS"
+}
+
+function Invoke-InstallerAcceptance {
+  param(
+    [Parameter(Mandatory = $true)] [string]$PayloadRoot,
+    [Parameter(Mandatory = $true)] [string]$RunRoot,
+    [Parameter(Mandatory = $true)] [string]$Repository,
+    [Parameter(Mandatory = $true)] [string]$Logs
+  )
+  $scriptPath = Join-Path $Repository 'scripts\windows\installer-acceptance.ps1'
+  $powershell = Join-Path $PSHOME 'powershell.exe'
+  if (-not (Test-Path -LiteralPath $powershell -PathType Leaf)) { $powershell = 'powershell.exe' }
+  $log = Join-Path $Logs 'installer-acceptance.log'
+  Write-Host "> $powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $scriptPath -PayloadRoot $PayloadRoot -RunRoot $RunRoot"
+  $previousErrorPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $scriptPath -PayloadRoot $PayloadRoot -RunRoot $RunRoot 2>&1 | Tee-Object -FilePath $log
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorPreference
+  }
+  if ($code -ne 0) { throw "installer acceptance failed with exit code $code; see $log" }
 }
 
 function Assert-SelfContainedImports {
@@ -223,6 +259,17 @@ function Assert-SelfContainedImports {
   $runtime = Join-Path (Split-Path -Parent $Executable) 'Microsoft.WindowsAppRuntime.dll'
   if (-not (Test-Path -LiteralPath $runtime -PathType Leaf)) {
     throw "Executable import is not backed by a local Windows App Runtime DLL: $runtime"
+  }
+}
+
+function Assert-WindowsInstallerFiles {
+  param([Parameter(Mandatory = $true)] [string]$PackageRoot)
+  foreach ($file in @('Install.cmd', 'install.ps1', 'Uninstall.cmd', 'uninstall.ps1')) {
+    $path = Join-Path $PackageRoot $file
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+      throw "Windows portable package installer file is not a regular file: $path"
+    }
   }
 }
 
@@ -404,6 +451,7 @@ function Invoke-PortableRelease {
   if (-not (Test-Path -LiteralPath $ProductFileSetPath -PathType Leaf)) {
     throw "Windows product file set is missing: $ProductFileSetPath"
   }
+  Assert-WindowsInstallerFiles $sourceRoot
   $fileSet = @(Get-PortableFileSet $sourceRoot)
   $packageRoot = Join-Path $RunDirectory 'package'
   $packageApp = Join-Path $packageRoot 'Kepos'
@@ -435,8 +483,12 @@ function Invoke-PortableRelease {
   New-Item -ItemType Directory -Path $extracted -Force | Out-Null
   Expand-Archive -LiteralPath $artifact -DestinationPath $extracted -Force
   $extractedApp = Join-Path $extracted 'Kepos'
+  Assert-WindowsInstallerFiles $extractedApp
   $extractedSet = @(Get-PortableFileSet $extractedApp)
   if (($fileSet -join "`n") -ne ($extractedSet -join "`n")) { throw 'Windows ZIP changed the validated portable file set' }
+  $extractedExecutable = Join-Path $extractedApp 'App\Kepos.exe'
+  & (Join-Path $Repository 'scripts\windows\assert-pe64.ps1') -Executable $extractedExecutable
+  Invoke-IconResourceValidation $extractedExecutable (Join-Path $Repository 'scripts\windows\icon-resources.ps1') $Logs 'icon-artifact'
   $script:ReleaseValidationOwned = $true
   Invoke-LoggedNative $Node 'self-contained-runtime-artifact' @(
     '--import',
@@ -752,7 +804,23 @@ try {
     Invoke-LoggedNative $BareMake 'bare-win-ui-test-build' @('build', '--build', $TestingBuild)
     Invoke-LoggedNative $BareMake 'bare-win-ui-test-install' @('install', '--build', $TestingBuild, '--prefix', (Join-Path $TestWinUi 'prebuilds'))
     Invoke-LoggedNative $BareBuild 'bare-win-ui-build' @('--base', $TestWinUi, '--host', 'win32-x64', '--runtime', (Join-Path $TestWinUi 'runtime.js'), '--out', $NativeCheck, (Join-Path $TestWinUi 'sample.js'))
-  $NativeExecutable = Get-ChildItem -LiteralPath $NativeCheck -Filter '*.exe' -Recurse | Select-Object -First 1
+    # The adapter sample is a separate executable, but it still needs the same
+    # self-contained Windows App Runtime files as the product. bare-build only
+    # copies the adapter's direct DLL, so complete the test output from the
+    # freshly installed, test-owned prebuild before launching it.
+    $NativeCheckApp = Join-Path $NativeCheck 'bare-win-ui\App'
+    $NativeRuntime = Join-Path $TestWinUi 'prebuilds\win32-x64\bare'
+    Assert-SafeOwnedPath $NativeCheck $NativeRuntime 'bare-win-ui test runtime'
+    Assert-SafeOwnedPath $NativeCheck $NativeCheckApp 'bare-win-ui test executable directory'
+    if (-not (Test-Path -LiteralPath $NativeRuntime -PathType Container)) { throw "bare-win-ui test runtime is missing: $NativeRuntime" }
+    New-Item -ItemType Directory -Path $NativeCheckApp -Force | Out-Null
+    foreach ($runtimeItem in Get-ChildItem -LiteralPath $NativeRuntime -Force) {
+      if (($runtimeItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "bare-win-ui test runtime contains a link: $($runtimeItem.FullName)"
+      }
+      Copy-Item -LiteralPath $runtimeItem.FullName -Destination (Join-Path $NativeCheckApp $runtimeItem.Name) -Recurse -Force
+    }
+  $NativeExecutable = Get-Item -LiteralPath (Join-Path $NativeCheck 'bare-win-ui\App\bare-win-ui.exe') -Force -ErrorAction SilentlyContinue
   if ($null -eq $NativeExecutable) { throw "bare-win-ui native check produced no executable under $NativeCheck" }
   # Inherit both probe streams so a child filling either pipe cannot deadlock
   # the bounded wait. Transcript captures console output; this result log is an
@@ -817,15 +885,21 @@ try {
   Assert-NoReparsePointsInTree $RepositoryArtifact 'Repository desktop output'
   New-Item -ItemType Directory -Path (Join-Path $RunDirectory 'dist') -Force | Out-Null
   Copy-Item -LiteralPath $RepositoryArtifact -Destination $Artifact -Recurse -Force
-  $StagedExecutable = Join-Path $Artifact 'Kepos\App\Kepos.exe'
+  $StagedPackageRoot = Join-Path $Artifact 'Kepos'
+  Assert-WindowsInstallerFiles $StagedPackageRoot
+  $StagedExecutable = Join-Path $StagedPackageRoot 'App\Kepos.exe'
   if (-not (Test-Path -LiteralPath $StagedExecutable -PathType Leaf)) { throw "staged Kepos.exe was not produced: $StagedExecutable" }
+  & (Join-Path $Repository 'scripts\windows\assert-pe64.ps1') -Executable $StagedExecutable
+  Invoke-IconResourceValidation $StagedExecutable (Join-Path $Repository 'scripts\windows\icon-resources.ps1') $Logs 'icon-staged'
   Get-ChildItem -LiteralPath $Artifact -File -Recurse | Select-Object FullName, Length | Format-Table -AutoSize | Out-File (Join-Path $Logs 'artifact-files.txt')
   if ($Workflow -eq 'dogfood') {
     $PackagedSmokeRoot = Join-Path $RunDirectory 'packaged-smoke'
     Assert-SafeOwnedPath $RunDirectory $PackagedSmokeRoot 'packaged smoke root'
     Invoke-PortableSmoke $StagedExecutable $PackagedSmokeRoot (Join-Path $Logs 'packaged-smoke') $BootstrapAsset $Node
+    Invoke-InstallerAcceptance $StagedPackageRoot $RunDirectory $Repository $Logs
   } elseif ($Workflow -eq 'release') {
     Invoke-PortableRelease $Repository $RunDirectory $ProductFileSetPath $Logs $ReleaseArtifactName $ReleaseMode $BootstrapAsset $Node
+    Invoke-InstallerAcceptance (Join-Path $RunDirectory 'extracted\Kepos') $RunDirectory $Repository $Logs
   }
   Write-Host "Windows desktop build complete: $Artifact"
 } catch {

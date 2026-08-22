@@ -21,6 +21,14 @@ const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const powerShellOnWsl = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
 const buildScript = path.join(repository, "scripts", "windows", "build-kepos.ps1");
 const pchCacheScript = path.join(repository, "scripts", "windows", "pch-cache.ps1");
+const peArchitectureScript = path.join(repository, "scripts", "windows", "assert-pe64.ps1");
+const windowsInstallerScripts = [
+  "assert-pe64.ps1",
+  "icon-resources.ps1",
+  "install.ps1",
+  "uninstall.ps1",
+  "installer-acceptance.ps1",
+];
 const controlScript = path.join(repository, "scripts", "windows", "nuc-kep.sh");
 const trackedManifestScript = path.join(
   repository,
@@ -407,6 +415,71 @@ test("Windows build PowerShell parses with the supported Windows PowerShell", (t
   );
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("Windows installer and icon PowerShell scripts parse with Windows PowerShell", (t) => {
+  const scripts = [buildScript, ...windowsInstallerScripts.map((name) => path.join(repository, "scripts", "windows", name))];
+  const windowsScripts = scripts.map(windowsPath);
+  if (windowsScripts.some((script) => !script)) {
+    t.skip("the exact Windows PowerShell executable is unavailable");
+    return;
+  }
+
+  const powershell = process.platform === "win32" ? "powershell.exe" : powerShellOnWsl;
+  const quote = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+  const command = windowsScripts
+    .map((script) => `[System.Management.Automation.Language.Parser]::ParseFile(${quote(script!)}, [ref]$tokens, [ref]$errors) > $null; if ($errors.Count -gt 0) { $errors | Out-Host; exit 1 }`)
+    .join("; ");
+  const result = spawnSync(
+    powershell,
+    ["-NoProfile", "-NonInteractive", "-Command", `$tokens = $null; $errors = $null; ${command}`],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test("Windows PE architecture gate accepts x64 and rejects another machine", (t) => {
+  const script = windowsPath(peArchitectureScript);
+  if (!script) {
+    t.skip("the exact Windows PowerShell executable is unavailable");
+    return;
+  }
+
+  const root = mkdtempSync(path.join(os.tmpdir(), "kepos-windows-pe64-"));
+  const x64 = path.join(root, "x64.exe");
+  const x86 = path.join(root, "x86.exe");
+  const createPe = (machine: number): Buffer => {
+    const bytes = Buffer.alloc(70);
+    bytes.writeInt32LE(64, 0x3c);
+    bytes.write("PE\0\0", 64, "binary");
+    bytes.writeUInt16LE(machine, 68);
+    return bytes;
+  };
+  writeFileSync(x64, createPe(0x8664));
+  writeFileSync(x86, createPe(0x014c));
+
+  try {
+    const powershell = process.platform === "win32" ? "powershell.exe" : powerShellOnWsl;
+    const x64Path = windowsPath(x64);
+    const x86Path = windowsPath(x86);
+    assert.ok(x64Path && x86Path);
+    const accepted = spawnSync(
+      powershell,
+      ["-NoProfile", "-NonInteractive", "-File", script, "-Executable", x64Path],
+      { encoding: "utf8" },
+    );
+    assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
+
+    const rejected = spawnSync(
+      powershell,
+      ["-NoProfile", "-NonInteractive", "-File", script, "-Executable", x86Path],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(rejected.status, 0, rejected.stderr || rejected.stdout);
+    assert.match(`${rejected.stdout}\n${rejected.stderr}`, /must be x64.*0x014c/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("Windows PCH cache probe removes only generated hxx outputs", (t) => {

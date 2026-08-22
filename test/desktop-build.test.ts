@@ -17,6 +17,7 @@ import {
   desktopBootstrapAssetPathForTarget,
   desktopBuildCommands,
   desktopBuildPlan,
+  WINDOWS_INSTALLER_FILES,
   readDesktopBootstrapAssetInput,
   requestedBootstrapAsset,
   requestedTarget,
@@ -324,6 +325,19 @@ test("desktop Windows plan builds an unpackaged WinUI directory and links native
       arguments_.some((argument) => argument.endsWith("bare-process")),
     ),
   );
+  assert.deepEqual(WINDOWS_INSTALLER_FILES, [
+    "Install.cmd",
+    "install.ps1",
+    "Uninstall.cmd",
+    "uninstall.ps1",
+  ]);
+  const iconCommand = commands.find(({ command }) => command === "powershell");
+  assert.deepEqual(iconCommand?.arguments.slice(0, 2), [
+    "-Mode",
+    "EmbedAndValidate",
+  ]);
+  assert.ok(iconCommand?.arguments.includes("-Executable"));
+  assert.ok(iconCommand?.arguments.includes("-Icon"));
 });
 
 test("desktop target and bootstrap input parsing reject missing or unknown values", () => {
