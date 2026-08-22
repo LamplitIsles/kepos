@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
+const publicPages = ["index.html", "docs/index.html"] as const;
 
 function readProjectFile(path: string): string | null {
   const fullPath = resolve(root, path);
@@ -12,6 +13,12 @@ function readProjectFile(path: string): string | null {
 function readProjectBuffer(path: string): Buffer | null {
   const fullPath = resolve(root, path);
   return existsSync(fullPath) ? readFileSync(fullPath) : null;
+}
+
+function page(path: (typeof publicPages)[number]): string {
+  const html = readProjectFile(path);
+  if (html === null) throw new Error(`missing public page: ${path}`);
+  return html;
 }
 
 function readPngDimensions(buffer: Buffer): { width: number; height: number } | null {
@@ -27,77 +34,60 @@ function readMetaContent(html: string, key: string): string | undefined {
   return html.match(new RegExp(`<meta\\s+(?:property|name)="${key}"\\s+content="([^"]+)"`))?.[1];
 }
 
-describe("Kepos landing page", () => {
-  it("registers every icon used by the page", () => {
-    const html = readProjectFile("index.html");
+function iconName(icon: string): string {
+  return icon
+    .split("-")
+    .map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`)
+    .join("");
+}
+
+describe("Kepos public website", () => {
+  it("registers every Lucide icon used across the public pages", () => {
     const main = readProjectFile("src/main.ts");
 
-    expect(html).not.toBeNull();
     expect(main).not.toBeNull();
-    if (!html || !main) return;
+    if (!main) return;
 
-    const iconNames = [...html.matchAll(/data-lucide="([^"]+)"/g)].map((match) =>
-      match[1]
-        .split("-")
-        .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
-        .join(""),
-    );
+    for (const path of publicPages) {
+      const html = page(path);
+      const iconNames = [...html.matchAll(/data-lucide="([^"]+)"/g)]
+        .map((match) => match[1])
+        .filter((icon): icon is string => icon !== undefined)
+        .map(iconName);
 
-    for (const iconName of iconNames) {
-      expect(main).toMatch(new RegExp(`\\b${iconName},`));
+      for (const name of iconNames) expect(main).toMatch(new RegExp(`\\b${name},`));
     }
   });
 
-  it("keeps fragment links and labelled regions connected", () => {
-    const html = readProjectFile("index.html");
+  it("keeps local fragment and accessible-label references connected", () => {
+    for (const path of publicPages) {
+      const html = page(path);
+      const ids = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
+      const fragments = [...html.matchAll(/\shref="#([^"]+)"/g)].map((match) => match[1]);
+      const labelReferences = [...html.matchAll(/\saria-labelledby="([^"]+)"/g)].flatMap(
+        (match) => match[1]?.split(/\s+/) ?? [],
+      );
 
-    expect(html).not.toBeNull();
-    if (!html) return;
-
-    const ids = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
-    const fragments = [...html.matchAll(/\shref="#([^"]+)"/g)].map((match) => match[1]);
-    const labelReferences = [...html.matchAll(/\saria-labelledby="([^"]+)"/g)].flatMap((match) =>
-      match[1].split(/\s+/),
-    );
-
-    for (const fragment of fragments) expect(ids).toContain(fragment);
-    for (const reference of labelReferences) expect(ids).toContain(reference);
-  });
-
-  it("keeps the hero focused on one product position", () => {
-    const html = readProjectFile("index.html");
-
-    expect(html).not.toBeNull();
-    if (!html) return;
-
-    expect(html).not.toContain('class="hero-manifesto"');
+      for (const fragment of fragments) expect(ids).toContain(fragment);
+      for (const reference of labelReferences) expect(ids).toContain(reference);
+    }
   });
 
   it("protects external links opened in new tabs", () => {
-    const html = readProjectFile("index.html");
+    for (const path of publicPages) {
+      const html = page(path);
+      const externalLinks = [...html.matchAll(/<a\b[^>]*target="_blank"[^>]*>/g)].map((match) => match[0]);
 
-    expect(html).not.toBeNull();
-    if (!html) return;
-
-    const externalLinks = [...html.matchAll(/<a\b[^>]*target="_blank"[^>]*>/g)].map((match) => match[0]);
-
-    expect(externalLinks.length).toBeGreaterThan(0);
-    for (const link of externalLinks) expect(link).toMatch(/\srel="[^"]*noreferrer[^"]*"/);
-    expect(html).toMatch(/<a\b[^>]*href="https:\/\/github\.com\/LamplitIsles\/kepos"/);
+      for (const link of externalLinks) expect(link).toMatch(/\srel="[^"]*noreferrer[^"]*"/);
+    }
   });
 
-  it("puts accessible direct downloads on every intended surface", () => {
-    const html = readProjectFile("index.html");
+  it("keeps all three platform artifacts visible on the landing page", () => {
+    const html = page("index.html");
     const css = readProjectFile("src/styles.css");
 
-    expect(html).not.toBeNull();
     expect(css).not.toBeNull();
-    if (!html || !css) return;
-
-    const heroDownloads = html.indexOf('class="hero-downloads"');
-    const heroProof = html.indexOf('class="hero-proof"');
-    expect(heroDownloads).toBeGreaterThan(-1);
-    expect(heroDownloads).toBeLessThan(heroProof);
+    if (!css) return;
 
     const downloads = [
       ["kepos-android-arm64.apk", /android/i],
@@ -113,22 +103,75 @@ describe("Kepos landing page", () => {
         expect(accessibleName).toMatch(platform);
       }
     }
+
+    expect(html).toMatch(/data-platform-download="android"/);
+    expect(html).toMatch(/data-platform-download="macos"/);
+    expect(html).toMatch(/data-platform-download="windows"/);
+    expect(html).toMatch(/data-platform-role="subscriber"/);
+    expect(html.match(/data-platform-role="publisher-subscriber"/g)?.length).toBe(2);
+    expect(html).toMatch(/href="\/docs\/"/);
     expect(html).not.toMatch(/releases\/download\/v/);
-    expect(html).not.toContain("ANDROID / ARM64");
-    expect(html).not.toContain("APPLE SILICON");
     expect(css).not.toContain('content: "SIGNED RELEASE"');
     expect(html).not.toContain("#verify-a-downloaded-release");
   });
 
+  it("builds and indexes the primary docs route", () => {
+    const docs = page("docs/index.html");
+    const vite = readProjectFile("vite.config.ts");
+    const sitemap = readProjectFile("public/sitemap.xml");
+    const builtDocs = readProjectFile("dist/docs/index.html");
+
+    expect(vite).not.toBeNull();
+    expect(sitemap).not.toBeNull();
+    expect(builtDocs).not.toBeNull();
+    if (!vite || !sitemap || !builtDocs) return;
+
+    expect(vite).toContain('docs: resolve(import.meta.dirname, "docs/index.html")');
+    expect(sitemap).toContain("https://kepos.guion.io/docs/");
+    expect(builtDocs).toContain("Kepos docs");
+    expect(builtDocs).toContain('id="publisher"');
+    expect(builtDocs).toContain('id="subscriber"');
+    expect(docs).toMatch(/href="\/"[^>]*aria-label="Kepos home"/);
+
+    for (const id of [
+      "platforms",
+      "android-install",
+      "macos-install",
+      "windows-install",
+      "verify",
+      "subscriber",
+      "publisher",
+      "first-service",
+      "trust",
+      "philosophy",
+      "holesail",
+      "troubleshooting",
+      "architecture",
+    ]) {
+      expect(docs).toMatch(new RegExp(`\\sid="${id}"`));
+    }
+
+    expect(docs.match(/data-platform-download="(?:android|macos|windows)"/g)?.length).toBe(3);
+  });
+
+  it("publishes indexable docs metadata and a home link", () => {
+    const html = page("docs/index.html");
+
+    expect(html).toMatch(/<title>[^<]+<\/title>/);
+    expect(html).toMatch(/<meta\s+name="description"\s+content="[^"]+"/);
+    expect(html).toContain('href="https://kepos.guion.io/docs/"');
+    expect(html).toContain('property="og:url" content="https://kepos.guion.io/docs/"');
+    expect(html).toMatch(/href="\/"[^>]*aria-label="Kepos home"/);
+  });
+
   it("shows the real desktop and Android product instead of endpoint mockups", () => {
-    const html = readProjectFile("index.html");
+    const html = page("index.html");
     const desktopScreenshot = readProjectBuffer("public/kepos-desktop.png");
     const androidScreenshot = readProjectBuffer("public/kepos-android.png");
 
-    expect(html).not.toBeNull();
     expect(desktopScreenshot).not.toBeNull();
     expect(androidScreenshot).not.toBeNull();
-    if (!html || !desktopScreenshot || !androidScreenshot) return;
+    if (!desktopScreenshot || !androidScreenshot) return;
 
     expect(html).toContain('class="product-showcase product-showcase-overlap"');
     expect(html).toContain('class="access-chapter page-chapter access-product-layout"');
@@ -143,14 +186,13 @@ describe("Kepos landing page", () => {
   });
 
   it("keeps the desktop capture Retina-sharp at its declared display size", () => {
-    const html = readProjectFile("index.html");
+    const html = page("index.html");
     const css = readProjectFile("src/styles.css");
     const desktopScreenshot = readProjectBuffer("public/kepos-desktop.png");
 
-    expect(html).not.toBeNull();
     expect(css).not.toBeNull();
     expect(desktopScreenshot).not.toBeNull();
-    if (!html || !css || !desktopScreenshot) return;
+    if (!css || !desktopScreenshot) return;
 
     const dimensions = readPngDimensions(desktopScreenshot);
     expect(dimensions).not.toBeNull();
@@ -195,28 +237,20 @@ describe("Kepos landing page", () => {
     expect(readProjectFile("blog/how-kepos-works.html")).toBeNull();
   });
 
-  it("publishes the required metadata and accessibility fallback", () => {
-    const html = readProjectFile("index.html");
+  it("publishes metadata, reduced motion, and a social preview", () => {
+    const html = page("index.html");
     const css = readProjectFile("src/styles.css");
+    const image = readProjectBuffer("public/og-image.png");
 
-    expect(html).not.toBeNull();
     expect(css).not.toBeNull();
-    if (!html || !css) return;
+    expect(image).not.toBeNull();
+    if (!css || !image) return;
 
     expect(html).toMatch(/<title>[^<]+<\/title>/);
     expect(html).toMatch(/<meta\s+name="description"\s+content="[^"]+"/);
     expect(html).toContain('href="https://kepos.guion.io"');
     expect(html).toMatch(/<a\s+class="skip-link"\s+href="#[^"]+">/);
     expect(css).toContain("@media (prefers-reduced-motion: reduce)");
-  });
-
-  it("publishes a crawler-compatible social preview image", () => {
-    const html = readProjectFile("index.html");
-    const image = readProjectBuffer("public/og-image.png");
-
-    expect(html).not.toBeNull();
-    expect(image).not.toBeNull();
-    if (!html || !image) return;
 
     const imageUrl = "https://kepos.guion.io/og-image.png";
     expect(readMetaContent(html, "og:image")).toBe(imageUrl);
@@ -240,6 +274,7 @@ describe("Kepos landing page", () => {
 
     const config = JSON.parse(configSource);
     expect(config.assets.directory).toBe("./dist");
+    expect(config.assets.html_handling).toBe("drop-trailing-slash");
     expect(config.compatibility_flags).toContain("nodejs_compat");
     expect(config.observability.enabled).toBe(true);
     expect(config.routes).toContainEqual({

@@ -1,5 +1,7 @@
 # Windows desktop
 
+For end-user installation, pairing, and troubleshooting, start with the [public Kepos guide](https://kepos.guion.io/docs/). This page keeps Windows packaging and operator detail.
+
 Kepos supports **Windows 10 x64 build 19045 (22H2) and later, and Windows 11
 x64** as a portable desktop application with an optional per-user scripted
 install. Download `kepos-windows-x64.zip`, verify it, and keep the extracted

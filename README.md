@@ -5,166 +5,64 @@
 
 **Share a service, not a network.**
 
-Kepos gives trusted devices access to the services you choose without exposing
-those services on a public TCP port. A publisher might share Navidrome and SSH;
-an approved phone or laptop receives ordinary local URLs and ports for only
-those services.
+Kepos gives trusted devices access to selected services without exposing a
+public service port or joining every device to a virtual subnet. A publisher
+owns the service and its allowlist; a subscriber receives the allowed service
+as an ordinary local URL or TCP port.
 
-There is no Kepos account and no Kepos-operated control plane. Device keys stay
-on the devices that created them. The publisher decides who may connect and can
-apply a narrower allowlist to each service.
+Kepos has no hosted account or Kepos-operated control plane. Device keys stay
+on the devices that created them. The current service path is TCP-only, carried
+through an authenticated peer connection whose Internet transport uses UDP.
 
 > Kepos is a developer preview. Android APKs, Apple Silicon macOS ZIPs, and
-> Windows x64 portable ZIPs for Windows 10 x64 build 19045 (22H2) and later plus
-> Windows 11 x64 are published for direct download with minisign verification.
-> They are not app-store releases; the macOS app is ad-hoc signed and not
-> notarized, and the Windows app is not Authenticode-signed and may trigger
-> SmartScreen.
+> Windows x64 portable ZIPs are available for direct download. Android is
+> sideload-only; macOS is ad-hoc signed and not notarized; Windows is not
+> Authenticode-signed and may trigger SmartScreen.
 
-## Why Kepos exists
+## Start here
 
-You have music, files, development tools, or an SSH shell running somewhere
-else. Making them reachable usually means publishing ports, joining every
-device to a virtual network, or trusting a hosted account to define the
-relationship.
+The **[Kepos user documentation](https://kepos.guion.io/docs/)** is the
+primary installation, pairing, publisher, subscriber, trust, comparison, and
+troubleshooting guide.
 
-Kepos takes a smaller view:
+Developers and operators can continue with:
 
-1. The computer running a service publishes its name, not its whole network.
-2. You choose **Add device** and show a short-lived QR code.
-3. The new device proves which cryptographic key it owns.
-4. You inspect its fingerprint and choose **Allow** or **Deny**.
-5. An allowed service appears as a local address such as
-   `http://navidrome.localhost:17480/` or `ssh -p 2222 user@127.0.0.1`.
+- [Developer architecture](docs/architecture.md)
+- [CLI, identity, and configuration](docs/cli.md)
+- [Platform and release guides](docs/platforms/)
+- [Nix, container, and Kubernetes deployment](docs/deployment.md)
+- [Network transport and compatibility](docs/network-transport-and-compatibility.md)
 
-Approval promotes the connection that carried the pairing request. The new
-device does not need a publisher restart or a second NAT traversal. Unknown
-devices cannot read the service registry while they wait.
-
-The implementation follows four rules:
-
-- **Services are the unit of sharing.** Access to one machine does not imply
-  access to every port on it.
-- **Devices own their identity.** Public keys are shared; secret keys are not
-  copied between installations.
-- **The local side stays boring.** Existing browsers, SSH clients, and CLIs use
-  loopback URLs and ports.
-- **Failure is visible and bounded.** Local listeners survive reconnects, stale
-  peer paths are replaced, and hole-punch observations omit candidate IP
-  addresses.
-
-## What works today
+## Supported surfaces
 
 | Surface | Roles | Current boundary |
 | --- | --- | --- |
-| Headless CLI | Publisher and subscriber | Node.js 24; one shared device process or standalone role processes; persistent local HTTP gateway and raw TCP listeners |
-| Nix / Home Manager | Publisher and CLI | Declarative public policy; private keys never enter the Nix store |
-| Container | Publisher and subscriber | Non-root `linux/amd64` image published to GHCR from `main` |
-| Kubernetes path | Subscriber gateway | Pod-facing hostname routing exists; reusable manifests are not yet shipped here |
-| Android | Subscriber | Android 12+, `arm64-v8a`, sideload-only; one persistent Bare Worklet |
-| macOS | Publisher, subscriber, or both | Apple Silicon, ad-hoc-signed direct-download ZIP, native tray app |
-| Windows | Publisher, subscriber, or both | Windows 10 x64 build 19045+ and Windows 11 x64, unsigned portable ZIP with optional per-user install, notification-area app |
+| Android | Subscriber | Android 12+, `arm64-v8a`, sideload-only; persistent app-private subscriber identity |
+| macOS | Publisher, subscriber, or both | Apple Silicon; native desktop app; ad-hoc-signed direct-download ZIP |
+| Windows | Publisher, subscriber, or both | Windows 10 x64 build 19045 (22H2)+ and Windows 11 x64; portable ZIP with optional per-user install |
+| Headless CLI | Publisher, subscriber, or both | Node.js 24; local HTTP gateway and explicit raw TCP listeners |
+| Nix / Home Manager | Publisher and CLI | Declarative publisher policy; private keys stay out of the Nix store |
+| Container | Publisher and subscriber | Non-root `linux/amd64` image; deployment owns state, networking, and supervision |
 
-The direct-download release includes `kepos-android-arm64.apk`,
-`kepos-macos-arm64.zip`, and `kepos-windows-x64.zip`. Verify `SHA256SUMS` with the
-repository's minisign key before opening any archive; the [latest release](https://github.com/LamplitIsles/kepos/releases/latest)
-contains the five release assets.
+The repository's Kubernetes path is an operator-owned subscriber gateway, not a
+shipped cluster product. See [deployment](docs/deployment.md) for its boundary.
 
-The container and Pod-facing gateway have also been exercised in a private
-Kubernetes deployment. That proves the path, not a supported cluster product:
-operators still own DNS, same-node routing, firewall rules, and rollout.
+## Direct downloads
 
-On Android, HTTP services use `http://<service-id>.localhost:17480/`. Registry
-entries without a built-in action use that HTTP fallback instead of being
-hidden. Fixed raw listeners map `127.0.0.1:17890` to Mihomo,
-`127.0.0.1:13080` to dsh, and `127.0.0.1:18789` to OpenClaw. Mihomo's
-mixed port supports HTTP proxy and SOCKS5 TCP clients; Kepos does not carry its
-UDP listener.
+These links follow GitHub's latest **stable** release and do not select beta
+prereleases:
 
-## The path through Kepos
+- [Android APK](https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-android-arm64.apk) — subscriber only
+- [Apple Silicon macOS ZIP](https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-macos-arm64.zip) — publisher and subscriber
+- [Windows x64 ZIP](https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-windows-x64.zip) — publisher and subscriber
 
-```text
-browser / ssh / native app
-          |
-          | localhost URL or TCP port
-          v
-  subscriber gateway
-          |
-          | named Protomux channel
-          v
- one authenticated HyperDHT connection
-          |
-          | named Protomux channel
-          v
-      publisher
-          |
-          | loopback TCP
-          v
-   Navidrome / SSH / Dagger / another TCP service
-```
+Download `SHA256SUMS` and `SHA256SUMS.minisig` from the same release and follow
+[release and artifact verification](docs/releasing.md) before opening a binary.
 
-A bootstrap node helps a peer enter the DHT. It does not grant access and is
-not the service endpoint. Peer keys authenticate the encrypted outer
-connection; publisher and per-service allowlists authorize what can be opened.
+## Develop
 
-## For Holepunch developers
-
-Kepos is built on the Holepunch stack rather than hiding it behind a generic
-VPN interface.
-
-- **HyperDHT + UDX** provide authenticated peer connections, NAT traversal,
-  path migration, reliable ordered streams, and transport counters over UDP.
-- A dual-role device shares one HyperDHT node and UDP transport while listen and
-  connect operations keep separate publisher and subscriber key pairs.
-- **Protomux** carries the registry, heartbeat control, pairing, and independent
-  service channels on one persistent outer connection.
-- The tunnel is a **split TCP byte-stream proxy over UDX**. Local TCP ends at
-  each Kepos peer; `OPEN`, data, half-close, reset, and backpressure cross the
-  multiplexed channel instead of TCP packets.
-- **Bare** runs the shared subscriber core inside a persistent Android Worklet
-  and powers the native macOS host. The desktop app starts no Node or Electron
-  child process.
-- A control heartbeat replaces silent paths in bounded time. A publisher keeps
-  only one current control-ready outer connection for each authenticated
-  subscriber identity, so a recovered path cannot race an older one for new
-  service opens.
-- HTTP services share one hostname gateway. Raw protocols such as SSH keep
-  explicit local listeners. Both reuse the same authenticated outer
-  connection.
-
-The native work has required changes in the pinned `bare-app-kit`,
-`bare-web-kit`, and `bare-native` forks for WebView messaging, deterministic
-teardown, external URL handling, window lifecycle, and macOS tray support.
-Those forks are Git submodules so their exact revisions remain reviewable.
-
-The deeper transport model, including where Noise, UDX, Protomux, and local TCP
-begin and end, is documented in
-[Network transport and compatibility](docs/network-transport-and-compatibility.md).
-
-## Trust and keys
-
-Every publisher and subscriber has a cryptographic key pair. The long
-hexadecimal value shown by Kepos is a public key, not a bearer token.
-
-- Share a subscriber public key so a publisher can allow it.
-- Pin the publisher public key so the subscriber connects to the intended peer.
-- Keep publisher seeds and subscriber secret keys on the device that created
-  them. Copying one identity makes two installations impersonate the same
-  device.
-- An empty publisher allowlist denies every subscriber. A service may inherit
-  that list, narrow it, or explicitly deny everyone.
-
-CLI identities live in the selected state directory. Android identities live
-in app-private storage. Public keys and fingerprints may be displayed and
-copied freely; private state must not be committed or placed in logs.
-
-## Start developing
-
-Requirements:
-
-- Node.js 24
-- npm 11
-- Git submodules for desktop development
+Requirements: Node.js 24, npm 11, and initialized Git submodules for desktop
+development.
 
 ```sh
 git clone --recurse-submodules https://github.com/LamplitIsles/kepos.git
@@ -179,7 +77,7 @@ Run the full portable check:
 npm run check
 ```
 
-Platform checks and builds are separate:
+Useful platform checks are separate from the root check:
 
 ```sh
 npm run android:check
@@ -189,7 +87,11 @@ npm run desktop:check
 npm run desktop:native-check
 ```
 
-The public website is the `@lamplitisles/kepos-web` npm workspace:
+`android:install` uses `adb install -r`, preserving app-private state. The
+physical-device gate uses the isolated `io.github.ttalab.kepos.devicetest`
+package so it cannot replace or remove the installed Kepos app.
+
+The website is the `@lamplitisles/kepos-web` npm workspace:
 
 ```sh
 npm run web:dev
@@ -197,32 +99,21 @@ npm run web:verify
 npm run web:deploy:dry-run
 ```
 
-Cloudflare Git Builds are disabled. After a website pull request is merged,
-deploy the current `main` locally with `npm run web:deploy`.
+Cloudflare Git Builds are disabled. Deployment is a local post-merge
+operation; do not use the deploy command for ordinary development.
 
-`android:install` uses `adb install -r`, preserving app-private state and the
-subscriber identity. Physical-device tests use the isolated
-`io.github.ttalab.kepos.devicetest` package, so the test runner cannot replace
-or remove the installed Kepos app.
+## More repository documentation
 
-## Documentation
-
-- [CLI, identity, and configuration](docs/cli.md)
 - [Android subscriber](docs/platforms/android.md)
 - [macOS desktop](docs/platforms/macos.md)
 - [Windows desktop](docs/platforms/windows.md)
 - [Release and artifact verification](docs/releasing.md)
-- [Nix, container, and Kubernetes deployment](docs/deployment.md)
-- [DeepSeek Harness integration](docs/integrations/deepseek-harness.md)
-- [Network transport and compatibility](docs/network-transport-and-compatibility.md)
 - [How Kepos grew from Hypertele](docs/hypertele-provenance.md)
-- [Proposed Capacitor Bare Kit Android bounty](docs/capacitor-bare-kit-android-bounty.md)
 - [Architecture decisions](docs/adr/)
 - [Physical and field evidence](docs/evidence/)
 
-The evidence directory records exact environments, commands, failures, and
-remaining gates. It is kept separate from product claims so a successful spike
-does not silently become a support promise.
+The evidence directory records environments, commands, failures, and remaining
+gates. It is separate from current product claims.
 
 ## License
 

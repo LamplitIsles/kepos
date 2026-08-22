@@ -1,5 +1,7 @@
 # macOS desktop
 
+For end-user installation and pairing, start with the [public Kepos guide](https://kepos.guion.io/docs/). This page keeps the macOS operator and contributor details.
+
 The native Apple Silicon app runs the real publisher, subscriber, or both roles
 inside one Bare process. Enabled roles share one device-owned HyperDHT node and
 one preferred DHT candidate listener while retaining separate role identities
@@ -101,9 +103,10 @@ Allow writes the configured TOML allowlist atomically, updates the live
 publisher, and promotes the same peer connection. Unknown candidates cannot
 read the registry or open services.
 
-The app is currently an ad-hoc-signed, local Apple Silicon build. Developer ID
-signing, notarization, durable downloadable packaging, an updater, Windows, and
-pre-login service operation are not claimed.
+The release ZIP is an ad-hoc-signed Apple Silicon build and is not notarized.
+Developer ID signing, a Mac App Store package, an updater, and pre-login service
+operation are not claimed. Windows is a separately supported desktop target;
+see [Windows desktop](windows.md) for its packaging and prerequisite boundary.
 
 Lifecycle and pairing decisions are documented in
 [ADR 0004](../adr/0004-two-level-subscriber-runtime-locking.md),

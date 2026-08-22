@@ -1,5 +1,7 @@
 # Android subscriber
 
+For end-user installation, pairing, and troubleshooting, start with the [public Kepos guide](https://kepos.guion.io/docs/). This page keeps Android build and device-test detail.
+
 The Android app is a subscriber-only arm64 client for Android 12 and newer. A
 Kotlin foreground service owns one persistent Bare Worklet. That Worklet runs
 the same HyperDHT and Protomux subscriber core as the CLI.

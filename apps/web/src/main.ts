@@ -1,39 +1,89 @@
 import {
   AppWindow,
+  ArrowRight,
   BookOpen,
+  Cable,
+  CircleAlert,
+  CircleCheck,
   CodeXml,
+  Copy,
   createIcons,
   Download,
+  ExternalLink,
   GlobeLock,
   KeyRound,
+  Laptop,
   Layers3,
+  Monitor,
   MonitorSmartphone,
   Network,
+  QrCode,
   RadioTower,
   Route,
+  Server,
+  ShieldCheck,
+  Smartphone,
   UserRoundX,
   Waypoints,
+  WifiOff,
 } from "lucide";
 
 import { createNavigationRootMargin, findActiveSectionId } from "./navigation";
+import { recommendPlatform } from "./platform";
 
 createIcons({
   icons: {
     AppWindow,
+    ArrowRight,
     BookOpen,
+    Cable,
+    CircleAlert,
+    CircleCheck,
     CodeXml,
+    Copy,
     Download,
+    ExternalLink,
     GlobeLock,
     KeyRound,
+    Laptop,
     Layers3,
+    Monitor,
     MonitorSmartphone,
     Network,
+    QrCode,
     RadioTower,
     Route,
+    Server,
+    ShieldCheck,
+    Smartphone,
     UserRoundX,
     Waypoints,
+    WifiOff,
   },
 });
+
+const browserNavigator = navigator as Navigator & {
+  userAgentData?: { platform?: string };
+};
+const recommendedPlatform = recommendPlatform({
+  platform: navigator.platform,
+  userAgent: navigator.userAgent,
+  userAgentDataPlatform: browserNavigator.userAgentData?.platform,
+});
+const recommendationMessages = {
+  android: "Android detected. The subscriber app is ready for this device.",
+  macos: "macOS detected. The Apple Silicon app can publish, subscribe, or do both.",
+  windows: "Windows detected. The desktop app can publish, subscribe, or do both.",
+  unknown: "Choose the build for the device you will use. All three downloads stay available.",
+} as const;
+
+for (const node of document.querySelectorAll<HTMLElement>("[data-platform-recommendation]")) {
+  node.textContent = recommendationMessages[recommendedPlatform];
+}
+for (const link of document.querySelectorAll<HTMLElement>("[data-platform-download]")) {
+  link.classList.toggle("is-recommended", link.dataset.platformDownload === recommendedPlatform);
+}
+document.documentElement.dataset.recommendedPlatform = recommendedPlatform;
 
 const sectionLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>("[data-section-link]"));
 const pageSections = Array.from(document.querySelectorAll<HTMLElement>("[data-section]"));
