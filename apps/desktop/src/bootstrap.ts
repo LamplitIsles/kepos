@@ -10,7 +10,7 @@ import { parseBootstrapAsset } from "../../../src/bootstrap-asset.js";
 import type { DhtAddress } from "../../../src/mux/hyperdht.js";
 import { DEFAULT_GATEWAY_PORT } from "../../../src/home/gateway.js";
 import {
-  setupPublisher,
+  ensurePublisher,
   type SetupPublisherResult,
 } from "../../../src/state/publisher.js";
 import {
@@ -33,7 +33,7 @@ export interface DesktopBootstrapContext {
   loadConfig?: typeof loadKeposConfig;
   readBootstrapAsset?: typeof readDesktopBootstrapAsset;
   saveConfig?: typeof saveKeposConfig;
-  setupPublisher?: typeof setupPublisher;
+  ensurePublisher?: typeof ensurePublisher;
   setupSubscriber?: typeof setupSubscriber;
 }
 
@@ -114,7 +114,7 @@ export async function ensureDesktopBootstrap(
 
   const publisher =
     config.publisher?.enabled === true
-      ? await (context.setupPublisher ?? setupPublisher)({
+      ? await (context.ensurePublisher ?? ensurePublisher)({
           stateDir: paths.publisherStateDir,
           displayName: config.publisher.displayName,
           subscriberPublicKeys: config.publisher.allow,
