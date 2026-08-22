@@ -280,12 +280,15 @@ fi
       true,
     );
 
-    const remoteCommand = readFileSync(
-      path.join(fakeState, "ssh-command-6"),
-      "utf8",
-    );
-    assert.match(remoteCommand, /BootstrapAsset/);
-    assert.match(remoteCommand, /kepos-bootstrap\.json/);
+    const dogfoodCommand = readFileSync(path.join(fakeState, "ssh-command-2"), "utf8");
+    const rehearsalCommand = readFileSync(path.join(fakeState, "ssh-command-4"), "utf8");
+    const formalCommand = readFileSync(path.join(fakeState, "ssh-command-6"), "utf8");
+    assert.match(dogfoodCommand, /C:\\kb\\runs\\test/);
+    assert.match(rehearsalCommand, /C:\\kb\\runs\\test/);
+    assert.doesNotMatch(rehearsalCommand, /C:\\kb\\runs\\formal/);
+    assert.match(formalCommand, /C:\\kb\\runs\\formal/);
+    assert.match(formalCommand, /BootstrapAsset/);
+    assert.match(formalCommand, /kepos-bootstrap\.json/);
 
     const failed = spawnSync("bash", ["scripts/windows/nuc-kep.sh"], {
       cwd: root,

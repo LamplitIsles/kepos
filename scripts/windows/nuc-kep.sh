@@ -18,9 +18,7 @@ RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 readonly RUN_ID
 readonly LOCAL_OUTPUT="${LOCAL_ROOT}/dist/windows/${RUN_ID}"
 readonly LOCAL_BOOTSTRAP="${LOCAL_OUTPUT}/kepos-bootstrap.json"
-readonly REMOTE_RUN="${WINDOWS_BUILDS}/${RUN_ID}"
 readonly REMOTE_SOURCE="${WINDOWS_BUILDS}/source"
-readonly REMOTE_BOOTSTRAP="${REMOTE_RUN}/kepos-bootstrap.json"
 TRANSFER_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/kepos-windows-transfer.XXXXXX")"
 readonly TRANSFER_ARCHIVE
 PARTIAL_ARTIFACT=""
@@ -37,6 +35,15 @@ if [[ $# -gt 0 ]]; then
   [[ $# -eq 2 ]] && RELEASE_MODE="rehearsal"
 fi
 readonly RELEASE_MODE RELEASE_TAG
+if [[ $RELEASE_MODE == release ]]; then
+  WINDOWS_RUN_CHANNEL="formal"
+else
+  WINDOWS_RUN_CHANNEL="test"
+fi
+readonly WINDOWS_RUN_CHANNEL
+readonly REMOTE_RUN="${WINDOWS_BUILDS}/runs/${WINDOWS_RUN_CHANNEL}"
+readonly WINDOWS_RUN_DIRECTORY="${WINDOWS_BUILD_ROOT}\\runs\\${WINDOWS_RUN_CHANNEL}"
+readonly REMOTE_BOOTSTRAP="${REMOTE_RUN}/kepos-bootstrap.json"
 BOOTSTRAP_INPUT_MODE="optional"
 if [[ -n $RELEASE_TAG ]]; then
   BOOTSTRAP_INPUT_MODE="required"
@@ -183,11 +190,11 @@ bash "$TRACKED_MANIFEST" "$LOCAL_ROOT" |
 remote_command=()
 remote_command+=("$POWERSHELL" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$WINDOWS_SCRIPT")
 remote_command+=(-Repository "${WINDOWS_BUILD_ROOT}\\source")
-remote_command+=(-RunDirectory "${WINDOWS_BUILD_ROOT}\\${RUN_ID}")
+remote_command+=(-RunDirectory "$WINDOWS_RUN_DIRECTORY")
 remote_command+=(-WorkspaceRoot "$WINDOWS_BUILD_ROOT")
 remote_command+=(-ToolsDirectory "${WINDOWS_ROOT}\\.local\\kepos-tools")
 remote_command+=(-RunId "$RUN_ID")
-remote_command+=(-BootstrapAsset "${WINDOWS_BUILD_ROOT}\\${RUN_ID}\\kepos-bootstrap.json")
+remote_command+=(-BootstrapAsset "${WINDOWS_RUN_DIRECTORY}\\kepos-bootstrap.json")
 if [[ -n $RELEASE_TAG ]]; then remote_command+=(-RequireBootstrap); fi
 remote_command+=(-RootRevision "$root_revision")
 remote_command+=(-BareNativeRevision "$bare_native_revision")
