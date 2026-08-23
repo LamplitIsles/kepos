@@ -99,6 +99,10 @@ test("desktop retains the TOML path that owns publisher allowlist changes", asyn
           services: [],
         },
       }),
+      ensurePublisher: async () => ({
+        created: false,
+        publisherKey: "11".repeat(32),
+      }),
     },
   );
 

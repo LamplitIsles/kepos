@@ -47,6 +47,7 @@
         <span>KEPOS</span>
       </a>
       <nav aria-label="Primary navigation">
+        <a class="docs-nav" href="/docs/"><i data-lucide="book-open" aria-hidden="true"></i>docs</a>
         <a href="#why" data-section-link="why"><i data-lucide="book-open" aria-hidden="true"></i>why</a>
         <a href="#how" data-section-link="how"><i data-lucide="waypoints" aria-hidden="true"></i>how</a>
         <a class="source-nav" href="https://github.com/LamplitIsles/kepos" target="_blank" rel="noreferrer">
@@ -62,35 +63,44 @@
           <p class="product-definition">
             Kepos makes services on another machine feel local—without a public IP, account, or virtual subnet.
           </p>
-          <div class="hero-downloads">
-            <a
-              class="download-cta download-cta-primary"
-              href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-android-arm64.apk"
-              aria-label="Download Kepos for Android"
-            >
-              <i data-lucide="download" aria-hidden="true"></i>
-              <span><strong>DOWNLOAD FOR ANDROID</strong></span>
-              <b aria-hidden="true">↓</b>
-            </a>
-            <a
-              class="download-cta"
-              href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-macos-arm64.zip"
-              aria-label="Download Kepos for Mac"
-            >
-              <i data-lucide="monitor-smartphone" aria-hidden="true"></i>
-              <span><strong>DOWNLOAD FOR MAC</strong></span>
-              <b aria-hidden="true">↓</b>
-            </a>
-            <a
-              class="download-cta"
-              href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-windows-x64.zip"
-              aria-label="Download Kepos for Windows"
-            >
-              <i data-lucide="monitor-smartphone" aria-hidden="true"></i>
-              <span><strong>DOWNLOAD FOR WINDOWS</strong></span>
-              <b aria-hidden="true">↓</b>
-            </a>
-          </div>
+          <section class="download-selection" id="downloads" aria-labelledby="download-title">
+            <p class="download-selection-label" id="download-title">
+              GET THE RIGHT BUILD
+              <span data-platform-recommendation role="status">All three downloads stay available.</span>
+            </p>
+            <div class="hero-downloads">
+              <a
+                class="download-cta"
+                data-platform-download="android"
+                href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-android-arm64.apk"
+                aria-label="Download Kepos for Android"
+              >
+                <i data-lucide="smartphone" aria-hidden="true"></i>
+                <span><strong>ANDROID</strong><small data-platform-role="subscriber">SUBSCRIBER ONLY · ANDROID 12+</small></span>
+                <b aria-hidden="true">↓</b>
+              </a>
+              <a
+                class="download-cta"
+                data-platform-download="macos"
+                href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-macos-arm64.zip"
+                aria-label="Download Kepos for macOS"
+              >
+                <i data-lucide="laptop" aria-hidden="true"></i>
+                <span><strong>MACOS</strong><small data-platform-role="publisher-subscriber">PUBLISHER + SUBSCRIBER · APPLE SILICON</small></span>
+                <b aria-hidden="true">↓</b>
+              </a>
+              <a
+                class="download-cta"
+                data-platform-download="windows"
+                href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-windows-x64.zip"
+                aria-label="Download Kepos for Windows"
+              >
+                <i data-lucide="monitor" aria-hidden="true"></i>
+                <span><strong>WINDOWS</strong><small data-platform-role="publisher-subscriber">PUBLISHER + SUBSCRIBER · X64</small></span>
+                <b aria-hidden="true">↓</b>
+              </a>
+            </div>
+          </section>
         </div>
 
         <aside class="hero-proof" aria-label="A remote Navidrome service available at a local address">
@@ -221,29 +231,37 @@
 
         <div class="principle-grid">
           <article>
-            <span>01 / SCOPE</span>
+            <span>01 / KEEP</span>
             <i data-lucide="app-window" aria-hidden="true"></i>
-            <h3>Choose what to expose.</h3>
-            <p>Publish a web app, TCP service, or shell—not the rest of the machine.</p>
+            <h3>Keep mature apps.</h3>
+            <p>Navidrome, Jellyfin, Forgejo, SSH, and similar services keep their existing clients and workflows.</p>
           </article>
           <article>
-            <span>02 / TRUST</span>
+            <span>02 / CHANGE</span>
+            <i data-lucide="waypoints" aria-hidden="true"></i>
+            <h3>Change service distribution.</h3>
+            <p>Kepos makes selected access channels direct, authenticated, and P2P instead of exposing a public port.</p>
+          </article>
+          <article>
+            <span>03 / PRESERVE</span>
             <i data-lucide="key-round" aria-hidden="true"></i>
-            <h3>Keep access local.</h3>
-            <p>The service owner controls a public-key allowlist. No hosted account can grant access.</p>
-          </article>
-          <article>
-            <span>03 / SPACE</span>
-            <i data-lucide="network" aria-hidden="true"></i>
-            <h3>No network to administer.</h3>
-            <p>Subscribers get local addresses only for services they can use.</p>
+            <h3>Preserve the client.</h3>
+            <p>Browsers, media clients, Git tools, and SSH still use ordinary local URLs or ports.</p>
           </article>
         </div>
 
         <aside class="honesty-note">
           <span>LIMITS</span>
-          <p>Kepos has no subnet routing or relay fallback. Use a mesh VPN when you need either.</p>
+          <p>Kepos does not route a virtual network or promise relay fallback. Its current service path is TCP-only; the outer P2P carrier uses UDP.</p>
         </aside>
+
+        <div class="landing-comparison">
+          <div>
+            <p class="eyebrow">KEPOS / HOLESAIL</p>
+            <h3>Different shapes of direct access.</h3>
+          </div>
+          <p>Holesail documents a direct encrypted port tunnel with a connection key or QR flow and TCP plus UDP support. Kepos is for a persistent publisher/subscriber relationship with named services, device identities, and per-service authorization. <a href="/docs/#holesail">Read the cited comparison <i data-lucide="arrow-right" aria-hidden="true"></i></a></p>
+        </div>
       </section>
 
       <section class="how-chapter page-chapter" id="how" aria-labelledby="how-title" data-section="how">
@@ -346,7 +364,7 @@
               <i data-lucide="monitor-smartphone" aria-hidden="true"></i>
             </header>
             <h3>Bare</h3>
-            <p>A portable JavaScript runtime for Android and Mac.</p>
+            <p>A portable JavaScript runtime for Android and desktop hosts.</p>
           </article>
         </div>
 
@@ -359,6 +377,7 @@
         <header class="chapter-lead">
           <p class="eyebrow">06 / OPEN SOURCE</p>
           <h2 id="source-title">Read the code.<br /><strong>Build it yourself.</strong></h2>
+          <p>Start with the public guide, then use the repository docs for contributor and architecture detail.</p>
         </header>
 
         <div class="source-grid">
@@ -367,20 +386,18 @@
             <strong>LamplitIsles/kepos</strong>
             <small>GITHUB ↗</small>
           </a>
-          <section class="quickstart-card" aria-labelledby="quickstart-title">
-            <i data-lucide="download" aria-hidden="true"></i>
-            <strong id="quickstart-title">Downloads</strong>
-            <div class="release-links">
-              <a href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-android-arm64.apk" aria-label="Download Kepos for Android">ANDROID APK ↓</a>
-              <a href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-macos-arm64.zip" aria-label="Download Kepos for macOS">MACOS ZIP ↓</a>
-              <a href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-windows-x64.zip" aria-label="Download Kepos for Windows">WINDOWS ZIP ↓</a>
-            </div>
-          </section>
+          <a class="docs-route-card" href="/docs/">
+            <i data-lucide="book-open" aria-hidden="true"></i>
+            <strong>Use Kepos</strong>
+            <span>Install, pair, share services, and troubleshoot the first connection.</span>
+            <small>PUBLIC GUIDE →</small>
+          </a>
         </div>
       </section>
     </main>
 
     <footer class="landing-footer">
+      <a class="landing-link" href="/docs/">READ THE DOCS →</a>
       <a class="landing-link" href="#top">BACK TO TOP ↑</a>
     </footer>
   </body>

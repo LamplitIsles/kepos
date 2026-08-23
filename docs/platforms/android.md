@@ -1,5 +1,7 @@
 # Android subscriber
 
+For end-user installation, pairing, and troubleshooting, start with the [public Kepos guide](https://kepos.guion.io/docs/). This page keeps Android build and device-test detail.
+
 The Android app is a subscriber-only arm64 client for Android 12 and newer. A
 Kotlin foreground service owns one persistent Bare Worklet. That Worklet runs
 the same HyperDHT and Protomux subscriber core as the CLI.
@@ -104,8 +106,9 @@ fingerprint against the public value in the repository. It writes the final
 versioned APK under `dist/release/` and reports its size against the debug APK.
 
 Only `arm64-v8a` is packaged. Kepos does not use Google Play or Play App
-Signing; users sideload the signed APK and verify it with the release manifest.
-See [Release and artifact verification](../releasing.md).
+Signing; users sideload the signed APK. Optional end-user checks are in the
+[public release verification reference](https://kepos.guion.io/docs/verify/).
+Maintainers should use the separate [release procedure](../releasing.md).
 
 Physical results and known gaps are recorded in
 [Android Navic subscriber evidence](../evidence/android-navic-subscriber-spike.md)

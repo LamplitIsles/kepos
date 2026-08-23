@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1209" />
+    <meta
+      name="description"
+      content="Install Kepos, share selected services from a publisher, and connect trusted subscriber devices through local addresses."
+    />
+    <meta property="og:title" content="Kepos docs — Share services, connect devices" />
+    <meta
+      property="og:description"
+      content="The Kepos guide to publishers, subscribers, installation, pairing, trust, and troubleshooting."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://kepos.guion.io/docs/" />
+    <meta property="og:image" content="https://kepos.guion.io/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Kepos documentation: share services and connect trusted devices through local addresses."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://kepos.guion.io/og-image.png" />
+    <meta
+      name="twitter:image:alt"
+      content="Kepos documentation: share services and connect trusted devices through local addresses."
+    />
+    <link rel="canonical" href="https://kepos.guion.io/docs/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/docs.css" />
+    <script type="module" src="/src/main.ts"></script>
+    <title>Kepos docs — Share services, connect devices</title>
+  </head>
+  <body class="docs-page pear-noir">
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <header class="site-header">
+      <a class="wordmark" href="/" aria-label="Kepos home">
+        <svg class="portal-mark" viewBox="0 0 40 28" aria-hidden="true">
+          <path d="M15 3H4v22h11M25 3h11v22H25M10 14h20" />
+        </svg>
+        <span>KEPOS</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a class="docs-nav is-current" href="/docs/" aria-current="page"><i data-lucide="book-open" aria-hidden="true"></i>docs</a>
+        <a href="/#why"><i data-lucide="book-open" aria-hidden="true"></i>why</a>
+        <a href="/#how"><i data-lucide="waypoints" aria-hidden="true"></i>how</a>
+        <a class="source-nav" href="https://github.com/LamplitIsles/kepos" target="_blank" rel="noreferrer">
+          <i data-lucide="code-xml" aria-hidden="true"></i>source
+        </a>
+      </nav>
+    </header>
+
+    <main class="docs-main" id="content">
+      <details class="docs-mobile-nav">
+        <summary><span>Documentation navigation</span><span class="docs-mobile-nav-hint">Open menu</span></summary>
+        <nav aria-label="Documentation sections on mobile">
+          <div class="docs-nav-group">
+            <p>Start here</p>
+            <a href="#start" data-section-link="start" aria-current="location">Overview</a>
+            <a href="#platforms" data-section-link="platforms">Platforms and install</a>
+          </div>
+          <div class="docs-nav-group">
+            <p>Roles</p>
+            <a href="#subscriber" data-section-link="subscriber">Subscriber</a>
+            <a href="#publisher-desktop" data-section-link="publisher-desktop">Publisher (Desktop)</a>
+            <a href="#publisher-cli" data-section-link="publisher-cli">Publisher (CLI)</a>
+          </div>
+          <div class="docs-nav-group">
+            <p>Trust and boundaries</p>
+            <a href="#trust" data-section-link="trust">Trust and identities</a>
+            <a href="#philosophy" data-section-link="philosophy">Why Kepos</a>
+            <a href="#holesail" data-section-link="holesail">Kepos and Holesail</a>
+          </div>
+          <div class="docs-nav-group">
+            <p>Problem solving</p>
+            <a href="#troubleshooting" data-section-link="troubleshooting">Troubleshooting</a>
+          </div>
+        </nav>
+      </details>
+
+      <div class="docs-layout">
+        <aside class="docs-sidebar" aria-label="Documentation navigation">
+          <p class="docs-sidebar-title">On this page</p>
+          <nav>
+            <div class="docs-nav-group">
+              <p>Start here</p>
+              <a href="#start" data-section-link="start" aria-current="location">Overview</a>
+              <a href="#platforms" data-section-link="platforms">Platforms and install</a>
+            </div>
+            <div class="docs-nav-group">
+              <p>Roles</p>
+              <a href="#subscriber" data-section-link="subscriber">Subscriber</a>
+              <a href="#publisher-desktop" data-section-link="publisher-desktop">Publisher (Desktop)</a>
+              <a href="#publisher-cli" data-section-link="publisher-cli">Publisher (CLI)</a>
+            </div>
+            <div class="docs-nav-group">
+              <p>Trust and boundaries</p>
+              <a href="#trust" data-section-link="trust">Trust and identities</a>
+              <a href="#philosophy" data-section-link="philosophy">Why Kepos</a>
+              <a href="#holesail" data-section-link="holesail">Kepos and Holesail</a>
+            </div>
+            <div class="docs-nav-group">
+              <p>Problem solving</p>
+              <a href="#troubleshooting" data-section-link="troubleshooting">Troubleshooting</a>
+            </div>
+          </nav>
+        </aside>
+
+        <article class="docs-article">
+          <header class="docs-intro" id="start" data-section="start">
+            <p class="docs-kicker">Kepos / User guide</p>
+            <h1 id="docs-title">Use Kepos to share and connect</h1>
+            <p>
+              A <strong>publisher</strong> owns a service and decides which trusted devices may open it. A
+              <strong>subscriber</strong> receives those selected services at local URLs or ports. Kepos has no
+              account system; choose the role that matches the device in front of you.
+            </p>
+
+            <nav class="docs-entry-list" aria-label="Getting started paths">
+              <a href="#publisher-desktop">
+                <span class="docs-entry-number">01</span>
+                <span><strong>Share services from this device</strong><small>Set up a desktop publisher, choose services, and approve a subscriber.</small></span>
+                <i data-lucide="arrow-right" aria-hidden="true"></i>
+              </a>
+              <a href="#subscriber">
+                <span class="docs-entry-number">02</span>
+                <span><strong>Connect to shared services</strong><small>Install a subscriber, pair one publisher, and open the first local service.</small></span>
+                <i data-lucide="arrow-right" aria-hidden="true"></i>
+              </a>
+            </nav>
+
+          </header>
+
+          <section class="docs-section" id="platforms" aria-labelledby="platforms-title" data-section="platforms">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">01 / Install</p>
+              <h2 id="platforms-title">Platforms and installation</h2>
+            </header>
+
+            <p class="docs-table-hint">On narrow screens, scroll horizontally to see all columns.</p>
+            <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: horizontal table overflow needs keyboard scrolling -->
+            <section class="docs-table-wrap" aria-label="Kepos platform downloads" tabindex="0">
+              <table class="docs-table docs-platform-table">
+                <caption>Kepos platform downloads</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Platform</th>
+                    <th scope="col">Role</th>
+                    <th scope="col">Artifact</th>
+                    <th scope="col">Release boundary</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">Android</th>
+                    <td>Subscriber only</td>
+                    <td>
+                      <a
+                        data-platform-download="android"
+                        href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-android-arm64.apk"
+                        aria-label="Download Kepos for Android"
+                        >APK download</a
+                      >
+                    </td>
+                    <td>Android 12+ · arm64-v8a</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">macOS</th>
+                    <td>Publisher + subscriber</td>
+                    <td>
+                      <a
+                        data-platform-download="macos"
+                        href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-macos-arm64.zip"
+                        aria-label="Download Kepos for macOS"
+                        >Apple Silicon ZIP</a
+                      >
+                    </td>
+                    <td>Apple Silicon · ad-hoc signed</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Windows</th>
+                    <td>Publisher + subscriber</td>
+                    <td>
+                      <a
+                        data-platform-download="windows"
+                        href="https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-windows-x64.zip"
+                        aria-label="Download Kepos for Windows"
+                        >x64 ZIP</a
+                      >
+                    </td>
+                    <td>Windows 10 build 19045+ or Windows 11</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+            <p class="docs-status"><i data-lucide="circle-check" aria-hidden="true"></i><span data-platform-recommendation role="status">All three downloads stay available.</span></p>
+            <p class="docs-related"><a href="/docs/verify/">Optional: verify the download</a></p>
+
+            <h3 id="android-install">Android subscriber</h3>
+            <p>
+              Sideload the release APK, approve the device's
+              request to install from that source if Android asks, and start the foreground service from the app.
+              Android does not publish services, install a VPN, or provide a TUN interface.
+            </p>
+
+            <h3 id="macos-install">Apple Silicon macOS</h3>
+            <p>
+              Unzip the release and open <code>Kepos.app</code>. macOS Gatekeeper may warn on first launch because this
+              local preview is ad-hoc signed and not notarized; it is not a Developer ID or Mac App Store package.
+            </p>
+
+            <h3 id="windows-install">Windows desktop</h3>
+            <p>
+              Extract the ZIP as a complete <code>Kepos\</code> tree. Launch <code>App\Kepos.exe</code> for a portable
+              run, or use <code>Install.cmd</code> for the supported per-user installation. The ZIP includes Windows
+              App Runtime files, but WebView2 and the Microsoft Visual C++ Redistributable remain system prerequisites.
+              SmartScreen and Defender Firewall prompts are expected boundaries for this unsigned-by-Authenticode
+              preview.
+            </p>
+
+          </section>
+
+          <section class="docs-section" id="subscriber" aria-labelledby="subscriber-title" data-section="subscriber">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">02 / Connecting device</p>
+              <h2 id="subscriber-title">Connect as a subscriber</h2>
+              <p>
+                A subscriber receives selected services from a publisher. Its device identity is a key pair; it shares only the
+                public key for approval. The publisher's allowlist names subscriber keys it accepts, and the subscriber
+                pins the publisher public key before connecting.
+              </p>
+            </header>
+
+            <ol class="docs-steps">
+              <li>
+                <h3>Install and start</h3>
+                <p>
+                  Install the artifact for the device you will carry. Packaged desktop startup fills missing config and
+                  enabled role state; Android creates its subscriber identity in app-private storage. See
+                  <a href="#trust">Trust and identities</a> for what that state contains.
+                </p>
+              </li>
+              <li>
+                <h3>Pair one publisher</h3>
+                <p>
+                  For Android, open <strong>Add device</strong> on a running macOS or Windows desktop publisher and scan
+                  its two-minute QR invitation. The publisher sees the candidate's label, platform, and subscriber-key
+                  fingerprint before you choose <strong>Allow</strong> or <strong>Deny</strong>. This is the supported
+                  interactive QR path.
+                </p>
+                <p>
+                  For a desktop subscriber, click <strong>Copy this device subscriber public key</strong>. On the desktop
+                  publisher, add that key to the <code>[publisher].allow</code> list and restart after the manual TOML
+                  edit. Copy the publisher public key from the publisher app, enter it in <strong>Connect this
+                  subscriber</strong>, and choose <strong>Connect / Save</strong>. Desktop QR or deep-link receipt is
+                  not supported in this release.
+                </p>
+              </li>
+              <li>
+                <h3>Confirm success</h3>
+                <p>
+                  When the subscriber shows <strong>Connected</strong> and its service list appears, open or copy the
+                  first service address below. If it stays <strong>Connecting</strong>, use the checks in
+                  <a href="#troubleshoot-connecting">troubleshooting</a>.
+                </p>
+              </li>
+            </ol>
+
+            <h3 id="first-service">Open the first service</h3>
+            <p>
+              Once the registry is current, an HTTP service normally appears at
+              <code>http://&lt;service-id&gt;.localhost:17480/</code>, for example
+              <code>http://navidrome.localhost:17480/</code>. Kepos can open a web action or copy the local URL for a
+              media client. SSH and other raw TCP services use the local listener configured for that subscriber; use
+              the address and port shown by the app rather than assuming a universal port.
+            </p>
+            <pre class="docs-code"><code>ssh -p &lt;configured-local-port&gt; 127.0.0.1</code></pre>
+
+          </section>
+
+          <section class="docs-section" id="publisher-desktop" aria-labelledby="publisher-desktop-title" data-section="publisher-desktop">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">03 / Service owner</p>
+              <h2 id="publisher-desktop-title">Publisher (Desktop)</h2>
+              <p>
+                Use the packaged macOS or Windows app when the service owner wants a graphical relationship view. The
+                desktop app reads its publisher policy from TOML.
+              </p>
+            </header>
+
+            <h3 id="publisher-desktop-config">Configure the packaged app</h3>
+            <p>
+              The packaged app uses the normal Kepos configuration file: <code>~/.config/kepos/config.toml</code> on
+              macOS unless <code>XDG_CONFIG_HOME</code> is set, and <code>%APPDATA%\Kepos\config.toml</code> on
+              Windows. Edit the file before launch when you need to enable publishing or change the services, then
+              restart after a manual policy edit. There is no graphical service editor in this preview.
+            </p>
+            <pre class="docs-code"><code>[publisher]
+enabled = true
+display_name = "Home"
+allow = []
+
+[[publisher.services]]
+id = "navidrome"
+name = "Navidrome"
+target_port = 4533</code></pre>
+            <p>
+              List loopback TCP targets that already run on the publisher device. An empty <code>allow</code> list
+              starts in deny-all mode; approving a device later adds its public key to the running policy.
+            </p>
+
+            <h3 id="publisher-desktop-identity">Let startup create the identity</h3>
+            <p>
+              When <code>enabled = true</code>, desktop startup creates missing publisher state from this policy before
+              starting the role. On later launches it validates the existing state and reuses the same seed and public
+              key; it never rotates or overwrites that state. TOML allowlist and service changes are runtime policy, so
+              they can change without rewriting the identity.
+            </p>
+
+            <h3 id="publisher-desktop-pairing">Launch and approve a device</h3>
+            <ol class="docs-steps">
+              <li>
+                <h3>Keep the app running</h3>
+                <p>Open Kepos and leave the process running while it publishes.</p>
+              </li>
+              <li>
+                <h3>Choose Add device for Android</h3>
+                <p>Generate the invitation and let the Android subscriber scan it. The invitation expires after two minutes.</p>
+              </li>
+              <li>
+                <h3>Inspect, then Allow</h3>
+                <p>Check the label, platform hint, and public-key fingerprint. Allow persists the subscriber public key, updates the live allowlist, and promotes the same connection without restarting.</p>
+              </li>
+            </ol>
+
+            <p class="docs-related">
+              Operators who need a headless host should use the separate <a href="#publisher-cli">Publisher (CLI)</a>
+              guide instead.
+            </p>
+          </section>
+
+          <section class="docs-section" id="publisher-cli" aria-labelledby="publisher-cli-title" data-section="publisher-cli">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">04 / Headless service owner</p>
+              <h2 id="publisher-cli-title">Publisher (CLI)</h2>
+              <p>
+                Use this path for repository checkouts, Nix, containers, and other headless hosts with explicit state
+                directories and manual public-key exchange.
+              </p>
+            </header>
+
+            <h3 id="publisher-cli-checkout">Check out and initialize</h3>
+            <p>On the subscriber device, create an identity and copy the public key printed by the command:</p>
+            <pre class="docs-code"><code>npm run kepos -- setup subscriber \
+  --state &lt;subscriber-state-directory&gt;</code></pre>
+            <p>On the publisher device, put that public key in the publisher TOML policy:</p>
+            <pre class="docs-code"><code>[publisher]
+display_name = "Home"
+allow = ["&lt;subscriber-public-key&gt;"]
+
+[[publisher.services]]
+id = "navidrome"
+name = "Navidrome"
+target_port = 4533</code></pre>
+            <pre class="docs-code"><code>npm run kepos -- setup publisher \
+  --state &lt;publisher-state-directory&gt; \
+  --config &lt;publisher-config.toml&gt;</code></pre>
+            <p>
+              This creates the publisher with the subscriber already allowed. The setup command writes the manifest and
+              identity into the explicit state directory. Repeat it only with the same policy; CLI setup remains strict
+              and never rotates an identity. Without a TOML publisher table, the same command accepts
+              <code>--display-name</code>, <code>--allow</code>, and repeated <code>--service</code> options instead.
+            </p>
+
+            <h3 id="publisher-cli-config">Update the allowlist and pin the publisher</h3>
+            <p>
+              If publisher state already exists in deny-all mode and no <code>[publisher]</code> TOML table owns its
+              policy, add the subscriber public key with <code>publisher set-allow</code>. For a TOML-owned publisher,
+              edit its <code>allow</code> array instead; do not combine TOML policy with CLI policy flags.
+            </p>
+            <pre class="docs-code"><code>npm run kepos -- publisher set-allow \
+  --state &lt;publisher-state-directory&gt; \
+  --allow &lt;subscriber-public-key&gt;
+
+npm run kepos -- publisher key \
+  --state &lt;publisher-state-directory&gt;
+
+npm run kepos -- subscriber set-publisher \
+  --state &lt;subscriber-state-directory&gt; \
+  --label Home \
+  --publisher-key &lt;publisher-public-key&gt;</code></pre>
+            <p>
+              Copy the <code>Publisher key:</code> output and pin it with <code>subscriber set-publisher</code>.
+            </p>
+
+            <h3 id="publisher-cli-run">Run and update a headless publisher</h3>
+            <pre class="docs-code"><code>npm run kepos -- publisher run \
+  --state &lt;publisher-state-directory&gt; \
+  --config &lt;publisher-config.toml&gt;
+
+npm run kepos -- subscriber run \
+  --state &lt;subscriber-state-directory&gt;</code></pre>
+            <p>
+              Start the publisher before the subscriber. A headless process reads its policy at startup, so restart
+              <code>publisher run</code> after a TOML allowlist or service edit, then restart the subscriber if its
+              pinned contact changed. Use the repository's Nix, container, Windows, and NUC deployment guides for
+              process supervision and platform-specific lifecycle details.
+            </p>
+
+            <p id="architecture" class="docs-related">
+              For role commands, Nix and container deployment, Windows packaging, and the transport model, read the
+              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/architecture.md" target="_blank" rel="noreferrer">developer architecture guide</a>,
+              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/cli.md" target="_blank" rel="noreferrer">CLI guide</a>, and
+              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/deployment.md" target="_blank" rel="noreferrer">deployment guide</a>.
+            </p>
+          </section>
+
+          <section class="docs-section" id="trust" aria-labelledby="trust-title" data-section="trust">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">05 / Identity and boundary</p>
+              <h2 id="trust-title">Public keys move; secrets stay home</h2>
+              <p>
+                Kepos uses device-owned identities rather than an account or shared bearer token. Publisher
+                authorization remains local to the publisher that owns the service.
+              </p>
+            </header>
+
+            <dl class="docs-definition-list">
+              <div>
+                <dt>Separate identities</dt>
+                <dd>Publishers and subscribers each keep their own key pair. A displayed long hexadecimal key is public.</dd>
+              </div>
+              <div>
+                <dt>Local approval</dt>
+                <dd>The publisher's allowlist and optional per-service allowlist decide what an approved subscriber may open.</dd>
+              </div>
+              <div>
+                <dt>No secret copies</dt>
+                <dd>Keep publisher seeds and subscriber secret keys in the private storage that generated them. Do not put identity files in logs.</dd>
+              </div>
+            </dl>
+
+            <h3 id="identity-lifecycle">Configuration and role state</h3>
+            <p>
+              TOML is mutable role policy: it names services and allowed subscriber keys. Role state is private identity
+              storage: publisher state holds its seed and subscriber state holds its key pair and publisher contact.
+              Packaged startup behavior is described in <a href="#publisher-desktop-identity">Publisher (Desktop)</a>;
+              Android keeps its subscriber identity in app-private storage across an in-place update.
+            </p>
+            <aside class="docs-callout">
+              <p>Trust in one publisher does not turn the subscriber into a member of a LAN or expose unlisted ports.</p>
+            </aside>
+          </section>
+
+          <section class="docs-section" id="philosophy" aria-labelledby="philosophy-title" data-section="philosophy">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">06 / Why this shape</p>
+              <h2 id="philosophy-title">Keep the app; change the route</h2>
+              <p>
+                Kepos changes how a selected service is distributed, not what the service is. That keeps mature
+                software's capabilities and client experience intact.
+              </p>
+            </header>
+
+            <ol class="docs-principles">
+              <li>
+                <h3>Keep mature applications</h3>
+                <p>Navidrome, Jellyfin, Forgejo or Gitea, SSH, and other self-hosted services continue to run as ordinary local applications.</p>
+              </li>
+              <li>
+                <h3>Change service distribution</h3>
+                <p>Kepos carries selected TCP service byte streams through an authenticated direct peer connection with named channels.</p>
+              </li>
+              <li>
+                <h3>Preserve clients</h3>
+                <p>A browser opens a local URL, a media client receives a local address, a Git client uses its normal endpoint, and SSH uses a loopback port.</p>
+              </li>
+            </ol>
+            <aside class="docs-callout docs-warning">
+              <p>
+                “P2P” describes Kepos's authenticated access channel, not every application protocol. The current
+                service path is TCP-only. HyperDHT and UDX use UDP as the outer Internet carrier, while local TCP ends
+                at each Kepos peer.
+              </p>
+            </aside>
+          </section>
+
+          <section class="docs-section" id="holesail" aria-labelledby="holesail-title" data-section="holesail">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">07 / A respectful comparison</p>
+              <h2 id="holesail-title">Kepos and Holesail</h2>
+              <p>
+                Both projects offer direct encrypted peer-to-peer access without requiring a public service port. The
+                useful distinction is the unit of sharing and the transport boundary each project documents.<br />
+                <small>Compared with Holesail 2.4.1 and its current official documentation, checked 2026-08-22.</small>
+              </p>
+            </header>
+
+            <p class="docs-compare-legend"><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span>Documented capability</span></span><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span>Not in the current documented model</span></span></p>
+            <p class="docs-table-hint">On narrow screens, scroll horizontally to see all columns.</p>
+            <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: horizontal table overflow needs keyboard scrolling -->
+            <section class="docs-table-wrap" aria-label="Kepos and Holesail comparison" tabindex="0">
+              <table class="docs-table docs-compare">
+                <caption>Kepos and Holesail comparison</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Dimension</th>
+                    <th scope="col">Kepos</th>
+                    <th scope="col">Holesail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">Direct encrypted P2P</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Authenticated HyperDHT connection.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Direct encrypted tunnel.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Persistent device relationship</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Separate publisher and subscriber identities.</span></span></td>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Official docs define private or public connection keys per tunnel.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Named multi-service registry</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Named services share one outer connection.</span></span></td>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> The documented quickstart is one local port per tunnel.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Per-service allowlists</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Services may narrow the publisher allowlist.</span></span></td>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Private mode checks the connection key; public mode has no key authentication.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Public connection mode</th>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Service access requires an allowed subscriber identity.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> <code>--public</code> exposes a public connection key without key authentication.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Graphical desktop onboarding</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> macOS and Windows show relationships, services, and approval.</span></span></td>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> The official desktop guide documents terminal executables.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Mobile QR onboarding</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Android scans a two-minute publisher invitation.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Holesail Go scans connection-key QR codes on iOS and Android.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">TCP service path</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Local TCP ends at each Kepos peer.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> TCP tunnels are supported.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">UDP service path</th>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Kepos services are currently TCP-only.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Official docs include UDP tunnels.</span></span></td>
+                  </tr>
+                  <tr>
+                    <th scope="row">One-command port sharing</th>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Kepos starts from a device and service policy.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Start with <code>holesail --live &lt;PORT&gt;</code>.</span></span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+            <p>
+              Choose Kepos for long-lived devices and named service policy; choose Holesail for a quick port tunnel or
+              UDP. The indicators describe current documented capabilities, not a quality score. Sources:
+            </p>
+            <ul class="docs-source-list">
+              <li><a href="https://github.com/holesail/holesail" target="_blank" rel="noreferrer">Holesail official repository</a> — one-command port sharing and TCP/UDP flags.</li>
+              <li><a href="https://docs.holesail.io/" target="_blank" rel="noreferrer">Holesail official documentation</a> — direct encrypted P2P transport claims.</li>
+              <li><a href="https://docs.holesail.io/usage-guide/overview.md" target="_blank" rel="noreferrer">Holesail official overview</a> — server/client and key or QR workflow.</li>
+              <li><a href="https://docs.holesail.io/usage-guide/start-a-holesail-server.md" target="_blank" rel="noreferrer">Holesail server guide</a> — port-oriented startup and connection options.</li>
+              <li><a href="https://docs.holesail.io/terminology/private-vs-public-connection-keys.md" target="_blank" rel="noreferrer">Holesail connection-key model</a> — private authentication and public mode.</li>
+              <li><a href="https://docs.holesail.io/installation-guide/holesail-executable-windows-linux-mac.md" target="_blank" rel="noreferrer">Holesail desktop executables</a> — terminal onboarding on Windows, macOS, and Linux.</li>
+              <li><a href="https://docs.holesail.io/installation-guide/holesail-go-for-mobile.md" target="_blank" rel="noreferrer">Holesail Go</a> — iOS/Android availability and QR onboarding.</li>
+            </ul>
+          </section>
+
+          <section class="docs-section" id="troubleshooting" aria-labelledby="troubleshooting-title" data-section="troubleshooting">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">08 / When it does not connect</p>
+              <h2 id="troubleshooting-title">Find the boundary</h2>
+              <p>
+                Kepos's current direct path needs usable outbound UDP and a NAT pair that HyperDHT can punch. Check
+                the observable boundary in order.
+              </p>
+            </header>
+
+            <h3 id="troubleshoot-states">Read the connection states</h3>
+            <dl class="docs-definition-list">
+              <div>
+                <dt>Connecting</dt>
+                <dd>The subscriber is attempting the pinned publisher connection.</dd>
+              </div>
+              <div>
+                <dt>Connected</dt>
+                <dd>The publisher registry has loaded; open or copy a listed service.</dd>
+              </div>
+              <div>
+                <dt>Reconnecting</dt>
+                <dd>Local listeners stay in place while Kepos replaces the outer connection; active client streams need their own retry.</dd>
+              </div>
+            </dl>
+
+            <h3 id="troubleshoot-connecting">Configured but still Connecting</h3>
+            <ol>
+              <li>Confirm the subscriber's pinned publisher public key is the key shown by the intended publisher.</li>
+              <li>Confirm the publisher is running and its subscriber public key is in the publisher allowlist. An empty allowlist denies everyone.</li>
+              <li>Keep the desktop process in the tray or menu bar. Closing the window hides it; <strong>Quit Kepos</strong> stops publishing.</li>
+              <li>Wait for a direct attempt to finish, then check local diagnostics rather than copying state files or secrets into a report.</li>
+            </ol>
+
+            <h3 id="troubleshoot-firewall">Firewall, VPN, or TUN interference</h3>
+            <p>
+              On Windows, allow Kepos through Windows Defender Firewall on the networks where the session needs DHT
+              connectivity. Kepos does not open a public TCP service port and does not automatically bypass a firewall.
+              VPN or TUN software can intercept or block the UDP path; test its documented bypass or pause behavior only
+              if you control that device and understand the consequence. Kepos does not promise a relay fallback.
+            </p>
+
+            <h3 id="troubleshoot-bootstrap">Bootstrap and configuration</h3>
+            <p>
+              Packaged desktop releases include bootstrap endpoints for a fresh default config. A configured
+              <code>[network].bootstrap</code> list takes precedence over that packaged default; verify each host and
+              UDP port is reachable from both peers. In the CLI, an empty bootstrap list selects HyperDHT defaults. A
+              bootstrap node helps a peer enter the DHT; it does not authorize a subscriber or carry the service stream.
+            </p>
+
+            <h3 id="troubleshoot-policy">Allowlist and policy edits</h3>
+            <p>
+              A desktop <strong>Add device</strong> approval updates the live publisher. A headless TOML edit does not:
+              restart the headless <code>publisher run</code> process after changing the publisher allowlist or service
+              policy. A per-service allowlist can be narrower than the publisher-wide list, so an approved device may
+              still be unable to open one service.
+            </p>
+
+
+            <h3 id="troubleshoot-diagnostics">Copy sanitized diagnostics</h3>
+            <p>
+              On desktop, open Settings and choose <strong>Copy diagnostics</strong>. The summary is bounded and
+              sanitized for support: it can describe roles, states, observations, and counters, but omits secret
+              identity material, pairing tokens, and candidate IP addresses. Do not paste config or state files into a
+              bug report.
+            </p>
+
+            <p class="docs-related">
+              The repository's
+              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/cli.md" target="_blank" rel="noreferrer">CLI and network guide</a>
+              records state paths, listener behavior, observations, and current transport limits.
+            </p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="docs-footer">
+      <a href="/">← Kepos home</a>
+      <span>Public user guide / current TCP service path</span>
+      <a href="#start">Back to top ↑</a>
+    </footer>
+  </body>
+</html>

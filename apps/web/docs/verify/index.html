@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1209" />
+    <meta
+      name="description"
+      content="Verify Kepos release downloads with the signed SHA-256 manifest and Minisign."
+    />
+    <meta property="og:title" content="Kepos docs — Verify a release" />
+    <meta
+      property="og:description"
+      content="Optional SHA-256 and Minisign verification steps for Kepos release downloads."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://kepos.guion.io/docs/verify/" />
+    <meta property="og:image" content="https://kepos.guion.io/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Kepos optional release verification reference."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://kepos.guion.io/og-image.png" />
+    <meta
+      name="twitter:image:alt"
+      content="Kepos optional release verification reference."
+    />
+    <link rel="canonical" href="https://kepos.guion.io/docs/verify/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/docs.css" />
+    <script type="module" src="/src/main.ts"></script>
+    <title>Kepos docs — Verify a release</title>
+  </head>
+  <body class="docs-page pear-noir">
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <header class="site-header">
+      <a class="wordmark" href="/" aria-label="Kepos home">
+        <svg class="portal-mark" viewBox="0 0 40 28" aria-hidden="true">
+          <path d="M15 3H4v22h11M25 3h11v22H25M10 14h20" />
+        </svg>
+        <span>KEPOS</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a class="docs-nav is-current" href="/docs/" aria-current="page"><i data-lucide="book-open" aria-hidden="true"></i>docs</a>
+        <a href="/#why"><i data-lucide="book-open" aria-hidden="true"></i>why</a>
+        <a href="/#how"><i data-lucide="waypoints" aria-hidden="true"></i>how</a>
+        <a class="source-nav" href="https://github.com/LamplitIsles/kepos" target="_blank" rel="noreferrer">
+          <i data-lucide="code-xml" aria-hidden="true"></i>source
+        </a>
+      </nav>
+    </header>
+
+    <main class="docs-main" id="content">
+      <details class="docs-mobile-nav">
+        <summary><span>Reference navigation</span><span class="docs-mobile-nav-hint">Open menu</span></summary>
+        <nav aria-label="Verification sections on mobile">
+          <div class="docs-nav-group">
+            <p>Release verification</p>
+            <a href="#verification" data-section-link="verification" aria-current="location">Overview</a>
+            <a href="#minisign" data-section-link="minisign">Minisign manifest</a>
+            <a href="#sha256" data-section-link="sha256">SHA-256 files</a>
+            <a href="#after-checks" data-section-link="after-checks">After the checks</a>
+          </div>
+        </nav>
+      </details>
+
+      <div class="docs-layout">
+        <aside class="docs-sidebar" aria-label="Verification navigation">
+          <p class="docs-sidebar-title">Reference</p>
+          <nav>
+            <div class="docs-nav-group">
+              <p>Release verification</p>
+              <a href="#verification" data-section-link="verification" aria-current="location">Overview</a>
+              <a href="#minisign" data-section-link="minisign">Minisign manifest</a>
+              <a href="#sha256" data-section-link="sha256">SHA-256 files</a>
+              <a href="#after-checks" data-section-link="after-checks">After the checks</a>
+            </div>
+          </nav>
+        </aside>
+
+        <article class="docs-article">
+          <header class="docs-intro" id="verification" data-section="verification">
+            <p class="docs-kicker">Kepos / Optional reference</p>
+            <h1 id="verification-title">Verify a downloaded release</h1>
+            <p>
+              Kepos publishes three platform artifacts, a <code>SHA256SUMS</code> manifest, and its
+              <code>SHA256SUMS.minisig</code> signature for each stable release. Verify the signed manifest before
+              trusting any digest.
+            </p>
+            <aside class="docs-callout docs-warning">
+              <p>
+                The website's <code>releases/latest/download</code> links follow the latest stable GitHub release and
+                do not select prereleases. Keep every file below from one release; do not mix a manifest, signature, or
+                public key from different releases.
+              </p>
+            </aside>
+          </header>
+
+          <section class="docs-section" id="minisign" aria-labelledby="minisign-title" data-section="minisign">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">01 / Authenticity</p>
+              <h2 id="minisign-title">Verify the Minisign manifest</h2>
+              <p>
+                Download the public key from the Kepos source tag or another trusted project copy. The checked-in key
+                is <code>release/minisign.pub</code>; a signature failure means the manifest must not be trusted.
+              </p>
+            </header>
+
+            <ol class="docs-steps">
+              <li>
+                <h3>Keep the release files together</h3>
+                <p>
+                  Download <code>kepos-android-arm64.apk</code>, <code>kepos-macos-arm64.zip</code>,
+                  <code>kepos-windows-x64.zip</code>, <code>SHA256SUMS</code>, and
+                  <code>SHA256SUMS.minisig</code> from the same stable GitHub release. Save
+                  <code>release/minisign.pub</code> separately from a trusted source.
+                </p>
+              </li>
+              <li>
+                <h3>Check the signature</h3>
+                <p>Run Minisign from the directory containing the manifest and signature:</p>
+                <pre class="docs-code"><code>minisign -Vm SHA256SUMS \
+  -x SHA256SUMS.minisig \
+  -p /path/to/kepos/release/minisign.pub</code></pre>
+                <p>Stop if Minisign reports an invalid signature, an unknown key, or a different public-key fingerprint than expected.</p>
+              </li>
+            </ol>
+          </section>
+
+          <section class="docs-section" id="sha256" aria-labelledby="sha256-title" data-section="sha256">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">02 / Integrity</p>
+              <h2 id="sha256-title">Check every artifact digest</h2>
+              <p>
+                After the signed manifest passes, compare all three downloaded artifacts with its matching entries.
+                The command must report a match for every file you intend to open.
+              </p>
+            </header>
+
+            <h3 id="sha256-unix">macOS or Linux</h3>
+            <pre class="docs-code"><code>shasum -a 256 -c SHA256SUMS</code></pre>
+            <p>
+              If your system does not provide <code>shasum</code>, calculate a SHA-256 digest with its standard tool and
+              compare the lowercase hexadecimal output with the corresponding line in <code>SHA256SUMS</code>.
+            </p>
+
+            <h3 id="sha256-windows">Windows PowerShell</h3>
+            <pre class="docs-code"><code>Get-FileHash .\kepos-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\kepos-android-arm64.apk -Algorithm SHA256
+Get-FileHash .\kepos-macos-arm64.zip -Algorithm SHA256
+Get-Content .\SHA256SUMS</code></pre>
+            <p>
+              Compare each <code>Hash</code> value with the matching artifact line in the manifest. Windows users only
+              need to compare the artifacts they downloaded, but every comparison must match exactly.
+            </p>
+
+            <aside class="docs-callout docs-warning">
+              <p>
+                A matching digest proves that a downloaded file matches the signed manifest; it does not change the
+                release packaging boundaries. Android is sideload-only, macOS is ad-hoc signed and not notarized, and
+                Windows binaries are not Authenticode-signed.
+              </p>
+            </aside>
+          </section>
+
+          <section class="docs-section" id="after-checks" aria-labelledby="after-checks-title" data-section="after-checks">
+            <header class="docs-section-heading">
+              <p class="docs-kicker">03 / Continue safely</p>
+              <h2 id="after-checks-title">Install only after both checks pass</h2>
+              <p>
+                Do not open or install an artifact when Minisign or SHA-256 verification fails. Re-download the complete
+                set from one stable release and repeat the checks instead of accepting a platform warning as proof of
+                authenticity.
+              </p>
+            </header>
+            <p>
+              Once the files pass, return to the <a href="/docs/">Kepos user guide</a> for platform installation,
+              publisher setup, pairing, and troubleshooting. The release procedure in the repository remains the
+              maintainer reference for certificate and packaging checks.
+            </p>
+            <p class="docs-related">
+              Source references:
+              <a href="https://github.com/LamplitIsles/kepos/blob/main/release/minisign.pub" target="_blank" rel="noreferrer">Minisign public key</a>
+              and
+              <a href="https://github.com/LamplitIsles/kepos/blob/main/docs/releasing.md" target="_blank" rel="noreferrer">release verification notes</a>.
+            </p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="docs-footer">
+      <a href="/docs/">← User guide</a>
+      <span>Optional release verification reference</span>
+      <a href="#verification">Back to top ↑</a>
+    </footer>
+  </body>
+</html>

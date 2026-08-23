@@ -10,6 +10,10 @@ import { parseBootstrapAsset } from "../../../src/bootstrap-asset.js";
 import type { DhtAddress } from "../../../src/mux/hyperdht.js";
 import { DEFAULT_GATEWAY_PORT } from "../../../src/home/gateway.js";
 import {
+  ensurePublisher,
+  type SetupPublisherResult,
+} from "../../../src/state/publisher.js";
+import {
   setupSubscriber,
   type SetupSubscriberResult,
 } from "../../../src/state/subscriber.js";
@@ -29,12 +33,14 @@ export interface DesktopBootstrapContext {
   loadConfig?: typeof loadKeposConfig;
   readBootstrapAsset?: typeof readDesktopBootstrapAsset;
   saveConfig?: typeof saveKeposConfig;
+  ensurePublisher?: typeof ensurePublisher;
   setupSubscriber?: typeof setupSubscriber;
 }
 
 export interface DesktopBootstrapResult {
   config: KeposConfig;
   configPath: string;
+  publisher?: SetupPublisherResult;
   subscriber?: SetupSubscriberResult;
 }
 
@@ -106,6 +112,27 @@ export async function ensureDesktopBootstrap(
     };
   }
 
+  return {
+    config,
+    configPath: paths.configPath,
+    ...(await ensureDesktopRoleState(config, context)),
+  };
+}
+
+export async function ensureDesktopRoleState(
+  config: KeposConfig,
+  context: DesktopBootstrapContext,
+): Promise<Pick<DesktopBootstrapResult, "publisher" | "subscriber">> {
+  const paths = defaultDesktopPaths(context);
+  const publisher =
+    config.publisher?.enabled === true
+      ? await (context.ensurePublisher ?? ensurePublisher)({
+          stateDir: paths.publisherStateDir,
+          displayName: config.publisher.displayName,
+          subscriberPublicKeys: config.publisher.allow,
+          services: config.publisher.services,
+        })
+      : undefined;
   const subscriber =
     config.subscriber?.enabled === true
       ? await (context.setupSubscriber ?? setupSubscriber)({
@@ -113,8 +140,7 @@ export async function ensureDesktopBootstrap(
         })
       : undefined;
   return {
-    config,
-    configPath: paths.configPath,
+    ...(publisher ? { publisher } : {}),
     ...(subscriber ? { subscriber } : {}),
   };
 }

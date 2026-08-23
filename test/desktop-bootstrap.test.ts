@@ -13,7 +13,10 @@ import { test } from "node:test";
 import { DESKTOP_BOOTSTRAP_ASSET } from "../apps/desktop/src/paths.js";
 
 import { parseKeposConfig, type KeposConfig } from "../src/app-config.js";
+import { parsePublisherConfig } from "../src/config.js";
 import { DEFAULT_GATEWAY_PORT } from "../src/home/gateway.js";
+import { setupPublisher } from "../src/state/publisher.js";
+import { setupSubscriber } from "../src/state/subscriber.js";
 import { ensureDesktopBootstrap } from "../apps/desktop/src/bootstrap.js";
 import { loadDesktopOptions } from "../apps/desktop/src/options.js";
 
@@ -304,7 +307,365 @@ test("desktop bootstrap preserves an existing default config", async () => {
   }
 });
 
-test("explicit desktop config does not invoke default bootstrap", async () => {
+test("desktop publisher bootstrap creates state from packaged TOML and preserves it on relaunch", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-desktop-publisher-first-"));
+  const environment = {
+    XDG_CONFIG_HOME: path.join(root, "config-home"),
+    XDG_STATE_HOME: path.join(root, "state-home"),
+  };
+  const configPath = path.join(
+    environment.XDG_CONFIG_HOME,
+    "kepos",
+    "config.toml",
+  );
+  const publisherStateDir = path.join(
+    environment.XDG_STATE_HOME,
+    "kepos-neo",
+    "publisher",
+  );
+  const subscriberStateDir = path.join(
+    environment.XDG_STATE_HOME,
+    "kepos-neo",
+    "subscriber",
+  );
+  const config = `[publisher]\nenabled = true\ndisplay_name = "Home"\nallow = ["${subscriberKey}"]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\ntarget_port = 4533\nallow = ["${subscriberKey}"]\n\n[subscriber]\nenabled = true\nservices = []\n`;
+  try {
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await writeFile(configPath, config);
+
+    const first = await loadDesktopOptions([], {
+      homeDirectory: root,
+      environment,
+      platform: "darwin",
+    });
+    const publisherConfigPath = path.join(publisherStateDir, "publisher.json");
+    const publisherManifestPath = path.join(
+      publisherStateDir,
+      "publisher.manifest.json",
+    );
+    const publisherConfigBytes = await readFile(publisherConfigPath);
+    const publisherManifestBytes = await readFile(publisherManifestPath);
+    const subscriberIdentityBytes = await readFile(
+      path.join(subscriberStateDir, "client.identity.json"),
+    );
+
+    assert.deepEqual(first.publisher, {
+      stateDir: publisherStateDir,
+      configPath,
+      policy: {
+        displayName: "Home",
+        allow: [subscriberKey],
+        services: [
+          {
+            id: "navidrome",
+            name: "Navidrome",
+            targetPort: 4533,
+            allow: [subscriberKey],
+          },
+        ],
+      },
+    });
+    assert.equal(
+      parsePublisherConfig(JSON.parse(publisherConfigBytes.toString())).allow[0],
+      subscriberKey,
+    );
+
+    await writeFile(
+      configPath,
+      `[publisher]\nenabled = true\ndisplay_name = "Renamed home"\nallow = ["${"22".repeat(32)}"]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\ntarget_port = 4534\n\n[subscriber]\nenabled = true\nservices = []\n`,
+    );
+    const second = await loadDesktopOptions([], {
+      homeDirectory: root,
+      environment,
+      platform: "darwin",
+    });
+
+    assert.deepEqual(second.publisher?.policy, {
+      displayName: "Renamed home",
+      allow: ["22".repeat(32)],
+      services: [
+        { id: "navidrome", name: "Navidrome", targetPort: 4534 },
+      ],
+    });
+    assert.deepEqual(await readFile(publisherConfigPath), publisherConfigBytes);
+    assert.deepEqual(
+      await readFile(publisherManifestPath),
+      publisherManifestBytes,
+    );
+    assert.deepEqual(
+      await readFile(path.join(subscriberStateDir, "client.identity.json")),
+      subscriberIdentityBytes,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop publisher bootstrap preserves an existing identity", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-desktop-publisher-existing-"));
+  const environment = {
+    XDG_CONFIG_HOME: path.join(root, "config"),
+    XDG_STATE_HOME: path.join(root, "state"),
+  };
+  const configPath = path.join(environment.XDG_CONFIG_HOME, "kepos", "config.toml");
+  const publisherStateDir = path.join(
+    environment.XDG_STATE_HOME,
+    "kepos-neo",
+    "publisher",
+  );
+  try {
+    const existing = await setupPublisher({
+      stateDir: publisherStateDir,
+      displayName: "Home",
+      subscriberPublicKeys: [],
+      services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
+    });
+    const publisherConfigPath = path.join(publisherStateDir, "publisher.json");
+    const originalPublisherConfig = await readFile(publisherConfigPath);
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await writeFile(
+      configPath,
+      '[publisher]\nenabled = true\ndisplay_name = "Home"\nallow = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\ntarget_port = 22\n',
+    );
+
+    const options = await loadDesktopOptions([], {
+      homeDirectory: root,
+      environment,
+      platform: "darwin",
+    });
+
+    assert.equal(
+      parsePublisherConfig(JSON.parse((await readFile(publisherConfigPath)).toString())).seed,
+      parsePublisherConfig(JSON.parse(originalPublisherConfig.toString())).seed,
+    );
+    assert.equal(options.publisher?.stateDir, publisherStateDir);
+    assert.equal(
+      (await setupPublisher({
+        stateDir: publisherStateDir,
+        displayName: "Home",
+        subscriberPublicKeys: [],
+        services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
+      })).publisherKey,
+      existing.publisherKey,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("subscriber-only desktop startup does not create publisher state", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-desktop-subscriber-only-"));
+  const environment = {
+    XDG_CONFIG_HOME: path.join(root, "config"),
+    XDG_STATE_HOME: path.join(root, "state"),
+  };
+  const configPath = path.join(environment.XDG_CONFIG_HOME, "kepos", "config.toml");
+  const publisherStateDir = path.join(
+    environment.XDG_STATE_HOME,
+    "kepos-neo",
+    "publisher",
+  );
+  try {
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await writeFile(
+      configPath,
+      '[publisher]\nenabled = false\ndisplay_name = "Home"\nallow = []\nservices = []\n\n[subscriber]\nenabled = true\nservices = []\n',
+    );
+
+    const options = await loadDesktopOptions([], {
+      homeDirectory: root,
+      environment,
+      platform: "darwin",
+    });
+
+    assert.equal(options.publisher, undefined);
+    await assert.rejects(readFile(path.join(publisherStateDir, "publisher.json")), {
+      code: "ENOENT",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop publisher bootstrap validates malformed state without changing identities", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-desktop-publisher-invalid-"));
+  const environment = {
+    XDG_CONFIG_HOME: path.join(root, "config"),
+    XDG_STATE_HOME: path.join(root, "state"),
+  };
+  const configPath = path.join(environment.XDG_CONFIG_HOME, "kepos", "config.toml");
+  const publisherStateDir = path.join(
+    environment.XDG_STATE_HOME,
+    "kepos-neo",
+    "publisher",
+  );
+  const subscriberStateDir = path.join(
+    environment.XDG_STATE_HOME,
+    "kepos-neo",
+    "subscriber",
+  );
+  try {
+    await setupPublisher({
+      stateDir: publisherStateDir,
+      displayName: "Other",
+      subscriberPublicKeys: [],
+      services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
+    });
+    const publisherStateBefore = await readFile(
+      path.join(publisherStateDir, "publisher.json"),
+    );
+    const subscriber = await setupSubscriber({
+      stateDir: subscriberStateDir,
+    });
+    const subscriberIdentityBefore = await readFile(
+      path.join(subscriberStateDir, "client.identity.json"),
+    );
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await writeFile(
+      configPath,
+      '[publisher]\nenabled = true\ndisplay_name = "Home"\nallow = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\ntarget_port = 2222\n\n[subscriber]\nenabled = true\nservices = []\n',
+    );
+    const configBefore = await readFile(configPath);
+
+    const options = await loadDesktopOptions([], {
+      homeDirectory: root,
+      environment,
+      platform: "darwin",
+    });
+    assert.deepEqual(options.publisher?.policy, {
+      displayName: "Home",
+      allow: [],
+      services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
+    });
+    assert.deepEqual(
+      await readFile(path.join(publisherStateDir, "publisher.json")),
+      publisherStateBefore,
+    );
+    assert.deepEqual(
+      await readFile(path.join(subscriberStateDir, "client.identity.json")),
+      subscriberIdentityBefore,
+    );
+    assert.deepEqual(await readFile(configPath), configBefore);
+    assert.equal(subscriber.created, true);
+
+    await rm(publisherStateDir, { recursive: true, force: true });
+    await mkdir(publisherStateDir, { recursive: true });
+    await writeFile(
+      path.join(publisherStateDir, "publisher.manifest.json"),
+      "not-json",
+    );
+    await assert.rejects(
+      loadDesktopOptions([], {
+        homeDirectory: root,
+        environment,
+        platform: "darwin",
+      }),
+      /invalid state file|publisher manifest/i,
+    );
+    assert.deepEqual(
+      await readFile(path.join(subscriberStateDir, "client.identity.json")),
+      subscriberIdentityBefore,
+    );
+    assert.deepEqual(await readFile(configPath), configBefore);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("desktop publisher bootstrap selects the Windows packaged state path", async () => {
+  const captured: { stateDir?: string; configPath?: string } = {};
+  const ensuredPolicies: Array<{
+    displayName: string;
+    allow: string[];
+    services: NonNullable<KeposConfig["publisher"]>["services"];
+  }> = [];
+  let config: KeposConfig = {
+    publisher: {
+      enabled: true,
+      displayName: "Windows home",
+      allow: [],
+      services: [],
+    },
+  };
+  const options = await loadDesktopOptions([], {
+    homeDirectory: "C:\\Users\\kepos",
+    environment: {
+      APPDATA: "C:\\Users\\kepos\\AppData\\Roaming",
+      LOCALAPPDATA: "C:\\Users\\kepos\\AppData\\Local",
+    },
+    platform: "win32",
+    loadConfig: async () => config,
+    ensurePublisher: async ({ stateDir, displayName, subscriberPublicKeys, services }) => {
+      captured.stateDir = stateDir;
+      ensuredPolicies.push({
+        displayName,
+        allow: subscriberPublicKeys,
+        services,
+      });
+      return {
+        created: ensuredPolicies.length === 1,
+        publisherKey: "aa".repeat(32),
+      };
+    },
+    setupSubscriber: async ({ stateDir }) => {
+      captured.configPath = stateDir;
+      return { created: true, configured: false, publicKey: subscriberKey };
+    },
+  });
+
+  assert.deepEqual(options.publisher, {
+    stateDir: "C:\\Users\\kepos\\AppData\\Local\\Kepos\\state\\publisher",
+    configPath: "C:\\Users\\kepos\\AppData\\Roaming\\Kepos\\config.toml",
+    policy: { displayName: "Windows home", allow: [], services: [] },
+  });
+  assert.equal(
+    captured.stateDir,
+    "C:\\Users\\kepos\\AppData\\Local\\Kepos\\state\\publisher",
+  );
+  assert.equal(captured.configPath, undefined);
+
+  config = {
+    publisher: {
+      enabled: true,
+      displayName: "Renamed Windows home",
+      allow: ["22".repeat(32)],
+      services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
+    },
+  };
+  const relaunched = await loadDesktopOptions([], {
+    homeDirectory: "C:\\Users\\kepos",
+    environment: {
+      APPDATA: "C:\\Users\\kepos\\AppData\\Roaming",
+      LOCALAPPDATA: "C:\\Users\\kepos\\AppData\\Local",
+    },
+    platform: "win32",
+    loadConfig: async () => config,
+    ensurePublisher: async ({ stateDir, displayName, subscriberPublicKeys, services }) => {
+      captured.stateDir = stateDir;
+      ensuredPolicies.push({
+        displayName,
+        allow: subscriberPublicKeys,
+        services,
+      });
+      return { created: false, publisherKey: "aa".repeat(32) };
+    },
+  });
+  assert.deepEqual(relaunched.publisher?.policy, {
+    displayName: "Renamed Windows home",
+    allow: ["22".repeat(32)],
+    services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
+  });
+  assert.deepEqual(ensuredPolicies, [
+    { displayName: "Windows home", allow: [], services: [] },
+    {
+      displayName: "Renamed Windows home",
+      allow: ["22".repeat(32)],
+      services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
+    },
+  ]);
+});
+
+test("missing explicit desktop config does not create defaults", async () => {
   let saved = false;
   let setup = false;
   await assert.rejects(
@@ -324,4 +685,47 @@ test("explicit desktop config does not invoke default bootstrap", async () => {
   );
   assert.equal(saved, false);
   assert.equal(setup, false);
+});
+
+test("explicit desktop config prepares enabled role identities", async () => {
+  const publisherStates: string[] = [];
+  const subscriberStates: string[] = [];
+  const options = await loadDesktopOptions(
+    ["--config", "/tmp/explicit-kepos.toml"],
+    {
+      homeDirectory: "/Users/kepos",
+      environment: { XDG_STATE_HOME: "/tmp/kepos-explicit-state" },
+      platform: "darwin",
+      loadConfig: async () => ({
+        publisher: {
+          enabled: true,
+          displayName: "Explicit home",
+          allow: [],
+          services: [],
+        },
+        subscriber: {
+          enabled: true,
+          gatewayPort: DEFAULT_GATEWAY_PORT,
+          services: [],
+        },
+      }),
+      ensurePublisher: async ({ stateDir }) => {
+        publisherStates.push(stateDir);
+        return { created: true, publisherKey: "aa".repeat(32) };
+      },
+      setupSubscriber: async ({ stateDir }) => {
+        subscriberStates.push(stateDir);
+        return { created: true, configured: false, publicKey: subscriberKey };
+      },
+    },
+  );
+
+  assert.deepEqual(publisherStates, [
+    "/tmp/kepos-explicit-state/kepos-neo/publisher",
+  ]);
+  assert.deepEqual(subscriberStates, [
+    "/tmp/kepos-explicit-state/kepos-neo/subscriber",
+  ]);
+  assert.equal(options.publisher?.configPath, "/tmp/explicit-kepos.toml");
+  assert.equal(options.subscriber?.subscriberSetup?.publicKey, subscriberKey);
 });

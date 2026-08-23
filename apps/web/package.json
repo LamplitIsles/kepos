@@ -15,7 +15,7 @@
     "check:write": "biome check --write .",
     "deploy": "npm run verify && wrangler deploy",
     "deploy:dry-run": "npm run build && wrangler deploy --dry-run",
-    "verify": "npm run test && npm run check && npm run build"
+    "verify": "npm run build && npm run test && npm run check"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",

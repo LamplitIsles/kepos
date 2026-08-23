@@ -81,6 +81,21 @@ export async function setupPublisher(
   return readPublisherResult(stateDir, manifest, allow, true);
 }
 
+export async function ensurePublisher(
+  options: SetupPublisherOptions,
+): Promise<SetupPublisherResult> {
+  const stateDir = path.resolve(options.stateDir);
+  if (!(await pathExists(stateDir))) {
+    return setupPublisher({ ...options, stateDir });
+  }
+
+  const { config } = await loadPublisherState(stateDir);
+  return {
+    created: false,
+    publisherKey: derivePublisherHomeKey(config.seed),
+  };
+}
+
 export async function setPublisherAllowlist(
   options: SetPublisherAllowlistOptions,
 ): Promise<void> {
