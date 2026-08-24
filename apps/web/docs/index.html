@@ -497,10 +497,87 @@ npm run kepos -- subscriber run \
               <h2 id="holesail-title">Kepos and Holesail</h2>
               <p>
                 Both projects offer direct encrypted peer-to-peer access without requiring a public service port. The
-                useful distinction is the unit of sharing and the transport boundary each project documents.<br />
+                difference is the unit of sharing: Kepos starts with a persistent authenticated device relationship;
+                Holesail documents a port tunnel and connection key.<br />
                 <small>Compared with Holesail 2.4.1 and its current official documentation, checked 2026-08-22.</small>
               </p>
             </header>
+
+            <figure class="docs-connection-contrast" aria-labelledby="connection-contrast-title">
+              <figcaption class="docs-connection-contrast-heading">
+                <p class="docs-kicker">The architectural difference</p>
+                <h3 id="connection-contrast-title">Pair once. Open many named services.</h3>
+                <p>
+                  Kepos turns a trusted device relationship into durable transport: adding a service opens a named
+                  channel, not another tunnel/key workflow.
+                </p>
+              </figcaption>
+              <div class="docs-connection-contrast-grid">
+                <section class="docs-connection-card docs-connection-card-kepos" aria-labelledby="kepos-connection-card-title">
+                  <header>
+                    <p>Kepos</p>
+                    <h4 id="kepos-connection-card-title">One relationship, many channels</h4>
+                  </header>
+                  <svg class="docs-connection-diagram" viewBox="0 0 360 222" role="img" aria-labelledby="kepos-connection-diagram-title kepos-connection-diagram-description">
+                    <title id="kepos-connection-diagram-title">One Kepos connection, three named service channels</title>
+                    <desc id="kepos-connection-diagram-description">A publisher and subscriber share one outer connection. That connection branches into named home, ssh, and music service channels.</desc>
+                    <text class="docs-connection-diagram-caption" x="180" y="35" text-anchor="middle">TRUSTED DEVICE PAIR</text>
+                    <rect class="docs-connection-node docs-connection-node-kepos" x="12" y="72" width="83" height="52" rx="6" />
+                    <text class="docs-connection-diagram-label" x="53.5" y="94" text-anchor="middle">PUBLISHER</text>
+                    <text class="docs-connection-diagram-muted" x="53.5" y="110" text-anchor="middle">DEVICE</text>
+                    <rect class="docs-connection-outer" x="114" y="77" width="132" height="42" rx="21" />
+                    <text class="docs-connection-diagram-label docs-connection-diagram-label-kepos" x="180" y="93" text-anchor="middle">ONE OUTER</text>
+                    <text class="docs-connection-diagram-label docs-connection-diagram-label-kepos" x="180" y="106" text-anchor="middle">CONNECTION</text>
+                    <rect class="docs-connection-node docs-connection-node-kepos" x="265" y="72" width="83" height="52" rx="6" />
+                    <text class="docs-connection-diagram-label" x="306.5" y="94" text-anchor="middle">SUBSCRIBER</text>
+                    <text class="docs-connection-diagram-muted" x="306.5" y="110" text-anchor="middle">DEVICE</text>
+                    <path class="docs-connection-line docs-connection-line-kepos" d="M95 98H114M246 98H265M180 119V140M66 140H294M66 140V166M180 140V166M294 140V166" />
+                    <rect class="docs-connection-channel" x="25" y="166" width="82" height="30" rx="15" />
+                    <text class="docs-connection-channel-label" x="66" y="185" text-anchor="middle">home</text>
+                    <rect class="docs-connection-channel" x="139" y="166" width="82" height="30" rx="15" />
+                    <text class="docs-connection-channel-label" x="180" y="185" text-anchor="middle">ssh</text>
+                    <rect class="docs-connection-channel" x="253" y="166" width="82" height="30" rx="15" />
+                    <text class="docs-connection-channel-label" x="294" y="185" text-anchor="middle">music</text>
+                  </svg>
+                  <p>One authenticated outer connection carries the registry and independent service streams.</p>
+                </section>
+
+                <section class="docs-connection-card docs-connection-card-holesail" aria-labelledby="holesail-connection-card-title">
+                  <header>
+                    <p>Holesail</p>
+                    <h4 id="holesail-connection-card-title">One port tunnel at a time</h4>
+                  </header>
+                  <svg class="docs-connection-diagram" viewBox="0 0 360 222" role="img" aria-labelledby="holesail-connection-diagram-title holesail-connection-diagram-description">
+                    <title id="holesail-connection-diagram-title">Three Holesail services, three port tunnel workflows</title>
+                    <desc id="holesail-connection-diagram-description">Web, ssh, and music each use a distinct port tunnel and connection key in Holesail's documented model.</desc>
+                    <text class="docs-connection-diagram-caption" x="180" y="24" text-anchor="middle">DOCUMENTED PORT-TUNNEL MODEL</text>
+                    <path class="docs-connection-line docs-connection-line-holesail" d="M102 55H133M227 55H258M102 111H133M227 111H258M102 167H133M227 167H258" />
+                    <rect class="docs-connection-node docs-connection-node-holesail" x="12" y="37" width="90" height="36" rx="6" />
+                    <text class="docs-connection-diagram-label" x="57" y="59" text-anchor="middle">web :3000</text>
+                    <rect class="docs-connection-tunnel" x="133" y="37" width="94" height="36" rx="18" />
+                    <text class="docs-connection-diagram-label docs-connection-diagram-label-holesail" x="180" y="53" text-anchor="middle">TUNNEL</text>
+                    <text class="docs-connection-diagram-muted docs-connection-diagram-muted-holesail" x="180" y="65" text-anchor="middle">+ KEY</text>
+                    <rect class="docs-connection-node docs-connection-node-holesail" x="258" y="37" width="90" height="36" rx="6" />
+                    <text class="docs-connection-diagram-label" x="303" y="59" text-anchor="middle">local :3000</text>
+                    <rect class="docs-connection-node docs-connection-node-holesail" x="12" y="93" width="90" height="36" rx="6" />
+                    <text class="docs-connection-diagram-label" x="57" y="115" text-anchor="middle">ssh :22</text>
+                    <rect class="docs-connection-tunnel" x="133" y="93" width="94" height="36" rx="18" />
+                    <text class="docs-connection-diagram-label docs-connection-diagram-label-holesail" x="180" y="109" text-anchor="middle">TUNNEL</text>
+                    <text class="docs-connection-diagram-muted docs-connection-diagram-muted-holesail" x="180" y="121" text-anchor="middle">+ KEY</text>
+                    <rect class="docs-connection-node docs-connection-node-holesail" x="258" y="93" width="90" height="36" rx="6" />
+                    <text class="docs-connection-diagram-label" x="303" y="115" text-anchor="middle">local :22</text>
+                    <rect class="docs-connection-node docs-connection-node-holesail" x="12" y="149" width="90" height="36" rx="6" />
+                    <text class="docs-connection-diagram-label" x="57" y="171" text-anchor="middle">music :4533</text>
+                    <rect class="docs-connection-tunnel" x="133" y="149" width="94" height="36" rx="18" />
+                    <text class="docs-connection-diagram-label docs-connection-diagram-label-holesail" x="180" y="165" text-anchor="middle">TUNNEL</text>
+                    <text class="docs-connection-diagram-muted docs-connection-diagram-muted-holesail" x="180" y="177" text-anchor="middle">+ KEY</text>
+                    <rect class="docs-connection-node docs-connection-node-holesail" x="258" y="149" width="90" height="36" rx="6" />
+                    <text class="docs-connection-diagram-label" x="303" y="171" text-anchor="middle">local :4533</text>
+                  </svg>
+                  <p>Its connection key resolves to one host and port; another service begins another tunnel/key workflow.</p>
+                </section>
+              </div>
+            </figure>
 
             <p class="docs-compare-legend"><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span>Documented capability</span></span><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span>Not in the current documented model</span></span></p>
             <p class="docs-table-hint">On narrow screens, scroll horizontally to see all columns.</p>
@@ -527,9 +604,9 @@ npm run kepos -- subscriber run \
                     <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Official docs define private or public connection keys per tunnel.</span></span></td>
                   </tr>
                   <tr>
-                    <th scope="row">Named multi-service registry</th>
-                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Named services share one outer connection.</span></span></td>
-                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> The documented quickstart is one local port per tunnel.</span></span></td>
+                    <th scope="row">Pair once; add named services</th>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> One durable outer connection carries named service channels.</span></span></td>
+                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Its documented model uses one port tunnel and connection key per exposed service.</span></span></td>
                   </tr>
                   <tr>
                     <th scope="row">Per-service allowlists</th>

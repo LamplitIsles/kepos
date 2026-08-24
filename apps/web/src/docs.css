@@ -387,6 +387,229 @@
   color: #ff8a80;
 }
 
+.docs-connection-contrast {
+  position: relative;
+  margin: 0 0 34px;
+  overflow: hidden;
+  padding: 25px;
+  border: 1px solid var(--docs-rule);
+  background:
+    linear-gradient(rgba(215, 247, 152, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(215, 247, 152, 0.04) 1px, transparent 1px), #0b1008;
+  background-size:
+    24px 24px,
+    24px 24px,
+    auto;
+}
+
+.docs-connection-contrast::after {
+  position: absolute;
+  inset: -90% 42% auto -15%;
+  width: 72%;
+  aspect-ratio: 1;
+  border: 1px solid rgba(183, 238, 69, 0.14);
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+}
+
+.docs-connection-contrast-heading,
+.docs-connection-contrast-grid {
+  position: relative;
+  z-index: 1;
+}
+
+.docs-connection-contrast-heading {
+  max-width: 66ch;
+  margin: 0 0 21px;
+}
+
+.docs-connection-contrast-heading .docs-kicker {
+  margin-bottom: 8px;
+}
+
+.docs-connection-contrast-heading h3 {
+  margin: 0 0 8px;
+  color: var(--pear-cream);
+  font-family: var(--display);
+  font-size: clamp(23px, 3vw, 30px);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+}
+
+.docs-connection-contrast-heading p:last-child {
+  margin: 0;
+  color: #c8ccbe;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.docs-connection-contrast-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.docs-connection-card {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid var(--docs-rule-soft);
+  background: rgba(8, 12, 6, 0.84);
+}
+
+.docs-connection-card-kepos {
+  border-color: rgba(183, 238, 69, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(183, 238, 69, 0.05);
+}
+
+.docs-connection-card-holesail {
+  border-color: rgba(216, 182, 96, 0.35);
+}
+
+.docs-connection-card header > p {
+  margin: 0 0 5px;
+  color: var(--pear-green);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.docs-connection-card-holesail header > p {
+  color: #d8b660;
+}
+
+.docs-connection-card h4 {
+  margin: 0;
+  color: var(--pear-cream);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.docs-connection-card > p {
+  margin: 0;
+  color: var(--pear-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.docs-connection-diagram {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 14px 0 11px;
+}
+
+.docs-connection-diagram-caption,
+.docs-connection-diagram-label,
+.docs-connection-diagram-muted,
+.docs-connection-channel-label {
+  font-family: var(--mono);
+}
+
+.docs-connection-diagram-caption {
+  fill: #78806f;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.docs-connection-diagram-label {
+  fill: var(--pear-cream);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.docs-connection-diagram-muted {
+  fill: #9aa08d;
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+}
+
+.docs-connection-node {
+  fill: #10170b;
+  stroke-width: 1;
+}
+
+.docs-connection-node-kepos {
+  stroke: rgba(183, 238, 69, 0.62);
+}
+
+.docs-connection-node-holesail {
+  stroke: rgba(216, 182, 96, 0.6);
+}
+
+.docs-connection-outer {
+  fill: rgba(183, 238, 69, 0.14);
+  stroke: var(--pear-green);
+  stroke-width: 1;
+}
+
+.docs-connection-tunnel {
+  fill: rgba(216, 182, 96, 0.1);
+  stroke: #d8b660;
+  stroke-width: 1;
+}
+
+.docs-connection-diagram-label-kepos,
+.docs-connection-channel-label {
+  fill: var(--pear-green-soft);
+}
+
+.docs-connection-diagram-label-holesail {
+  fill: #f0d998;
+}
+
+.docs-connection-diagram-muted-holesail {
+  fill: #c3aa71;
+}
+
+.docs-connection-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.docs-connection-line-kepos {
+  stroke: var(--pear-green);
+}
+
+.docs-connection-line-holesail {
+  stroke: #d8b660;
+  stroke-dasharray: 3 4;
+}
+
+.docs-connection-channel {
+  fill: rgba(183, 238, 69, 0.08);
+  stroke: rgba(183, 238, 69, 0.5);
+  stroke-width: 1;
+}
+
+.docs-connection-channel-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+@media (max-width: 680px) {
+  .docs-connection-contrast {
+    padding: 18px 14px;
+  }
+
+  .docs-connection-contrast-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .docs-connection-card {
+    padding: 15px;
+  }
+}
+
 .docs-article p.docs-status {
   display: flex;
   margin: 0 0 28px;
