@@ -101,11 +101,15 @@ npm run kepos -- setup publisher \
   --state ~/.local/state/kepos-neo/publisher
 ```
 
-The headless publisher reads TOML policy when it starts. After editing the
-allowlist or services, restart `publisher run` before treating the change as
-active. Restarting closes existing service streams, so their clients must
-reconnect. Desktop's **Add device** approval is different: it updates both TOML
-and the running desktop publisher.
+The headless publisher polls its selected TOML policy every second while it
+runs. Valid changes apply without restarting the process, publisher identity, or
+DHT listener. Removing a subscriber from the global allowlist disconnects only
+that subscriber and denies reconnects; service-list, target, and service ACL
+changes affect the next Home-registry request and newly opened service
+channels, while existing service tunnels drain normally. Invalid or incomplete
+TOML keeps the last valid policy and reports a reload failure. Desktop's **Add
+device** approval is different: it updates both TOML and the running desktop
+publisher.
 
 Publisher-wide and service-specific allowlists fail closed:
 

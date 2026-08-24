@@ -66,6 +66,9 @@ import { HOME_REGISTRY_PATH } from "../home/registry.js";
 interface CliPublisher {
   home: { url: string };
   publisherKey: string;
+  applyPolicy?: (
+    policy: NonNullable<KeposConfig["publisher"]>,
+  ) => Promise<boolean>;
   status: () => PublisherRuntimeStatus;
   stop: () => Promise<void>;
 }
@@ -118,6 +121,10 @@ export interface CliDependencies {
     stateDir: string,
   ) => Promise<RuntimeLock>;
   waitForSignal: (stop: () => Promise<void>) => Promise<void>;
+  schedulePolicyReload: (
+    callback: () => void,
+    intervalMs: number,
+  ) => () => void;
 }
 
 export function createDefaultCliDependencies(
@@ -141,6 +148,10 @@ export function createDefaultCliDependencies(
     acquirePublisherRuntimeLock,
     acquireSubscriberRuntimeLock,
     waitForSignal,
+    schedulePolicyReload: (callback, intervalMs) => {
+      const timer = setInterval(callback, intervalMs);
+      return () => clearInterval(timer);
+    },
   };
 }
 
@@ -353,6 +364,8 @@ async function runPublisherCommand(
   const config = await dependencies.loadConfig(configPath(options));
   const stateDir = requiredState(options);
   const lock = await dependencies.acquirePublisherRuntimeLock(stateDir);
+  let stopPolicyReload: (() => void) | undefined;
+  let policyReloads = Promise.resolve();
   try {
     const running = await dependencies.startPublisher({
       stateDir,
@@ -360,11 +373,39 @@ async function runPublisherCommand(
       policy: config?.publisher,
       observe: observationWriter(mode, dependencies),
     });
+    if (config?.publisher) {
+      let polling = true;
+      const pollPolicy = (): void => {
+        if (!polling) return;
+        policyReloads = policyReloads.then(async () => {
+          try {
+            const nextConfig = await dependencies.loadConfig(configPath(options));
+            if (!nextConfig?.publisher) {
+              throw new Error("publisher policy section is missing");
+            }
+            if (!running.applyPolicy) {
+              throw new Error("publisher policy reload is unavailable");
+            }
+            await running.applyPolicy(nextConfig.publisher);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            dependencies.stderr(`Publisher policy reload failed: ${message}`);
+          }
+        });
+      };
+      const cancel = dependencies.schedulePolicyReload(pollPolicy, 1_000);
+      stopPolicyReload = (): void => {
+        polling = false;
+        cancel();
+      };
+    }
     statusWriter(mode, dependencies)(
       `Publisher running: key=${running.publisherKey} registry=${running.home.url}${HOME_REGISTRY_PATH}`,
     );
     await dependencies.waitForSignal(running.stop);
   } finally {
+    stopPolicyReload?.();
+    await policyReloads;
     await lock.release();
   }
 }

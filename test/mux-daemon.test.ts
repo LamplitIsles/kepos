@@ -758,6 +758,150 @@ test("service allowlists restrict channels and subscriber registries", async () 
   }
 });
 
+test("publisher policy reload preserves unaffected subscribers and drains services", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-policy-reload-"));
+  const publisherState = path.join(root, "publisher");
+  const allowedState = path.join(root, "allowed");
+  const removedState = path.join(root, "removed");
+  const target = createServer({ allowHalfOpen: true }, (socket) => {
+    socket.pipe(socket);
+  });
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let allowed: RunningSubscriber | undefined;
+  let removed: RunningSubscriber | undefined;
+  let existing: ReturnType<typeof createConnection> | undefined;
+
+  try {
+    const [allowedSetup, removedSetup] = await Promise.all([
+      setupSubscriber({ stateDir: allowedState }),
+      setupSubscriber({ stateDir: removedState }),
+    ]);
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "original",
+      subscriberPublicKeys: [allowedSetup.publicKey, removedSetup.publicKey],
+      services: [],
+    });
+    await Promise.all([
+      setSubscriberPublisher({
+        stateDir: allowedState,
+        label: "original",
+        publisherKey: publisherSetup.publisherKey,
+      }),
+      setSubscriberPublisher({
+        stateDir: removedState,
+        label: "original",
+        publisherKey: publisherSetup.publisherKey,
+      }),
+    ]);
+    const targetPort = await listen(target);
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+      policy: {
+        displayName: "original",
+        allow: [allowedSetup.publicKey, removedSetup.publicKey],
+        services: [
+          {
+            id: "echo",
+            name: "Echo",
+            targetPort,
+            allow: [allowedSetup.publicKey],
+          },
+        ],
+      },
+    });
+    const homeUrl = publisher.home.url;
+    assert.equal(publisher.publisherKey, publisherSetup.publisherKey);
+    assert.ok(publisher.applyPolicy);
+    assert.equal(
+      await publisher.applyPolicy({
+        displayName: "original",
+        allow: [allowedSetup.publicKey, removedSetup.publicKey],
+        services: [
+          { id: "echo", name: "Echo", targetPort, allow: [allowedSetup.publicKey] },
+        ],
+      }),
+      false,
+    );
+    assert.equal(publisher.home.url, homeUrl);
+    [allowed, removed] = await Promise.all([
+      startSubscriber({
+        stateDir: allowedState,
+        bootstrap: testnet.bootstrap,
+        gatewayPort: 0,
+        services: [{ id: "echo", localPort: 0 }],
+        log: noLog,
+      }),
+      startSubscriber({
+        stateDir: removedState,
+        bootstrap: testnet.bootstrap,
+        gatewayPort: 0,
+        services: [{ id: "echo", localPort: 0 }],
+        log: noLog,
+      }),
+    ]);
+    const allowedEcho = allowed.services.find(({ id }) => id === "echo");
+    const removedEcho = removed.services.find(({ id }) => id === "echo");
+    assert.ok(allowedEcho);
+    assert.ok(removedEcho);
+
+    existing = createConnection({ host: "127.0.0.1", port: allowedEcho.port });
+    await once(existing, "connect");
+    existing.write("before");
+    const [before] = await once(existing, "data");
+    assert.equal(before.toString(), "before");
+
+    assert.ok(publisher.applyPolicy);
+    assert.equal(
+      await publisher.applyPolicy({
+        displayName: "updated",
+        allow: [allowedSetup.publicKey, removedSetup.publicKey],
+        services: [
+          { id: "echo", name: "Echo", targetPort, allow: [removedSetup.publicKey] },
+        ],
+      }),
+      true,
+    );
+    const allowedRegistry = await fetch(
+      `${allowed.home.url}/.well-known/kepos/services.json`,
+    ).then((response) => response.json() as Promise<{ services: Array<{ id: string }> }>);
+    assert.deepEqual(allowedRegistry.services.map(({ id }) => id), ["home"]);
+    assert.equal(await exchangeTcp(allowedEcho.port, "new"), "");
+    assert.equal(await exchangeTcp(removedEcho.port, "new"), "new");
+    existing.write("after");
+    const [after] = await once(existing, "data");
+    assert.equal(after.toString(), "after");
+
+    await publisher.applyPolicy({
+      displayName: "updated",
+      allow: [allowedSetup.publicKey],
+      services: [
+        { id: "echo", name: "Echo", targetPort, allow: [allowedSetup.publicKey] },
+      ],
+    });
+    await waitFor(
+      () => publisher?.activeSubscribers() === 1,
+      "global ACL removal did not disconnect only the removed subscriber",
+    );
+    assert.equal((await fetch(`${allowed.home.url}/healthz`)).status, 200);
+    assert.equal((await fetch(`${publisher.home.url}/healthz`)).status, 200);
+  } finally {
+    existing?.destroy();
+    await Promise.allSettled([
+      allowed?.stop(),
+      removed?.stop(),
+      publisher?.stop(),
+      closeServer(target),
+      testnet?.destroy(),
+      rm(root, { recursive: true, force: true }),
+    ]);
+  }
+});
+
 test("publisher allowlist rejects an unknown subscriber", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-denied-"));
   const allowedState = path.join(root, "allowed");
