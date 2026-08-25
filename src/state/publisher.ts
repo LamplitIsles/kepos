@@ -23,6 +23,7 @@ const configFileName = "publisher.json";
 export interface PublisherStateService {
   id: string;
   name: string;
+  kind?: "tcp" | "http";
   targetPort: number;
   allow?: string[];
 }
@@ -139,7 +140,7 @@ function createManifest(
     services: services.map(
       (service): PublisherService => ({
         ...service,
-        kind: "tcp",
+        kind: service.kind ?? "tcp",
       }),
     ),
   });

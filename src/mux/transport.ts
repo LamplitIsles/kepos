@@ -19,6 +19,7 @@ import {
   type ObservationRole,
   type Observe,
 } from "./observability.js";
+import { bridgeHttp1 } from "./http-forwarder.js";
 
 const Protomux = ProtomuxModule as ProtomuxConstructor;
 const compact = compactModule as CompactEncoding;
@@ -122,6 +123,8 @@ export interface MuxPublisherOptions {
   observe?: Observe;
   outerId?: string;
   schedulePairingRequestDeadline?: ScheduleHeartbeat;
+  serviceKind?: (serviceId: string) => "tcp" | "http";
+  subscriberPublicKey?: string;
   transportSnapshot?: () => unknown;
 }
 
@@ -897,7 +900,14 @@ function pairPublisherServiceProtocol(
           tunnel.stream.accept();
           tunnel.messages.status.send("");
           emit("channel.open-ok", transportFields(options.transportSnapshot));
-          bridge(tunnel.stream, target);
+          if (options.serviceKind?.(openedServiceId) === "http") {
+            if (!options.subscriberPublicKey) {
+              throw new Error("HTTP service is missing subscriber identity");
+            }
+            bridgeHttp1(tunnel.stream, target, options.subscriberPublicKey);
+          } else {
+            bridge(tunnel.stream, target);
+          }
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);

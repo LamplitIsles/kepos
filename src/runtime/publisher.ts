@@ -34,7 +34,9 @@ import type { PublisherService } from "../config.js";
 import { cleanupAll } from "./cleanup.js";
 
 const maximumPairingCandidates = 3;
-type PublisherRuntimeService = Omit<PublisherService, "kind">;
+export type PublisherRuntimeService = Omit<PublisherService, "kind"> & {
+  kind?: PublisherService["kind"];
+};
 
 type SchedulePairingExpiry = (
   delayMs: number,
@@ -354,6 +356,8 @@ export async function startPublisher(
           }
           return connectLoopback(service.targetPort);
         },
+        serviceKind: (serviceId) => services.get(serviceId)?.kind ?? "tcp",
+        subscriberPublicKey: subscriberKey,
       });
       muxes.set(stream, mux);
       if (initiallyAuthorized && !activeBySubscriberKey.has(subscriberKey)) {
@@ -525,9 +529,10 @@ function clonePolicy(policy: PublisherRuntimePolicy): PublisherRuntimePolicy {
   return {
     displayName: policy.displayName,
     allow: [...policy.allow],
-    services: policy.services.map(({ id, name, targetPort, allow }) => ({
+    services: policy.services.map(({ id, name, kind, targetPort, allow }) => ({
       id,
       name,
+      ...(kind === undefined ? {} : { kind }),
       targetPort,
       ...(allow === undefined ? {} : { allow: [...allow] }),
     })),
@@ -545,9 +550,10 @@ function policyFingerprint(policy: PublisherRuntimePolicy): string {
   return JSON.stringify({
     displayName: policy.displayName,
     allow: [...new Set(policy.allow)].sort(),
-    services: policy.services.map(({ id, name, targetPort, allow }) => ({
+    services: policy.services.map(({ id, name, kind, targetPort, allow }) => ({
       id,
       name,
+      kind: kind ?? "tcp",
       targetPort,
       ...(allow === undefined ? {} : { allow: [...new Set(allow)].sort() }),
     })),

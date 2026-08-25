@@ -7,7 +7,12 @@ import {
   request,
   type Server as HttpServer,
 } from "node:http";
-import { createConnection, createServer, type Server } from "node:net";
+import type { Duplex } from "node:stream";
+import {
+  createConnection,
+  createServer,
+  type Server,
+} from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -97,19 +102,23 @@ async function requestWithHost(
   port: number,
   host: string,
   requestPath: string,
+  authorization?: string | string[],
+  expectedStatus = 200,
 ): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
+    const headers: Record<string, string | string[]> = { host };
+    if (authorization !== undefined) headers.authorization = authorization;
     const outgoing = request({
       hostname: "127.0.0.1",
       port,
       path: requestPath,
-      headers: { host },
+      headers,
     });
     outgoing.once("response", (response) => {
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer) => chunks.push(chunk));
       response.once("end", () => {
-        if (response.statusCode !== 200) {
+        if (response.statusCode !== expectedStatus) {
           reject(new Error(`HTTP ${response.statusCode ?? 0}`));
           return;
         }
@@ -149,6 +158,142 @@ async function waitFor(
   }
 }
 
+interface RawHttpResponse {
+  status: number;
+  body: Buffer;
+}
+
+function persistentResponseReader(
+  socket: ReturnType<typeof createConnection>,
+): () => Promise<RawHttpResponse> {
+  let buffered = Buffer.alloc(0);
+  let waiter:
+    | {
+        resolve: (response: RawHttpResponse) => void;
+        reject: (error: Error) => void;
+      }
+    | undefined;
+  let closedError: Error | undefined;
+
+  socket.on("data", (chunk: Buffer) => {
+    buffered = Buffer.concat([buffered, chunk]);
+    pump();
+  });
+  socket.on("error", (error) => {
+    closedError = error instanceof Error ? error : new Error(String(error));
+    if (waiter) {
+      const current = waiter;
+      waiter = undefined;
+      current.reject(closedError);
+    }
+  });
+  socket.on("close", () => {
+    if (waiter) {
+      const current = waiter;
+      waiter = undefined;
+      current.reject(closedError ?? new Error("HTTP response socket closed"));
+    }
+  });
+
+  return () => {
+    if (closedError) return Promise.reject(closedError);
+    return new Promise<RawHttpResponse>((resolve, reject) => {
+      waiter = { resolve, reject };
+      pump();
+    });
+  };
+
+  function pump(): void {
+    if (!waiter) return;
+    const headerEnd = buffered.indexOf(Buffer.from("\r\n\r\n"));
+    if (headerEnd === -1) return;
+    const header = buffered.subarray(0, headerEnd).toString("latin1");
+    const lines = header.split("\r\n");
+    const statusMatch = /^HTTP\/1\.1 (\d{3}) /.exec(lines.shift() ?? "");
+    const lengthLine = lines.find((line) => /^content-length:/i.test(line));
+    const lengthMatch = /^content-length:\s*([0-9]+)$/i.exec(lengthLine ?? "");
+    if (!statusMatch || !lengthMatch) {
+      const current = waiter;
+      waiter = undefined;
+      current.reject(new Error("target response has invalid test framing"));
+      return;
+    }
+    const length = Number(lengthMatch[1]);
+    const bodyStart = headerEnd + 4;
+    if (buffered.byteLength < bodyStart + length) return;
+    const current = waiter;
+    waiter = undefined;
+    const body = Buffer.from(buffered.subarray(bodyStart, bodyStart + length));
+    buffered = buffered.subarray(bodyStart + length);
+    current.resolve({ status: Number(statusMatch[1]), body });
+  }
+}
+
+async function writeSplit(
+  socket: ReturnType<typeof createConnection>,
+  input: Uint8Array,
+  chunkSize: number,
+): Promise<void> {
+  for (let offset = 0; offset < input.byteLength; offset += chunkSize) {
+    const chunk = input.subarray(offset, offset + chunkSize);
+    if (!socket.write(chunk)) await once(socket, "drain");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+async function readRawHead(
+  socket: ReturnType<typeof createConnection>,
+): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    let buffered = Buffer.alloc(0);
+    const onData = (chunk: Buffer): void => {
+      buffered = Buffer.concat([buffered, chunk]);
+      const end = buffered.indexOf(Buffer.from("\r\n\r\n"));
+      if (end === -1) return;
+      socket.off("data", onData);
+      resolve(Buffer.from(buffered.subarray(0, end + 4)));
+    };
+    socket.on("data", onData);
+    socket.once("error", reject);
+    socket.once("close", () => reject(new Error("raw HTTP socket closed")));
+  });
+}
+
+async function readExactly(
+  socket: ReturnType<typeof createConnection>,
+  length: number,
+): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    let buffered = Buffer.alloc(0);
+    const onData = (chunk: Buffer): void => {
+      buffered = Buffer.concat([buffered, chunk]);
+      if (buffered.byteLength < length) return;
+      socket.off("data", onData);
+      resolve(Buffer.from(buffered.subarray(0, length)));
+    };
+    socket.on("data", onData);
+    socket.once("error", reject);
+    socket.once("close", () => reject(new Error("raw WebSocket socket closed")));
+  });
+}
+
+function waitForSocketClose(
+  socket: ReturnType<typeof createConnection>,
+  message: string,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onClose = (): void => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(() => {
+      socket.off("close", onClose);
+      reject(new Error(message));
+    }, 2_000);
+    socket.once("close", onClose);
+  });
+}
+
 test("one persistent subscriber connection carries Home, Navidrome, and SSH", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-daemon-"));
   const subscriberState = path.join(root, "subscriber");
@@ -162,11 +307,27 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     socket.on("end", () => socket.end(`ssh:${request}`));
   });
   const navidromeServer = createHttpServer((request, response) => {
-    response.writeHead(200, {
+    const status =
+      request.url === "/rest/unauthorized"
+        ? 401
+        : request.url === "/rest/forbidden"
+          ? 403
+          : 200;
+    response.writeHead(status, {
       "content-type": "audio/flac",
       "x-request-path": request.url ?? "/",
     });
-    response.end(Buffer.alloc(64 * 1024, 7));
+    response.end(status === 200 ? Buffer.alloc(64 * 1024, 7) : `HTTP ${status}`);
+  });
+  const navidromeAuthorizations: string[][] = [];
+  navidromeServer.on("request", (request) => {
+    const values: string[] = [];
+    for (let index = 0; index < request.rawHeaders.length; index += 2) {
+      if (request.rawHeaders[index]?.toLowerCase() !== "authorization") continue;
+      const value = request.rawHeaders[index + 1];
+      if (value !== undefined) values.push(value);
+    }
+    navidromeAuthorizations.push(values);
   });
   let testnet: HyperDhtTestnet | undefined;
   let publisher: RunningPublisher | undefined;
@@ -188,7 +349,12 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
       displayName: "kosmos",
       subscriberPublicKeys: [subscriberSetup.publicKey],
       services: [
-        { id: "navidrome", name: "Navidrome", targetPort: navidromePort },
+        {
+          id: "navidrome",
+          name: "Navidrome",
+          kind: "http",
+          targetPort: navidromePort,
+        },
         { id: "ssh", name: "SSH", targetPort: sshPort },
       ],
     });
@@ -219,7 +385,14 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     const ssh = subscriber.services.find((service) => service.id === "ssh");
     assert.ok(ssh);
 
-    const [healthResponse, audioResponse, podResponse, sshResponse] = await Promise.all([
+    const [
+      healthResponse,
+      audioResponse,
+      podResponse,
+      unauthorizedResponse,
+      forbiddenResponse,
+      sshResponse,
+    ] = await Promise.all([
       fetch(`${subscriber.home.url}/healthz`),
       fetch(
         `http://navidrome.localhost:${subscriber.home.port}/rest/stream`,
@@ -228,14 +401,41 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
         subscriber.home.port,
         "navidrome.kepos.internal",
         "/rest/stream",
+        ["Bearer forged", "Basic forged"],
       ),
-      exchangeTcp(ssh.port, "hello"),
+      requestWithHost(
+        subscriber.home.port,
+        "navidrome.kepos.internal",
+        "/rest/unauthorized",
+        "Bearer forged",
+        401,
+      ),
+      requestWithHost(
+        subscriber.home.port,
+        "navidrome.kepos.internal",
+        "/rest/forbidden",
+        "Bearer forged",
+        403,
+      ),
+      exchangeTcp(
+        ssh.port,
+        `Authorization: Kepos ${subscriberSetup.publicKey}\r\n`,
+      ),
     ]);
     assert.equal(healthResponse.status, 200);
     assert.equal(audioResponse.status, 200);
     assert.equal((await audioResponse.arrayBuffer()).byteLength, 64 * 1024);
     assert.equal(podResponse.byteLength, 64 * 1024);
-    assert.equal(sshResponse, "ssh:hello");
+    assert.equal(unauthorizedResponse.toString(), "HTTP 401");
+    assert.equal(forbiddenResponse.toString(), "HTTP 403");
+    assert.equal(
+      sshResponse,
+      `ssh:Authorization: Kepos ${subscriberSetup.publicKey}\r\n`,
+    );
+    assert.ok(navidromeAuthorizations.length >= 2);
+    for (const authorization of navidromeAuthorizations) {
+      assert.deepEqual(authorization, [`Kepos ${subscriberSetup.publicKey}`]);
+    }
     assert.equal(publisher.acceptedConnections(), 1);
 
     const repeated = await fetch(`${subscriber.home.url}/healthz`);
@@ -292,6 +492,407 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     throw new AggregateError(
       [testError, ...cleanupErrors].filter((error) => error !== undefined),
       "mux daemon test or cleanup failed",
+    );
+  }
+});
+
+test("forwards fragmented persistent HTTP/1.1 requests with per-request identity", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-http-persistent-"));
+  const subscriberState = path.join(root, "subscriber");
+  const publisherState = path.join(root, "publisher");
+  interface TargetRequest {
+    authorization: string[];
+    body: Buffer;
+  }
+  const targetRequests: TargetRequest[] = [];
+  const target = createHttpServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      const authorizations: string[] = [];
+      for (let index = 0; index < request.rawHeaders.length; index += 2) {
+        if (request.rawHeaders[index]?.toLowerCase() !== "authorization") {
+          continue;
+        }
+        const value = request.rawHeaders[index + 1];
+        if (value !== undefined) authorizations.push(value);
+      }
+      const body = Buffer.concat(chunks);
+      targetRequests.push({ authorization: authorizations, body });
+      const responseBody = Buffer.from(
+        `response-${targetRequests.length}-first/response-${targetRequests.length}-last`,
+      );
+      response.writeHead(200, {
+        Connection: "keep-alive",
+        "Content-Length": responseBody.byteLength,
+        "Content-Type": "text/plain",
+      });
+      const splitAt = responseBody.indexOf(Buffer.from("/"));
+      response.write(responseBody.subarray(0, splitAt));
+      setImmediate(() => response.end(responseBody.subarray(splitAt)));
+    });
+  });
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let client: ReturnType<typeof createConnection> | undefined;
+  let malformedClient: ReturnType<typeof createConnection> | undefined;
+  let testError: unknown;
+
+  try {
+    const targetPort = await listen(target);
+    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [
+        {
+          id: "navidrome",
+          name: "Navidrome",
+          kind: "http",
+          targetPort,
+        },
+      ],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    subscriber = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      gatewayDomain: "kepos.internal",
+      services: [],
+      log: noLog,
+    });
+
+    client = createConnection({ host: "127.0.0.1", port: subscriber.home.port });
+    await once(client, "connect");
+    const readResponse = persistentResponseReader(client);
+    const firstBody = Buffer.from("first-body");
+    const firstRequest = Buffer.from(
+      `POST /first HTTP/1.1\r\nHost: navidrome.kepos.internal\r\nAuthorization: Bearer forged\r\naUtHoRiZaTiOn: Basic forged\r\nConnection: keep-alive\r\nContent-Length: ${firstBody.byteLength}\r\n\r\n${firstBody.toString("latin1")}`,
+      "latin1",
+    );
+    await writeSplit(client, firstRequest, 5);
+    const firstResponse = await readResponse();
+    assert.equal(firstResponse.status, 200);
+    assert.equal(
+      firstResponse.body.toString(),
+      "response-1-first/response-1-last",
+    );
+
+    const secondBody = Buffer.from("chunked-body");
+    const secondRequest = Buffer.from(
+      `POST /second HTTP/1.1\r\nHost: navidrome.kepos.internal\r\nAuthorization: forged-second\r\nConnection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n${secondBody.byteLength.toString(16)}\r\n${secondBody.toString("latin1")}\r\n0\r\n\r\n`,
+      "latin1",
+    );
+    await writeSplit(client, secondRequest, 2);
+    const secondResponse = await readResponse();
+    assert.equal(secondResponse.status, 200);
+    assert.equal(
+      secondResponse.body.toString(),
+      "response-2-first/response-2-last",
+    );
+
+    assert.deepEqual(targetRequests, [
+      {
+        authorization: [`Kepos ${subscriberSetup.publicKey}`],
+        body: firstBody,
+      },
+      {
+        authorization: [`Kepos ${subscriberSetup.publicKey}`],
+        body: secondBody,
+      },
+    ]);
+
+    const cleanClose = waitForSocketClose(
+      client,
+      "clean persistent request did not close",
+    );
+    client.end();
+    await cleanClose;
+
+    malformedClient = createConnection({
+      host: "127.0.0.1",
+      port: subscriber.home.port,
+    });
+    malformedClient.on("error", () => undefined);
+    await once(malformedClient, "connect");
+    const readMalformedResponse = persistentResponseReader(malformedClient);
+    await writeSplit(
+      malformedClient,
+      Buffer.from(
+        "GET /before-malformed HTTP/1.1\r\nHost: navidrome.kepos.internal\r\nConnection: keep-alive\r\n\r\n",
+        "latin1",
+      ),
+      4,
+    );
+    const beforeMalformedResponse = await readMalformedResponse();
+    assert.equal(beforeMalformedResponse.status, 200);
+    assert.equal(
+      beforeMalformedResponse.body.toString(),
+      "response-3-first/response-3-last",
+    );
+    assert.deepEqual(targetRequests[2], {
+      authorization: [`Kepos ${subscriberSetup.publicKey}`],
+      body: Buffer.alloc(0),
+    });
+
+    const malformedSecond = Buffer.from(
+      "GET /malformed HTTP/1.1\r\nHost: navidrome.kepos.internal\r\nContent-Length: 1\r\nContent-Length: 2\r\nAuthorization: forged-third\r\n\r\nX",
+      "latin1",
+    );
+    const malformedClose = waitForSocketClose(
+      malformedClient,
+      "malformed persistent request stayed open",
+    );
+    await writeSplit(malformedClient, malformedSecond, 3);
+    await malformedClose;
+    assert.equal(targetRequests.length, 3);
+  } catch (error) {
+    testError = error;
+  }
+
+  client?.destroy();
+  malformedClient?.destroy();
+  const cleanup = await Promise.allSettled([
+    subscriber?.stop(),
+    publisher?.stop(),
+    closeServer(target),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "persistent HTTP/1.1 test or cleanup failed",
+    );
+  }
+});
+
+test("delivers a target response after an HTTP client half-closes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-http-half-close-"));
+  const subscriberState = path.join(root, "subscriber");
+  const publisherState = path.join(root, "publisher");
+  const targetSockets = new Set<Duplex>();
+  let targetRequest = "";
+  const responseBody = "final-after-fin";
+  const target = createServer({ allowHalfOpen: true }, (socket) => {
+    targetSockets.add(socket);
+    socket.once("close", () => targetSockets.delete(socket));
+    socket.on("error", () => undefined);
+    socket.setEncoding("latin1");
+    socket.on("data", (chunk) => {
+      targetRequest += chunk;
+    });
+    socket.once("end", () => {
+      setImmediate(() => {
+        if (socket.destroyed) return;
+        socket.end(
+          `HTTP/1.1 200 OK\r\nContent-Length: ${Buffer.byteLength(responseBody)}\r\nConnection: close\r\n\r\n${responseBody}`,
+        );
+      });
+    });
+  });
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let testError: unknown;
+
+  try {
+    const targetPort = await listen(target);
+    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [
+        {
+          id: "half-close",
+          name: "Half close",
+          kind: "http",
+          targetPort,
+        },
+      ],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    subscriber = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      gatewayDomain: "kepos.internal",
+      services: [],
+      log: noLog,
+    });
+
+    const response = await exchangeTcp(
+      subscriber.home.port,
+      "GET /after-fin HTTP/1.1\r\nHost: half-close.kepos.internal\r\nAuthorization: Bearer forged\r\n\r\n",
+    );
+    assert.equal(
+      response,
+      `HTTP/1.1 200 OK\r\nContent-Length: ${Buffer.byteLength(responseBody)}\r\nConnection: close\r\n\r\n${responseBody}`,
+    );
+    assert.match(
+      targetRequest,
+      new RegExp(`Authorization: Kepos ${subscriberSetup.publicKey}\\r\\n`),
+    );
+    assert.equal(targetRequest.includes("Bearer forged"), false);
+  } catch (error) {
+    testError = error;
+  }
+
+  for (const socket of targetSockets) socket.destroy();
+  const cleanup = await Promise.allSettled([
+    subscriber?.stop(),
+    publisher?.stop(),
+    closeServer(target),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "HTTP half-close test or cleanup failed",
+    );
+  }
+});
+
+test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-websocket-"));
+  const subscriberState = path.join(root, "subscriber");
+  const publisherState = path.join(root, "publisher");
+  const authorizations: string[][] = [];
+  const upgradeHeads: Buffer[] = [];
+  const targetSockets = new Set<Duplex>();
+  const target = createHttpServer();
+  target.on("upgrade", (request, socket, head) => {
+    const values: string[] = [];
+    for (let index = 0; index < request.rawHeaders.length; index += 2) {
+      if (request.rawHeaders[index]?.toLowerCase() !== "authorization") continue;
+      const value = request.rawHeaders[index + 1];
+      if (value !== undefined) values.push(value);
+    }
+    authorizations.push(values);
+    upgradeHeads.push(Buffer.from(head));
+    targetSockets.add(socket);
+    socket.once("close", () => targetSockets.delete(socket));
+    socket.on("data", (chunk) => socket.write(chunk));
+    const response = Buffer.from(
+      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+      "latin1",
+    );
+    socket.write(response.subarray(0, 23));
+    setImmediate(() => socket.write(response.subarray(23)));
+  });
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let client: ReturnType<typeof createConnection> | undefined;
+  let testError: unknown;
+
+  try {
+    const targetPort = await listen(target);
+    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [
+        {
+          id: "websocket",
+          name: "WebSocket",
+          kind: "http",
+          targetPort,
+        },
+      ],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    subscriber = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      gatewayDomain: "kepos.internal",
+      services: [],
+      log: noLog,
+    });
+
+    client = createConnection({ host: "127.0.0.1", port: subscriber.home.port });
+    await once(client, "connect");
+    const handshake = Buffer.from(
+      "GET /socket HTTP/1.1\r\nHost: websocket.kepos.internal\r\nUpgrade: WebSocket\r\nConnection: Upgrade\r\nAuthorization: Bearer forged\r\naUtHoRiZaTiOn: Basic forged\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGVzdC1rZXk=\r\n\r\n",
+      "latin1",
+    );
+    await writeSplit(client, handshake, 4);
+    const responseHead = await readRawHead(client);
+    assert.match(responseHead.toString("latin1"), /^HTTP\/1\.1 101 /);
+    await waitFor(
+      () => authorizations.length === 1,
+      "WebSocket target did not receive the opening handshake",
+    );
+    assert.deepEqual(authorizations, [[`Kepos ${subscriberSetup.publicKey}`]]);
+    assert.equal(upgradeHeads[0]?.byteLength, 0);
+
+    const binary = Buffer.from([0, 255, 1, 128, 2, 42, 0, 17]);
+    const echoed = readExactly(client, binary.byteLength);
+    await writeSplit(client, binary, 2);
+    assert.deepEqual(await echoed, binary);
+  } catch (error) {
+    testError = error;
+  }
+
+  client?.destroy();
+  for (const socket of targetSockets) socket.destroy();
+  const cleanup = await Promise.allSettled([
+    subscriber?.stop(),
+    publisher?.stop(),
+    closeServer(target),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "WebSocket integration test or cleanup failed",
     );
   }
 });

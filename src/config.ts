@@ -12,7 +12,7 @@ export interface SubscriberContact {
 export interface PublisherService {
   id: string;
   name: string;
-  kind: "tcp";
+  kind: "tcp" | "http";
   targetPort: number;
   allow?: string[];
 }
@@ -165,14 +165,15 @@ export function parsePublisherManifest(value: unknown): PublisherManifest {
     }
     seenIds.add(entry.id);
 
-    if (entry.kind !== "tcp") {
-      throw new Error(`services[${index}].kind must be tcp`);
+    const kind = entry.kind === undefined ? "tcp" : entry.kind;
+    if (kind !== "tcp" && kind !== "http") {
+      throw new Error(`services[${index}].kind must be tcp or http`);
     }
 
     return {
       id: entry.id,
       name: parseNonEmptyString(entry.name, `services[${index}].name`),
-      kind: entry.kind,
+      kind,
       targetPort: parseTargetPort(entry.targetPort),
       ...(entry.allow === undefined
         ? {}

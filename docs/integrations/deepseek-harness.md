@@ -24,8 +24,8 @@ which subscriber public keys may open the service.
 ## Setup
 
 First create and pair a Kepos publisher and subscriber as described in
-[CLI, identity, and configuration](../cli.md). On the publisher, add dsh's HTTP
-port to the shared TOML policy:
+[CLI, identity, and configuration](../cli.md). On the publisher, add dsh's
+service port to the shared TOML policy:
 
 ```toml
 [publisher]
@@ -38,6 +38,11 @@ id = "dsh"
 name = "DeepSeek Harness"
 target_port = 3080
 ```
+
+This recipe deliberately omits `kind`, so dsh remains a byte-transparent `tcp`
+service. It preserves dsh's loopback behavior but does not make dsh consume a
+Kepos device-identity header. Use `kind = "http"` only for a target that
+implements the [HTTP service authentication contract](../cli.md#http-service-device-authentication).
 
 Restart a running headless publisher after changing its TOML policy. The
 subscriber configuration used for dsh is:

@@ -66,14 +66,18 @@ export function repeatedOption(
 }
 
 export function parsePublisherService(value: string): PublisherStateService {
-  const [id, name, port, ...extra] = value.split(":");
+  const [id, name, port, kind, ...extra] = value.split(":");
   if (!id || !name || !port || extra.length > 0) {
-    throw new Error("--service must use id:name:target-port");
+    throw new Error("--service must use id:name:target-port[:tcp|http]");
+  }
+  if (kind !== undefined && kind !== "tcp" && kind !== "http") {
+    throw new Error("--service kind must be tcp or http");
   }
   return {
     id,
     name,
     targetPort: parseTcpPort(port, "--service target port"),
+    ...(kind === undefined ? {} : { kind }),
   };
 }
 

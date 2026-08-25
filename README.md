@@ -11,8 +11,11 @@ owns the service and its allowlist; a subscriber receives the allowed service
 as an ordinary local URL or TCP port.
 
 Kepos has no hosted account or Kepos-operated control plane. Device keys stay
-on the devices that created them. The current service path is TCP-only, carried
-through an authenticated peer connection whose Internet transport uses UDP.
+on the devices that created them. Kepos carries TCP byte streams through an
+authenticated peer connection whose Internet transport uses UDP. Services are
+raw `tcp` by default; a publisher can opt a plaintext HTTP/1.1 target, including
+a `ws://` upgrade endpoint, into `kind = "http"` so the target receives the
+authenticated subscriber device identity. See [the HTTP service contract](docs/cli.md#http-service-device-authentication).
 
 > Kepos is a developer preview. Android APKs, Apple Silicon macOS ZIPs, and
 > Windows x64 portable ZIPs are available for direct download. Android is
