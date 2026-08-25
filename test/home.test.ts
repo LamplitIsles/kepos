@@ -189,7 +189,7 @@ test("Home server refreshes Registry bodies and ETags", async () => {
     const oldEtag = first.headers.get("etag");
     assert.ok(oldEtag);
 
-    home.updateRegistry?.({
+    home.updateRegistry({
       displayName: "Updated Publisher",
       services: [{ id: "ssh", name: "SSH", kind: "tcp" }],
     });

@@ -24,7 +24,7 @@ export interface RunningHomeServer {
   host: typeof host;
   port: number;
   url: string;
-  updateRegistry?: (options: HomeRegistryUpdate) => void;
+  updateRegistry: (options: HomeRegistryUpdate) => void;
   close: () => Promise<void>;
 }
 

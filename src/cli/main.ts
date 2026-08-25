@@ -66,7 +66,7 @@ import { HOME_REGISTRY_PATH } from "../home/registry.js";
 interface CliPublisher {
   home: { url: string };
   publisherKey: string;
-  applyPolicy?: (
+  applyPolicy: (
     policy: NonNullable<KeposConfig["publisher"]>,
   ) => Promise<boolean>;
   status: () => PublisherRuntimeStatus;
@@ -375,6 +375,7 @@ async function runPublisherCommand(
     });
     if (config?.publisher) {
       let polling = true;
+      let pollingStopped = false;
       const pollPolicy = (): void => {
         if (!polling) return;
         policyReloads = policyReloads.then(async () => {
@@ -382,9 +383,6 @@ async function runPublisherCommand(
             const nextConfig = await dependencies.loadConfig(configPath(options));
             if (!nextConfig?.publisher) {
               throw new Error("publisher policy section is missing");
-            }
-            if (!running.applyPolicy) {
-              throw new Error("publisher policy reload is unavailable");
             }
             await running.applyPolicy(nextConfig.publisher);
           } catch (error) {
@@ -395,14 +393,27 @@ async function runPublisherCommand(
       };
       const cancel = dependencies.schedulePolicyReload(pollPolicy, 1_000);
       stopPolicyReload = (): void => {
+        if (pollingStopped) return;
+        pollingStopped = true;
         polling = false;
         cancel();
       };
     }
+    const stop = (() => {
+      let stopping: Promise<void> | undefined;
+      return (): Promise<void> => {
+        stopping ??= (async () => {
+          stopPolicyReload?.();
+          await policyReloads;
+          await running.stop();
+        })();
+        return stopping;
+      };
+    })();
     statusWriter(mode, dependencies)(
       `Publisher running: key=${running.publisherKey} registry=${running.home.url}${HOME_REGISTRY_PATH}`,
     );
-    await dependencies.waitForSignal(running.stop);
+    await dependencies.waitForSignal(stop);
   } finally {
     stopPolicyReload?.();
     await policyReloads;

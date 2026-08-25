@@ -80,7 +80,7 @@ export interface RunningPublisher {
   createPairingInvitation: () => { uri: string; expiresAt: number };
   denyPairing: () => void;
   pairingStatus: () => PublisherPairingSnapshot;
-  applyPolicy?: (policy: PublisherRuntimePolicy) => Promise<boolean>;
+  applyPolicy: (policy: PublisherRuntimePolicy) => Promise<boolean>;
   status: () => PublisherRuntimeStatus;
   stop: () => Promise<void>;
 }
@@ -406,7 +406,7 @@ export async function startPublisher(
       );
       allow = new Set(next.allow);
       appliedPolicy = next;
-      home.updateRegistry?.({
+      home.updateRegistry({
         displayName,
         services: [...services.values()].map(({ id, name }) => ({
           id,
@@ -417,7 +417,7 @@ export async function startPublisher(
       await Promise.all(
         [...subscriberHomes.entries()].map(async ([subscriberKey, starting]) => {
           const subscriberHome = await starting;
-          subscriberHome.updateRegistry?.({
+          subscriberHome.updateRegistry({
             displayName,
             services: [...services.values()]
               .filter((service) => serviceAllows(service, subscriberKey))

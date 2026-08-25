@@ -763,8 +763,13 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
   const publisherState = path.join(root, "publisher");
   const allowedState = path.join(root, "allowed");
   const removedState = path.join(root, "removed");
-  const target = createServer({ allowHalfOpen: true }, (socket) => {
-    socket.pipe(socket);
+  const targetA = createServer({ allowHalfOpen: true }, (socket) => {
+    socket.on("data", (payload) => socket.write(`target-a:${payload}`));
+    socket.on("end", () => socket.end());
+  });
+  const targetB = createServer({ allowHalfOpen: true }, (socket) => {
+    socket.on("data", (payload) => socket.write(`target-b:${payload}`));
+    socket.on("end", () => socket.end());
   });
   let testnet: HyperDhtTestnet | undefined;
   let publisher: RunningPublisher | undefined;
@@ -795,7 +800,10 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
         publisherKey: publisherSetup.publisherKey,
       }),
     ]);
-    const targetPort = await listen(target);
+    const [targetAPort, targetBPort] = await Promise.all([
+      listen(targetA),
+      listen(targetB),
+    ]);
     testnet = await createHyperDhtTestnet(3);
     publisher = await startPublisher({
       stateDir: publisherState,
@@ -808,21 +816,25 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
           {
             id: "echo",
             name: "Echo",
-            targetPort,
-            allow: [allowedSetup.publicKey],
+            targetPort: targetAPort,
+            allow: [allowedSetup.publicKey, removedSetup.publicKey],
           },
         ],
       },
     });
     const homeUrl = publisher.home.url;
     assert.equal(publisher.publisherKey, publisherSetup.publisherKey);
-    assert.ok(publisher.applyPolicy);
     assert.equal(
       await publisher.applyPolicy({
         displayName: "original",
         allow: [allowedSetup.publicKey, removedSetup.publicKey],
         services: [
-          { id: "echo", name: "Echo", targetPort, allow: [allowedSetup.publicKey] },
+          {
+            id: "echo",
+            name: "Echo",
+            targetPort: targetAPort,
+            allow: [allowedSetup.publicKey, removedSetup.publicKey],
+          },
         ],
       }),
       false,
@@ -833,6 +845,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
         stateDir: allowedState,
         bootstrap: testnet.bootstrap,
         gatewayPort: 0,
+        serviceAcquisitionTimeoutMs: 500,
         services: [{ id: "echo", localPort: 0 }],
         log: noLog,
       }),
@@ -840,6 +853,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
         stateDir: removedState,
         bootstrap: testnet.bootstrap,
         gatewayPort: 0,
+        serviceAcquisitionTimeoutMs: 500,
         services: [{ id: "echo", localPort: 0 }],
         log: noLog,
       }),
@@ -853,40 +867,92 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
     await once(existing, "connect");
     existing.write("before");
     const [before] = await once(existing, "data");
-    assert.equal(before.toString(), "before");
+    assert.equal(before.toString(), "target-a:before");
 
-    assert.ok(publisher.applyPolicy);
+    const registryUrl = `${allowed.home.url}/.well-known/kepos/services.json`;
+    const initialRegistryResponse = await fetch(registryUrl);
+    const initialEtag = initialRegistryResponse.headers.get("etag");
+    assert.ok(initialEtag);
+    await initialRegistryResponse.json();
+
     assert.equal(
       await publisher.applyPolicy({
-        displayName: "updated",
+        displayName: "retargeted",
         allow: [allowedSetup.publicKey, removedSetup.publicKey],
         services: [
-          { id: "echo", name: "Echo", targetPort, allow: [removedSetup.publicKey] },
+          {
+            id: "echo",
+            name: "Echo B",
+            targetPort: targetBPort,
+            allow: [allowedSetup.publicKey, removedSetup.publicKey],
+          },
         ],
       }),
       true,
     );
-    const allowedRegistry = await fetch(
-      `${allowed.home.url}/.well-known/kepos/services.json`,
-    ).then((response) => response.json() as Promise<{ services: Array<{ id: string }> }>);
-    assert.deepEqual(allowedRegistry.services.map(({ id }) => id), ["home"]);
-    assert.equal(await exchangeTcp(allowedEcho.port, "new"), "");
-    assert.equal(await exchangeTcp(removedEcho.port, "new"), "new");
+    const updatedRegistryResponse = await fetch(registryUrl, {
+      headers: { "if-none-match": initialEtag },
+    });
+    const updatedEtag = updatedRegistryResponse.headers.get("etag");
+    assert.equal(updatedRegistryResponse.status, 200);
+    assert.ok(updatedEtag);
+    assert.notEqual(updatedEtag, initialEtag);
+    const updatedRegistry = (await updatedRegistryResponse.json()) as {
+      services: Array<{ id: string; name: string }>;
+    };
+    assert.deepEqual(
+      updatedRegistry.services.map(({ id, name }) => [id, name]),
+      [["home", "Home"], ["echo", "Echo B"]],
+    );
+    assert.equal(await exchangeTcp(allowedEcho.port, "new"), "target-b:new");
     existing.write("after");
     const [after] = await once(existing, "data");
-    assert.equal(after.toString(), "after");
+    assert.equal(after.toString(), "target-a:after");
 
     await publisher.applyPolicy({
-      displayName: "updated",
+      displayName: "retargeted",
+      allow: [allowedSetup.publicKey, removedSetup.publicKey],
+      services: [
+        {
+          id: "echo",
+          name: "Echo B",
+          targetPort: targetBPort,
+          allow: [removedSetup.publicKey],
+        },
+      ],
+    });
+    const restrictedRegistry = (await fetch(registryUrl).then((response) =>
+      response.json())) as { services: Array<{ id: string }> };
+    assert.deepEqual(restrictedRegistry.services.map(({ id }) => id), ["home"]);
+    assert.equal(await exchangeTcp(allowedEcho.port, "denied"), "");
+    assert.equal(await exchangeTcp(removedEcho.port, "allowed"), "target-b:allowed");
+
+    await publisher.applyPolicy({
+      displayName: "retargeted",
       allow: [allowedSetup.publicKey],
       services: [
-        { id: "echo", name: "Echo", targetPort, allow: [allowedSetup.publicKey] },
+        {
+          id: "echo",
+          name: "Echo B",
+          targetPort: targetBPort,
+          allow: [allowedSetup.publicKey],
+        },
       ],
     });
     await waitFor(
-      () => publisher?.activeSubscribers() === 1,
-      "global ACL removal did not disconnect only the removed subscriber",
+      () => {
+        const keys = publisher?.status().activeSubscriberKeys;
+        return keys?.length === 1 && keys[0] === allowedSetup.publicKey;
+      },
+      "global ACL removal did not leave the expected subscriber active",
     );
+    assert.deepEqual(publisher.status().activeSubscriberKeys, [allowedSetup.publicKey]);
+    await waitFor(
+      () => removed?.status().connection === "reconnecting",
+      "removed subscriber did not get a reconnect opportunity",
+    );
+    assert.equal(await exchangeTcp(removedEcho.port, "reconnect"), "");
+    assert.equal(await exchangeTcp(allowedEcho.port, "unaffected"), "target-b:unaffected");
     assert.equal((await fetch(`${allowed.home.url}/healthz`)).status, 200);
     assert.equal((await fetch(`${publisher.home.url}/healthz`)).status, 200);
   } finally {
@@ -895,7 +961,8 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
       allowed?.stop(),
       removed?.stop(),
       publisher?.stop(),
-      closeServer(target),
+      closeServer(targetA),
+      closeServer(targetB),
       testnet?.destroy(),
       rm(root, { recursive: true, force: true }),
     ]);
