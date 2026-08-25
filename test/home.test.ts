@@ -183,6 +183,31 @@ test("Home server returns an empty 304 for a matching Registry ETag", async () =
   });
 });
 
+test("Home server refreshes Registry bodies and ETags", async () => {
+  await withHome(async (home) => {
+    const first = await fetch(`${home.url}/.well-known/kepos/services.json`);
+    const oldEtag = first.headers.get("etag");
+    assert.ok(oldEtag);
+
+    home.updateRegistry({
+      displayName: "Updated Publisher",
+      services: [{ id: "ssh", name: "SSH", kind: "tcp" }],
+    });
+    const response = await fetch(`${home.url}/.well-known/kepos/services.json`, {
+      headers: { "if-none-match": oldEtag },
+    });
+    const newEtag = response.headers.get("etag");
+
+    assert.equal(response.status, 200);
+    assert.notEqual(newEtag, oldEtag);
+    assert.deepEqual(await response.json(), createHomeRegistry({
+      publisherKey,
+      displayName: "Updated Publisher",
+      services: [{ id: "ssh", name: "SSH", kind: "tcp" }],
+    }));
+  });
+});
+
 test("Home server serves the health check as plain text", async () => {
   await withHome(async (home) => {
     const response = await fetch(`${home.url}/healthz`);

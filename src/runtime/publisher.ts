@@ -80,6 +80,7 @@ export interface RunningPublisher {
   createPairingInvitation: () => { uri: string; expiresAt: number };
   denyPairing: () => void;
   pairingStatus: () => PublisherPairingSnapshot;
+  applyPolicy: (policy: PublisherRuntimePolicy) => Promise<boolean>;
   status: () => PublisherRuntimeStatus;
   stop: () => Promise<void>;
 }
@@ -98,21 +99,22 @@ export async function startPublisher(
   };
   const keyPair = keyPairFromSeed(config.seed);
   const publisherKey = b4a.toString(keyPair.publicKey, "hex");
+  let displayName = policy.displayName;
+  let services = new Map(
+    policy.services.map((service) => [service.id, service]),
+  );
+  let allow = new Set(policy.allow);
+  let appliedPolicy = clonePolicy(policy);
   const home = await startHomeServer({
     publisherKey,
-    displayName: policy.displayName,
-    services: policy.services.map(({ id, name }) => ({
+    displayName,
+    services: [...services.values()].map(({ id, name }) => ({
       id,
       name,
       kind: "tcp",
     })),
   });
-  const services = new Map(
-    policy.services.map((service) => [service.id, service]),
-  );
   const subscriberHomes = new Map<string, Promise<RunningHomeServer>>();
-  const allow = new Set(policy.allow);
-
   const subscriberHome = (
     subscriberKey: string,
   ): Promise<RunningHomeServer> => {
@@ -120,8 +122,8 @@ export async function startPublisher(
     if (existing) return existing;
     const starting = startHomeServer({
       publisherKey,
-      displayName: policy.displayName,
-      services: policy.services
+      displayName,
+      services: [...services.values()]
         .filter((service) => serviceAllows(service, subscriberKey))
         .map(({ id, name }) => ({ id, name, kind: "tcp" })),
     });
@@ -389,6 +391,52 @@ export async function startPublisher(
 
   options.log?.(`Publisher ready: ${publisherKey}`);
 
+  let policyApplication: Promise<void> = Promise.resolve();
+  const applyPolicy = (nextPolicy: PublisherRuntimePolicy): Promise<boolean> => {
+    const result = policyApplication.then(async () => {
+      const next = clonePolicy(nextPolicy);
+      if (publisherPoliciesEqual(appliedPolicy, next)) return false;
+
+      const removedSubscribers = new Set(
+        [...allow].filter((subscriberKey) => !next.allow.includes(subscriberKey)),
+      );
+      displayName = next.displayName;
+      services = new Map(
+        next.services.map((service) => [service.id, service]),
+      );
+      allow = new Set(next.allow);
+      appliedPolicy = next;
+      home.updateRegistry({
+        displayName,
+        services: [...services.values()].map(({ id, name }) => ({
+          id,
+          name,
+          kind: "tcp",
+        })),
+      });
+      await Promise.all(
+        [...subscriberHomes.entries()].map(async ([subscriberKey, starting]) => {
+          const subscriberHome = await starting;
+          subscriberHome.updateRegistry({
+            displayName,
+            services: [...services.values()]
+              .filter((service) => serviceAllows(service, subscriberKey))
+              .map(({ id, name }) => ({ id, name, kind: "tcp" })),
+          });
+        }),
+      );
+      for (const [subscriberKey, current] of activeBySubscriberKey) {
+        if (removedSubscribers.has(subscriberKey)) current.mux.close();
+      }
+      return true;
+    });
+    policyApplication = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+
   return {
     publisherKey,
     home,
@@ -443,6 +491,7 @@ export async function startPublisher(
       closePairingCandidates();
     },
     pairingStatus: () => pairing.snapshot(),
+    applyPolicy,
     status: () => ({
       role: "publisher",
       state: stopped ? "stopped" : "running",
@@ -457,6 +506,7 @@ export async function startPublisher(
       if (stopped) return;
       stopped = true;
       clearPairingExpiry();
+      await policyApplication.catch(() => undefined);
       await pairing.waitForApproval().catch(() => undefined);
       for (const mux of muxes.values()) mux.close();
       await cleanupAll([
@@ -469,6 +519,39 @@ export async function startPublisher(
       ]);
     },
   };
+}
+
+function clonePolicy(policy: PublisherRuntimePolicy): PublisherRuntimePolicy {
+  return {
+    displayName: policy.displayName,
+    allow: [...policy.allow],
+    services: policy.services.map(({ id, name, targetPort, allow }) => ({
+      id,
+      name,
+      targetPort,
+      ...(allow === undefined ? {} : { allow: [...allow] }),
+    })),
+  };
+}
+
+function publisherPoliciesEqual(
+  left: PublisherRuntimePolicy,
+  right: PublisherRuntimePolicy,
+): boolean {
+  return policyFingerprint(left) === policyFingerprint(right);
+}
+
+function policyFingerprint(policy: PublisherRuntimePolicy): string {
+  return JSON.stringify({
+    displayName: policy.displayName,
+    allow: [...new Set(policy.allow)].sort(),
+    services: policy.services.map(({ id, name, targetPort, allow }) => ({
+      id,
+      name,
+      targetPort,
+      ...(allow === undefined ? {} : { allow: [...new Set(allow)].sort() }),
+    })),
+  });
 }
 
 function serviceAllows(

@@ -98,6 +98,7 @@ function runningPublisher(): RunningPublisher {
       host: "127.0.0.1",
       port: 3000,
       url: "http://127.0.0.1:3000",
+      updateRegistry: () => undefined,
       close: async () => undefined,
     },
     acceptedConnections: () => 1,
@@ -107,6 +108,7 @@ function runningPublisher(): RunningPublisher {
     createPairingInvitation: () => ({ uri: "kepos://pair", expiresAt: 0 }),
     denyPairing: () => undefined,
     pairingStatus: () => ({ phase: "idle" }),
+    applyPolicy: async () => false,
     status: publisherStatus,
     stop: async () => undefined,
   };

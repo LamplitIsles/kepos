@@ -7,6 +7,7 @@ import {
   HOME_REGISTRY_PATH,
   type HomeRegistry,
   type HomeRegistryService,
+  type CreateHomeRegistryOptions,
 } from "./registry.js";
 
 const host = "127.0.0.1" as const;
@@ -14,10 +15,16 @@ const benchmarkPath = "/.well-known/kepos/benchmark";
 const benchmarkChunk = Buffer.alloc(64 * 1024);
 const maxBenchmarkBytes = 64 * 1024 * 1024;
 
+export type HomeRegistryUpdate = Omit<
+  CreateHomeRegistryOptions,
+  "publisherKey"
+>;
+
 export interface RunningHomeServer {
   host: typeof host;
   port: number;
   url: string;
+  updateRegistry: (options: HomeRegistryUpdate) => void;
   close: () => Promise<void>;
 }
 
@@ -79,8 +86,18 @@ async function startHomeServerWithRegistry(
   registry: HomeRegistry,
   port: number,
 ): Promise<RunningHomeServer> {
-  const registryBody = `${JSON.stringify(registry, null, 2)}\n`;
-  const registryEtag = `"${createHash("sha256").update(registryBody).digest("hex")}"`;
+  let registryBody = `${JSON.stringify(registry, null, 2)}\n`;
+  let registryEtag = `"${createHash("sha256").update(registryBody).digest("hex")}"`;
+  const updateRegistry = ({ displayName, services }: HomeRegistryUpdate): void => {
+    const nextRegistry = createHomeRegistry({
+      publisherKey: registry.publisher.publisherKey,
+      displayName,
+      services,
+    });
+    registryBody = `${JSON.stringify(nextRegistry, null, 2)}\n`;
+    registryEtag = `"${createHash("sha256").update(registryBody).digest("hex")}"`;
+    registry = nextRegistry;
+  };
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -151,6 +168,7 @@ async function startHomeServerWithRegistry(
     host,
     port: address.port,
     url: `http://${host}:${address.port}`,
+    updateRegistry,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

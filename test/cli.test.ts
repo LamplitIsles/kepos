@@ -21,6 +21,8 @@ interface Calls {
   setPublisherServices: unknown[];
   startDevice: unknown[];
   startPublisher: unknown[];
+  policyApplications: unknown[];
+  lifecycle: string[];
   startSubscriber: unknown[];
   publisherLocks: string[];
   subscriberLocks: string[];
@@ -43,6 +45,8 @@ function fakeCli(): {
     setPublisherServices: [],
     startDevice: [],
     startPublisher: [],
+    policyApplications: [],
+    lifecycle: [],
     startSubscriber: [],
     publisherLocks: [],
     subscriberLocks: [],
@@ -98,6 +102,11 @@ function fakeCli(): {
       return {
         publisherKey: "11".repeat(32),
         home: { url: "http://127.0.0.1:3000" },
+        applyPolicy: async (policy) => {
+          calls.policyApplications.push(policy);
+          calls.lifecycle.push("policy.apply");
+          return true;
+        },
         status: () => ({
           role: "publisher" as const,
           state: "running" as const,
@@ -110,6 +119,7 @@ function fakeCli(): {
         }),
         stop: async () => {
           calls.stopped.push("publisher");
+          calls.lifecycle.push("publisher.stop");
         },
       };
     },
@@ -191,6 +201,7 @@ function fakeCli(): {
     waitForSignal: async (stop) => {
       await stop();
     },
+    schedulePolicyReload: () => () => undefined,
   };
   return { calls, dependencies, stderr, stdout };
 }
@@ -735,6 +746,87 @@ test("publisher setup and run use TOML publisher policy", async () => {
       ],
     },
   );
+});
+
+test("publisher run serially reloads valid TOML and recovers from failures", async () => {
+  const cli = fakeCli();
+  const first = {
+    displayName: "first",
+    allow: [],
+    services: [],
+  };
+  const second = {
+    displayName: "second",
+    allow: [],
+    services: [],
+  };
+  const recovered = {
+    displayName: "recovered",
+    allow: [],
+    services: [],
+  };
+  let reads = 0;
+  cli.dependencies.loadConfig = async () => {
+    reads++;
+    if (reads === 1) return { publisher: first };
+    if (reads === 2) return { publisher: second };
+    if (reads === 3) return undefined;
+    if (reads === 4) throw new Error("malformed TOML");
+    return { publisher: recovered };
+  };
+  cli.dependencies.schedulePolicyReload = (callback, intervalMs) => {
+    assert.equal(intervalMs, 1_000);
+    callback();
+    callback();
+    callback();
+    callback();
+    return () => undefined;
+  };
+
+  await runCli(["publisher", "run", "--state", "./publisher"], cli.dependencies);
+
+  assert.deepEqual(cli.calls.policyApplications, [second, recovered]);
+  assert.match(cli.stderr.join("\n"), /Publisher policy reload failed: publisher policy section is missing/);
+  assert.match(cli.stderr.join("\n"), /Publisher policy reload failed: malformed TOML/);
+});
+
+test("publisher run drains queued reloads before stopping the publisher", async () => {
+  const cli = fakeCli();
+  const initial = { displayName: "initial", allow: [], services: [] };
+  const next = { displayName: "next", allow: [], services: [] };
+  let reads = 0;
+  let releaseReload: (() => void) | undefined;
+  let scheduled: (() => void) | undefined;
+  cli.dependencies.loadConfig = async () => {
+    reads++;
+    if (reads === 1) return { publisher: initial };
+    await new Promise<void>((resolve) => {
+      releaseReload = resolve;
+    });
+    return { publisher: next };
+  };
+  cli.dependencies.schedulePolicyReload = (callback) => {
+    scheduled = callback;
+    return () => cli.calls.lifecycle.push("poll.cancel");
+  };
+  cli.dependencies.waitForSignal = async (stop) => {
+    scheduled?.();
+    const stopping = stop();
+    await Promise.resolve();
+    assert.deepEqual(cli.calls.lifecycle, ["poll.cancel"]);
+    assert.deepEqual(cli.calls.stopped, []);
+    releaseReload?.();
+    await stopping;
+  };
+
+  await runCli(["publisher", "run", "--state", "./publisher"], cli.dependencies);
+
+  assert.deepEqual(cli.calls.lifecycle, [
+    "poll.cancel",
+    "policy.apply",
+    "publisher.stop",
+  ]);
+  assert.deepEqual(cli.calls.policyApplications, [next]);
 });
 
 test("publisher setup rejects CLI overrides of TOML policy", async () => {
