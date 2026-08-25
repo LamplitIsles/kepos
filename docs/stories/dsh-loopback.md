@@ -1,6 +1,6 @@
 # Making a remote service look local
 
-I wrote Kepos as a general-purpose, end-to-end encrypted P2P tunnel. The publisher shares a TCP service, and the subscriber receives it as a `*.localhost` hostname or an explicit local port. Browsers, SSH clients, and CLIs all behave as if the service were on the same machine.
+I wrote Kepos as a general-purpose, end-to-end encrypted P2P tunnel. The publisher shares a service through a TCP byte stream, raw by default, and the subscriber receives it as a `*.localhost` hostname or an explicit local port. Browsers, SSH clients, and CLIs all behave as if the service were on the same machine.
 
 The first things I wanted to reach were ordinary self-hosted services: music and SSH, without opening public ports or putting every device on a virtual network. Kepos uses HyperDHT and UDX for the peer connection. Peer keys authenticate an end-to-end encrypted outer connection, and Protomux carries the registry, heartbeat, pairing, and one channel per service over that single connection.
 
@@ -26,7 +26,7 @@ local_port = 13080
 
 Opening `http://127.0.0.1:13080/` gives dsh the loopback `Host` semantics it expects. There are no `--trusted-host` changes, and its settings continue to edit and persist across reloads. Android includes this `dsh` mapping by default, so the service card opens the same loopback URL after the phone pairs with a publisher that advertises `id = "dsh"`.
 
-Nothing in the transport is specific to dsh. SSH, Dagger, and other raw TCP services use their own listeners over the same authenticated outer connection; HTTP services can share the `*.localhost` gateway.
+Nothing in the transport is specific to dsh. SSH, Dagger, and other raw TCP services use their own listeners over the same authenticated outer connection; HTTP services can share the `*.localhost` gateway. A target that needs Kepos device identity can explicitly opt into the separate [`kind = "http"` contract](../cli.md#http-service-device-authentication); this dsh recipe deliberately remains raw TCP.
 
 Unknown devices still cannot open the service. Publisher and per-service allowlists decide which subscriber public keys are authorized. Kepos does not weaken dsh's browser fence or expose its port publicly. It makes the remote service look local while keeping access at the service boundary.
 

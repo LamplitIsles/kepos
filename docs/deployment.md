@@ -45,6 +45,11 @@ Import and configure the module:
 }
 ```
 
+The Home Manager module currently publishes only raw `tcp` services: its
+`services.<id>` schema has no `kind` option. Use a TOML or CLI publisher
+configuration for a `kind = "http"` target rather than adding an unsupported
+Nix attribute; see [the HTTP service contract](cli.md#http-service-device-authentication).
+
 On first start, the user service creates publisher identity under
 `$XDG_STATE_HOME/kepos-neo/publisher`. Complete state is reused without
 rotation; partial state fails closed. The module generates public TOML policy
@@ -121,6 +126,13 @@ The gateway accepts both `navidrome.localhost:17480` for node-local clients and
 `navidrome.kepos.internal:17480` for Pods. `gateway_domain` only adds Host
 header routing. It does not install DNS, create a Service, or make the listener
 reachable by itself.
+
+This is device-level delegation: every Pod or LAN client that can reach the
+gateway can open services as that subscriber device. For a publisher service
+configured as `kind = "http"`, all of those callers produce the same
+`Authorization: Kepos <subscriber-public-key>` assertion at the target; there
+is no per-Pod identity. The client-to-gateway HTTP leg is plaintext unless the
+deployment protects it separately.
 
 A cluster deployment must:
 

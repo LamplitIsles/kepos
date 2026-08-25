@@ -39,11 +39,19 @@ connection starts at the publisher. Kepos moves payload bytes, lifecycle
 messages, and backpressure through a Protomux channel. TCP headers and TCP
 acknowledgements do not cross the peer connection.
 
-The current service path therefore supports TCP services only. The Internet
-carrier is a different layer: HyperDHT discovers peers and coordinates NAT
-traversal, UDX provides reliable ordered streams over UDP, and Noise protects
-the peer connection. A bootstrap node helps a peer enter the DHT; it does not
-authorize a subscriber or act as the service endpoint.
+The transport carries TCP byte streams for every service. The default `tcp`
+kind is byte-transparent. A publisher may instead opt a plaintext HTTP/1.1
+target into `http`: a framing-aware publisher-side adapter replaces every
+target-facing `Authorization` field with the authenticated subscriber device
+key, and supports a `ws://` Upgrade after a valid target `101` response. It does
+not add TLS, HTTP/2, h2c, HTTP/3, CONNECT, or a generic Upgrade tunnel. The
+[CLI HTTP service contract](cli.md#http-service-device-authentication) defines
+the target-facing header and its private-ingress security boundary.
+
+The Internet carrier is a different layer: HyperDHT discovers peers and
+coordinates NAT traversal, UDX provides reliable ordered streams over UDP, and
+Noise protects the peer connection. A bootstrap node helps a peer enter the
+DHT; it does not authorize a subscriber or act as the service endpoint.
 
 ## Roles and authority
 

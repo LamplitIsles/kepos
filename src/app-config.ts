@@ -139,9 +139,10 @@ export function serializeKeposConfig(config: KeposConfig): string {
       display_name: config.publisher.displayName,
       allow: config.publisher.allow,
       services: config.publisher.services.map(
-        ({ id, name, targetPort, allow }) => ({
+        ({ id, name, kind, targetPort, allow }) => ({
           id,
           name,
+          ...(kind === undefined ? {} : { kind }),
           target_port: targetPort,
           ...(allow === undefined ? {} : { allow }),
         }),
@@ -232,12 +233,12 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
     rejectUnknownFields(
       service,
       ["publisher", `services[${index}]`],
-      ["id", "name", "target_port", "allow"],
+      ["id", "name", "kind", "target_port", "allow"],
     );
     return {
       id: service.id,
       name: service.name,
-      kind: "tcp",
+      ...(service.kind === undefined ? {} : { kind: service.kind }),
       targetPort: service.target_port,
       ...(service.allow === undefined ? {} : { allow: service.allow }),
     };
@@ -245,7 +246,10 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
   const manifest = parsePublisherManifest({
     displayName: publisher.display_name,
     publisherConfig: "publisher.json",
-    services,
+    services: services.map((service) => ({
+      ...service,
+      kind: service.kind ?? "tcp",
+    })),
   });
   const allow = parsePublisherConfig({
     seed: "00".repeat(32),
@@ -257,9 +261,10 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
       : { enabled: parseBoolean(publisher.enabled, "publisher.enabled") }),
     displayName: manifest.displayName,
     allow,
-    services: manifest.services.map(({ id, name, targetPort, allow }) => ({
+    services: manifest.services.map(({ id, name, kind, targetPort, allow }, index) => ({
       id,
       name,
+      ...(services[index]?.kind === undefined ? {} : { kind }),
       targetPort,
       ...(allow === undefined ? {} : { allow }),
     })),

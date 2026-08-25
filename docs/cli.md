@@ -23,8 +23,12 @@ npm run kepos -- setup publisher \
   --display-name kosmos \
   --allow '<subscriber-public-key>' \
   --service ssh:SSH:22 \
-  --service navidrome:Navidrome:4533
+  --service navidrome:Navidrome:4533:http
 ```
+
+Publisher service declarations use `id:name:target-port[:tcp|http]`.
+The final segment is optional and defaults to `tcp`; choose `http` only for a
+plaintext HTTP/1.1 target that should receive Kepos subscriber authentication.
 
 Print an existing publisher's public key without repeating or changing its
 policy:
@@ -71,6 +75,7 @@ target_port = 22
 [[publisher.services]]
 id = "navidrome"
 name = "Navidrome"
+kind = "http"
 target_port = 4533
 allow = ["<subscriber-public-key>"]
 
@@ -132,11 +137,51 @@ npm run kepos -- publisher set-allow \
 npm run kepos -- publisher set-services \
   --state ~/.local/state/kepos-neo/publisher \
   --service ssh:SSH:22 \
-  --service navidrome:Navidrome:4533
+  --service navidrome:Navidrome:4533:http
 ```
 
 These commands fail instead of editing inactive state when TOML owns the
 publisher policy. Neither command rotates the publisher key.
+
+## HTTP service device authentication
+
+Use `kind = "http"` (or the final `:http` service-declaration segment) only
+for a plaintext HTTP/1.1 target. It is a publisher-side authentication adapter,
+not a generic TLS terminator or protocol tunnel.
+
+For every HTTP request, including the opening request of a `ws://` WebSocket
+Upgrade, Kepos removes all caller-supplied `Authorization` fields and forwards
+exactly one target-facing field:
+
+```http
+Authorization: Kepos <subscriber-public-key>
+```
+
+`<subscriber-public-key>` is the authenticated subscriber's canonical
+lowercase 64-hex-character public key. It identifies a device, not a person or
+a secret bearer token. A target can authorize it with small HTTP middleware or
+an Upgrade-handler check. Caller-supplied Bearer, Basic, and other
+`Authorization` values are intentionally not forwarded. Normal target
+responses, including `401` with `WWW-Authenticate: Kepos` and `403`, pass
+through unchanged.
+
+The adapter supports ordinary HTTP/1.1 requests (including bodies, chunked
+requests, and sequential keep-alive requests) and `ws://`. A target's valid
+`101 Switching Protocols` response switches the connection to opaque WebSocket
+bytes; a rejected upgrade remains an ordinary HTTP response. HTTPS/TLS,
+`wss://`, HTTP/2 and h2c, HTTP/3, CONNECT, and non-WebSocket upgrades are not
+supported. Malformed or ambiguous framing, and request or inspected Upgrade
+response heads larger than 16 KiB, fail closed instead of becoming an opaque
+identity-bearing stream.
+
+The header is trustworthy only at its intended private publisher ingress:
+anything that can connect to the target without passing through Kepos can forge
+`Authorization: Kepos ...`. Keep the target private and rely on the header only
+when its traffic must pass through the publisher adapter. The subscriber gateway
+binds to loopback by default. Binding it to a non-loopback address such as
+`0.0.0.0` delegates that subscriber device's Kepos capability to every reachable
+LAN client; the client-to-gateway HTTP leg is plaintext unless the deployment
+protects it separately.
 
 ## Run both roles as one device
 
