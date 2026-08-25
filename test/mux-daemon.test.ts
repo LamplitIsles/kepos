@@ -683,6 +683,107 @@ test("forwards fragmented persistent HTTP/1.1 requests with per-request identity
   }
 });
 
+test("delivers a target response after an HTTP client half-closes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-http-half-close-"));
+  const subscriberState = path.join(root, "subscriber");
+  const publisherState = path.join(root, "publisher");
+  const targetSockets = new Set<Duplex>();
+  let targetRequest = "";
+  const responseBody = "final-after-fin";
+  const target = createServer({ allowHalfOpen: true }, (socket) => {
+    targetSockets.add(socket);
+    socket.once("close", () => targetSockets.delete(socket));
+    socket.on("error", () => undefined);
+    socket.setEncoding("latin1");
+    socket.on("data", (chunk) => {
+      targetRequest += chunk;
+    });
+    socket.once("end", () => {
+      setImmediate(() => {
+        if (socket.destroyed) return;
+        socket.end(
+          `HTTP/1.1 200 OK\r\nContent-Length: ${Buffer.byteLength(responseBody)}\r\nConnection: close\r\n\r\n${responseBody}`,
+        );
+      });
+    });
+  });
+  let testnet: HyperDhtTestnet | undefined;
+  let publisher: RunningPublisher | undefined;
+  let subscriber: RunningSubscriber | undefined;
+  let testError: unknown;
+
+  try {
+    const targetPort = await listen(target);
+    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
+    const publisherSetup = await setupPublisher({
+      stateDir: publisherState,
+      displayName: "kosmos",
+      subscriberPublicKeys: [subscriberSetup.publicKey],
+      services: [
+        {
+          id: "half-close",
+          name: "Half close",
+          kind: "http",
+          targetPort,
+        },
+      ],
+    });
+    await setSubscriberPublisher({
+      stateDir: subscriberState,
+      label: "kosmos",
+      publisherKey: publisherSetup.publisherKey,
+    });
+    testnet = await createHyperDhtTestnet(3);
+    publisher = await startPublisher({
+      stateDir: publisherState,
+      bootstrap: testnet.bootstrap,
+      log: noLog,
+    });
+    subscriber = await startSubscriber({
+      stateDir: subscriberState,
+      bootstrap: testnet.bootstrap,
+      gatewayPort: 0,
+      gatewayDomain: "kepos.internal",
+      services: [],
+      log: noLog,
+    });
+
+    const response = await exchangeTcp(
+      subscriber.home.port,
+      "GET /after-fin HTTP/1.1\r\nHost: half-close.kepos.internal\r\nAuthorization: Bearer forged\r\n\r\n",
+    );
+    assert.equal(
+      response,
+      `HTTP/1.1 200 OK\r\nContent-Length: ${Buffer.byteLength(responseBody)}\r\nConnection: close\r\n\r\n${responseBody}`,
+    );
+    assert.match(
+      targetRequest,
+      new RegExp(`Authorization: Kepos ${subscriberSetup.publicKey}\\r\\n`),
+    );
+    assert.equal(targetRequest.includes("Bearer forged"), false);
+  } catch (error) {
+    testError = error;
+  }
+
+  for (const socket of targetSockets) socket.destroy();
+  const cleanup = await Promise.allSettled([
+    subscriber?.stop(),
+    publisher?.stop(),
+    closeServer(target),
+    testnet?.destroy(),
+    rm(root, { recursive: true, force: true }),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason as unknown);
+  if (testError || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [testError, ...cleanupErrors].filter((error) => error !== undefined),
+      "HTTP half-close test or cleanup failed",
+    );
+  }
+});
+
 test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-mux-websocket-"));
   const subscriberState = path.join(root, "subscriber");
