@@ -593,8 +593,16 @@ try {
   Set-Location -LiteralPath $Repository
   $NpmInstallLog = Join-Path $Logs 'npm-ci.log'
   Write-Host "> $Npm ci --ignore-scripts --no-audit --no-fund"
-  & $Npm ci --ignore-scripts --no-audit --no-fund 2>&1 | Tee-Object -FilePath $NpmInstallLog
-  $npmInstallCode = $LASTEXITCODE
+  $previousErrorPreference = $ErrorActionPreference
+  try {
+    # Windows PowerShell 5.1 wraps npm's ordinary stderr notices as errors.
+    # Preserve the full log but use npm's exit code as the failure signal.
+    $ErrorActionPreference = 'Continue'
+    & $Npm ci --ignore-scripts --no-audit --no-fund 2>&1 | Tee-Object -FilePath $NpmInstallLog
+    $npmInstallCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorPreference
+  }
   if ($npmInstallCode -ne 0) { throw "npm-ci failed with exit code $npmInstallCode; see $NpmInstallLog" }
 
   $existingSubst = Get-SubstTarget
