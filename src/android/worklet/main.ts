@@ -22,7 +22,8 @@ const gatewayPort = Number(Bare.argv[2] ?? "17480");
 const mihomoPort = Number(Bare.argv[3] ?? "17890");
 const dshPort = Number(Bare.argv[4] ?? "13080");
 const openClawPort = Number(Bare.argv[5] ?? "18789");
-const bootstrap = parseAndroidBootstrapAsset(Bare.argv[6] ?? "null");
+const sshPort = Number(Bare.argv[6] ?? "2222");
+const bootstrap = parseAndroidBootstrapAsset(Bare.argv[7] ?? "null");
 if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65_535) {
   throw new Error("Android gateway port is invalid");
 }
@@ -43,11 +44,15 @@ if (
 ) {
   throw new Error("Android OpenClaw port is invalid");
 }
+if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65_535) {
+  throw new Error("Android SSH port is invalid");
+}
 const navidromeUrl = `http://navidrome.localhost:${gatewayPort}/`;
 const subscriberServices = createAndroidSubscriberServices(
   mihomoPort,
   dshPort,
   openClawPort,
+  sshPort,
 );
 const localPorts = new Map(
   subscriberServices.map(({ id, localPort }) => [id, localPort]),

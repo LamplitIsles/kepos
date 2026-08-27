@@ -157,6 +157,7 @@ test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated ac
       { id: "navidrome", name: "Navidrome", kind: "tcp" },
       { id: "dsh", name: "DeepSeek Harness", kind: "tcp" },
       { id: "mihomo", name: "Mihomo", kind: "tcp" },
+      { id: "ssh", name: "SSH", kind: "tcp" },
       { id: "bookorbit", name: "BookOrbit", kind: "tcp" },
       { id: "mihomo-dashboard", name: "Mihomo Dashboard", kind: "tcp" },
     ],
@@ -169,6 +170,7 @@ test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated ac
       new Map([
         ["mihomo", 17_890],
         ["dsh", 13_080],
+        ["ssh", 2_222],
       ]),
     ).services,
     [
@@ -205,6 +207,14 @@ test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated ac
         copyText: "socks5://127.0.0.1:17890",
       },
       {
+        id: "ssh",
+        name: "SSH",
+        access: "ssh",
+        action: "copy-command",
+        icon: "terminal",
+        copyText: "ssh -p 2222 127.0.0.1",
+      },
+      {
         id: "navidrome",
         name: "Navidrome",
         access: "http",
@@ -217,11 +227,12 @@ test("Android presents BookOrbit, Mihomo Dashboard, and Mihomo with dedicated ac
   );
 });
 
-test("Android maps its fixed raw listeners to Mihomo, dsh, and OpenClaw", () => {
-  assert.deepEqual(createAndroidSubscriberServices(17_890, 13_080, 18_789), [
+test("Android maps its fixed raw listeners to Mihomo, dsh, OpenClaw, and SSH", () => {
+  assert.deepEqual(createAndroidSubscriberServices(17_890, 13_080, 18_789, 2_222), [
     { id: "mihomo", localPort: 17_890 },
     { id: "dsh", localPort: 13_080 },
     { id: "openclaw", localPort: 18_789 },
+    { id: "ssh", localPort: 2_222 },
   ]);
 });
 
