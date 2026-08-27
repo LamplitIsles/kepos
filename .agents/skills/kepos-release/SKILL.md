@@ -35,6 +35,15 @@ Check whether credentials exist without echoing their values. When a signing too
 
 Do not substitute rehearsal, debug, ad-hoc Android, moved tags, or manually renamed assets for the formal scripts.
 
+## Android signing material on the release Mac
+
+Before an Android signing operation, inspect the host-local instructions in
+`~/.codex/AGENTS.machine.md`. Kepos's standard release-Mac loader is recorded
+in `docs/releasing.md`: it scopes the JKS path, `kepos-release` alias, and the
+`io.github.ttalab.kepos.android-release` Keychain generic password to the
+`release:android` command. Use that loader or the host-local equivalent; never
+list Keychain values or print the password.
+
 ## Irreversible tag gate
 
 Before pushing a tag, complete the host preflight and all checks. Tag push is the irreversible boundary.

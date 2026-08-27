@@ -57,15 +57,27 @@ git push origin v0.1.0
 For a formal beta, use the same annotated-tag gate with
 `v0.3.0-beta.1`; never reuse a beta number after a failed tag.
 
-Load Android keystore path, alias, and password from local secret storage.
-Never put passwords in arguments, tracked files, logs, or shell history. Build
-Android and macOS, then run the Windows build from the release Mac:
+On the release Mac, Kepos's Android JKS is at
+`$HOME/Library/Application Support/Kepos Release/android/kepos-release.jks`,
+its alias is `kepos-release`, and its password is the macOS Keychain generic
+password with service `io.github.ttalab.kepos.android-release`. Scope those
+values to the signing command so the password is neither printed nor retained
+in the shell environment:
 
 ```sh
+KEPOS_ANDROID_KEYSTORE="$HOME/Library/Application Support/Kepos Release/android/kepos-release.jks" \
+KEPOS_ANDROID_KEY_ALIAS="kepos-release" \
+KEPOS_ANDROID_KEY_PASSWORD="$(security find-generic-password \
+  -a "$USER" -s io.github.ttalab.kepos.android-release -w)" \
 npm run release:android -- v0.1.0
+```
+
+Do not put the password in arguments, tracked files, logs, or shell history.
+Build macOS, then run the Windows build from the release Mac:
+
+```sh
 npm run release:macos -- v0.1.0
 WINDOWS_USER=white npm run release:windows -- v0.1.0
-unset KEPOS_ANDROID_KEYSTORE KEPOS_ANDROID_KEY_ALIAS KEPOS_ANDROID_KEY_PASSWORD
 ```
 
 `release:windows` transfers only the tracked source snapshot plus one

@@ -101,6 +101,7 @@ class KeposForegroundService : Service() {
           BuildConfig.MIHOMO_PORT.toString(),
           BuildConfig.DSH_PORT.toString(),
           BuildConfig.OPENCLAW_PORT.toString(),
+          BuildConfig.SSH_PORT.toString(),
           readBootstrapAsset(),
         ),
       )
