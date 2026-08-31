@@ -86,12 +86,5 @@ An authenticated `outer.accepted` / `outer.connected` event on the publisher
 is stronger evidence than an open UDP socket. Conversely, a failed TCP or SSH
 probe does not prove UDP loss.
 
-## 4. What the 2026-08-27 trial established
-
-The controlled restart trial established a healthy direct path: the old outer
-closed at the stimulus, the publisher accepted and connected a new outer about
-eight seconds later, and both captures showed bidirectional UDP activity. The
-publisher then served channels successfully.
-
-That trial did **not** reproduce the earlier long outage. Its root cause remains
-unknown; the next occurrence must follow this runbook without restarting first.
+The [2026-08-27 controlled trial record](evidence/udp-direct-path-2026-08-27.md)
+documents one healthy restart path; it is not a diagnosis of a prior outage.
