@@ -55,7 +55,7 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
       --soft-line: rgba(240, 241, 231, 0.09);
       --danger: #ff9f82;
       --display: "Iowan Old Style", "Baskerville", Georgia, serif;
-      --mono: "SFMono-Regular", Menlo, Monaco, monospace;
+      --mono: "SFMono-Regular", Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
     }
 
     * { box-sizing: border-box; }
