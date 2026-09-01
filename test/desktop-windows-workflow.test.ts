@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -184,6 +185,7 @@ printf '%s' "\${count}" > "\${count_file}"
 printf '%s\n' "\${*:2}" > "\${FAKE_ROOT}/ssh-command-\${count}"
 cat > "\${FAKE_ROOT}/ssh-input-\${count}"
 if (( count % 2 == 0 )); then cp "\${FAKE_ROOT}/ssh-input-\${count}" "\${FAKE_ROOT}/archive-\${count}.tar"; fi
+if (( count % 2 == 0 )); then printf '%s\n' 'remote workflow signal'; fi
 `,
   );
   chmodSync(fakeSsh, 0o755);
@@ -249,6 +251,15 @@ fi
     assert.equal(
       readFileSync(path.join(fakeState, "remote-bootstrap.json"), "utf8"),
       '[{"host":"bootstrap.example","port":49737}]\n',
+    );
+    const windowsRuns = readdirSync(path.join(root, "dist", "windows"));
+    assert.ok(windowsRuns.length > 0);
+    assert.match(
+      readFileSync(
+        path.join(root, "dist", "windows", windowsRuns[0]!, "remote-command.log"),
+        "utf8",
+      ),
+      /remote workflow signal/,
     );
 
     const beta = spawnSync(

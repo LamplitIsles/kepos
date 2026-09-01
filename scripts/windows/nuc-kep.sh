@@ -241,8 +241,9 @@ $remote_powershell"
 
 set +e
 # shellcheck disable=SC2029 # The quoted payload is intentionally built locally.
-ssh "$HOST" "bash -c $(shell_quote "$remote_payload")" < "$TRANSFER_ARCHIVE"
-status=$?
+ssh "$HOST" "bash -c $(shell_quote "$remote_payload")" < "$TRANSFER_ARCHIVE" 2>&1 |
+  tee "$LOCAL_OUTPUT/remote-command.log"
+status=${PIPESTATUS[0]}
 set -e
 
 log_transfer_status=0
