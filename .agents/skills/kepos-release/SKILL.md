@@ -19,7 +19,7 @@ Track these gates and stop at the first failure:
 2. **Host:** Android JKS, Android alias/password, minisign secret key/password, Android SDK tools, `minisign`, and `gh` authentication are available without printing secret values.
 3. **Checks:** every check listed in `docs/releasing.md` passes on the exact candidate commit and leaves the worktree clean.
 4. **Tag:** create an annotated tag, inspect its peeled commit, push only that exact tag with `git push origin <tag>`, and verify the remote annotated and peeled references.
-5. **Artifacts:** run the repository Android, macOS, and remote Windows release scripts for that tag; accept only their versioned outputs and built-in signature, architecture, version, archive, extraction, and isolated-smoke verification.
+5. **Artifacts:** run the repository Android, macOS, and remote Windows release scripts for that tag; the Windows command is the checked-in `nuc-kep` route. Retain its `dist/windows/<run-id>/remote-command.log` as build evidence and accept only versioned outputs that pass their built-in signature, architecture, version, archive, extraction, and isolated-smoke verification.
 6. **Manifest:** create the minisign checksum manifest, then independently verify the minisign signature and every SHA-256 entry.
 7. **Smoke:** follow the artifact checks in `docs/releasing.md`. Preserve live state: use test-owned temporary HOME, state, and config paths for macOS and Windows smoke tests, and never uninstall an existing Android app or erase pairing state without explicit approval.
 8. **Draft:** create the draft with the repository script and inspect tag, target commit, draft state, all five exact asset names, upload states, sizes, and digests.
@@ -52,9 +52,10 @@ If any formal build or verification fails after the tag is pushed:
 
 1. Stop the release immediately.
 2. Keep the failed tag and any published assets unchanged; never delete, move, force-update, or reuse it.
-3. Identify the narrowest reproducible cause.
-4. Fix it on a feature branch through a pull request and verify the original failing path.
-5. After merge, restart the full release ledger from clean `main` with a new patch version.
+3. For a Windows failure, inspect the run's local `dist/windows/<run-id>/remote-command.log` first and record its path; if that evidence is absent, repair the checked-in capture path before retrying.
+4. Identify the narrowest reproducible cause.
+5. Fix it on a feature branch through a pull request and verify the original failing path.
+6. After merge, restart the full release ledger from clean `main` with a new patch version.
 
 Report the failed tag as unpublished and distinguish generated local artifacts from uploaded GitHub assets.
 
