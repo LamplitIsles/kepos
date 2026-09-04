@@ -9,14 +9,14 @@ import {
   serializeKeposConfig,
 } from "../src/app-config.js";
 import {
-  parsePublisherConfig,
-  serializePublisherConfig,
+  parsePublisherIdentity,
+  serializePublisherIdentity,
   type SubscriberDevice,
 } from "../src/config.js";
 import {
   parseMetricsListenOption,
   parseOptions,
-  parseSubscriberDeviceOption,
+  parseSubscriberService,
 } from "../src/cli/options.js";
 import {
   createPublisherMetricsRecorder,
@@ -66,16 +66,12 @@ function policy(subscribers = devices) {
   };
 }
 
-test("publisher state and TOML round-trip labeled devices and reject bare keys", () => {
-  const config = { seed: publisherKey, subscribers: devices };
-  assert.deepEqual(parsePublisherConfig(JSON.parse(serializePublisherConfig(config))), config);
+test("publisher identity and TOML round-trip labeled devices and reject bare keys", () => {
+  const identity = { seed: publisherKey };
+  assert.deepEqual(parsePublisherIdentity(JSON.parse(serializePublisherIdentity(identity))), identity);
   assert.throws(
-    () => parsePublisherConfig({ seed: publisherKey, allow: [subscriberKey] }),
+    () => parsePublisherIdentity({ seed: publisherKey, allow: [subscriberKey] }),
     /unknown field.*allow/i,
-  );
-  assert.throws(
-    () => parsePublisherConfig({ seed: publisherKey, subscribers: [devices[0], devices[0]] }),
-    /duplicate subscriber device/i,
   );
 
   const toml = serializeKeposConfig({
@@ -90,19 +86,14 @@ test("publisher state and TOML round-trip labeled devices and reject bare keys",
 });
 
 test("subscriber-device and metrics options are routed with bounded values", () => {
-  assert.deepEqual(parseSubscriberDeviceOption(`phone:${subscriberKey}`), devices[0]);
-  assert.deepEqual(parseSubscriberDeviceOption(`phone=${subscriberKey}`), devices[0]);
-  assert.throws(
-    () => parseSubscriberDeviceOption(`:${subscriberKey}`),
-    /subscriber-device/i,
-  );
+  assert.deepEqual(parseSubscriberService("ssh:2222"), { id: "ssh", localPort: 2222 });
   const options = parseOptions(
-    ["--metrics-listen", "127.0.0.1:9464", "--subscriber-device", `phone:${subscriberKey}`],
-    ["--metrics-listen", "--subscriber-device"],
+    ["--metrics-listen", "127.0.0.1:9464"],
+    ["--metrics-listen"],
   );
   assert.deepEqual(parseMetricsListenOption(options), { host: "127.0.0.1", port: 9464 });
   assert.throws(
-    () => parseOptions(["--allow", subscriberKey], ["--subscriber-device"]),
+    () => parseOptions(["--allow", subscriberKey], ["--metrics-listen"]),
     /unknown option.*allow/i,
   );
 });

@@ -21,8 +21,14 @@ import { acquireDesktopSingleton } from "../apps/desktop/src/singleton.js";
 import { setupSubscriber } from "../src/state/subscriber.js";
 import type { RunningDesktopRuntime } from "../apps/desktop/src/runtime.js";
 import type { DesktopTray } from "../apps/desktop/src/tray.js";
+import type { PublisherRuntimePolicy } from "../src/runtime/publisher.js";
 
 const remotePublisherKey = "e4".repeat(32);
+const publisherPolicy: PublisherRuntimePolicy = {
+  displayName: "This Mac",
+  subscribers: [],
+  services: [],
+};
 
 test("desktop host acquires dual-role locks before one control window", async () => {
   const harness = createHarness();
@@ -509,7 +515,9 @@ test("desktop host republishes unconfigured state when persistence fails and ret
 test("desktop host supports publisher-only mode", async () => {
   const harness = createHarness();
   const host = await startDesktopHost(
-    desktopHostOptions({ publisher: { stateDir: "/state/publisher" } }),
+    desktopHostOptions({
+      publisher: { stateDir: "/state/publisher", policy: publisherPolicy },
+    }),
     harness.dependencies,
   );
 
@@ -573,7 +581,7 @@ test("desktop host exposes in-process role reconfiguration", async () => {
   );
 
   await host.reconfigure({
-    publisher: { stateDir: "/state/publisher" },
+    publisher: { stateDir: "/state/publisher", policy: publisherPolicy },
   });
 
   assert.equal(harness.events.includes("runtime:reconfigure"), true);
@@ -821,7 +829,7 @@ function subscriberDesktopOptions(): DesktopOptions {
 function dualDesktopOptions(): DesktopOptions {
   return {
     ...subscriberDesktopOptions(),
-    publisher: { stateDir: "/state/publisher" },
+    publisher: { stateDir: "/state/publisher", policy: publisherPolicy },
   };
 }
 

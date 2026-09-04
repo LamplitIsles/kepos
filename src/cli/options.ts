@@ -2,8 +2,6 @@ import path from "node:path";
 
 import type { DhtAddress } from "../mux/hyperdht.js";
 import { parseRoute, type Route } from "../mux/route.js";
-import type { PublisherStateService } from "../state/publisher.js";
-import { parseSubscriberDevice, type SubscriberDevice } from "../config.js";
 import type { MetricsListenAddress } from "../metrics/server.js";
 import type { SubscriberService } from "../runtime/subscriber.js";
 import {
@@ -41,10 +39,7 @@ export function requiredState(options: ParsedOptions): string {
   return path.resolve(state);
 }
 
-export function requiredOption(
-  options: ParsedOptions,
-  name: string,
-): string {
+export function requiredOption(options: ParsedOptions, name: string): string {
   const value = singleOption(options, name);
   if (!value) throw new Error(`${name} is required`);
   return value;
@@ -60,41 +55,8 @@ export function singleOption(
   return values[0];
 }
 
-export function repeatedOption(
-  options: ParsedOptions,
-  name: string,
-): string[] {
+export function repeatedOption(options: ParsedOptions, name: string): string[] {
   return [...(options.get(name) ?? [])];
-}
-
-export function parsePublisherService(value: string): PublisherStateService {
-  const [id, name, port, kind, ...extra] = value.split(":");
-  if (!id || !name || !port || extra.length > 0) {
-    throw new Error("--service must use id:name:target-port[:tcp|http]");
-  }
-  if (kind !== undefined && kind !== "tcp" && kind !== "http") {
-    throw new Error("--service kind must be tcp or http");
-  }
-  return {
-    id,
-    name,
-    targetPort: parseTcpPort(port, "--service target port"),
-    ...(kind === undefined ? {} : { kind }),
-  };
-}
-
-export function parseSubscriberDeviceOption(value: string): SubscriberDevice {
-  const separator = value.includes("=")
-    ? value.indexOf("=")
-    : value.lastIndexOf(":");
-  if (separator <= 0 || separator === value.length - 1) {
-    throw new Error(
-      "--subscriber-device must use label:public-key or label=public-key",
-    );
-  }
-  const label = value.slice(0, separator);
-  const publicKey = value.slice(separator + 1);
-  return parseSubscriberDevice({ label, publicKey }, "--subscriber-device");
 }
 
 export function parseMetricsListenOption(
@@ -188,9 +150,7 @@ export function parseBootstrapValues(
   });
 }
 
-export function observationMode(
-  options: ParsedOptions,
-): "human" | "ndjson" {
+export function observationMode(options: ParsedOptions): "human" | "ndjson" {
   const mode = singleOption(options, "--observations") ?? "human";
   if (mode === "human" || mode === "ndjson") return mode;
   throw new Error("--observations must be human or ndjson");

@@ -132,33 +132,25 @@ test("desktop launch options accept subscriber-only mode", () => {
   );
 });
 
-test("desktop launch options accept publisher-only mode", () => {
-  assert.deepEqual(
-    parseDesktopOptions(["--publisher-state", "./publisher"]),
-    {
-      publisher: { stateDir: path.resolve("./publisher") },
-    },
+test("desktop launch options require TOML policy for publisher mode", () => {
+  assert.throws(
+    () => parseDesktopOptions(["--publisher-state", "./publisher"]),
+    /complete \[publisher\] policy in TOML/,
   );
 });
 
-test("desktop launch options accept simultaneous publisher and subscriber roles", () => {
-  assert.deepEqual(
-    parseDesktopOptions([
-      "--publisher-state",
-      "./publisher",
-      "--subscriber-state",
-      "./subscriber",
-      "--subscriber-service",
-      "ssh:2222",
-    ]),
-    {
-      publisher: { stateDir: path.resolve("./publisher") },
-      subscriber: {
-        stateDir: path.resolve("./subscriber"),
-        gatewayPort: 17_480,
-        services: [{ id: "ssh", localPort: 2222 }],
-      },
-    },
+test("desktop launch options reject publisher flags without TOML policy", () => {
+  assert.throws(
+    () =>
+      parseDesktopOptions([
+        "--publisher-state",
+        "./publisher",
+        "--subscriber-state",
+        "./subscriber",
+        "--subscriber-service",
+        "ssh:2222",
+      ]),
+    /complete \[publisher\] policy in TOML/,
   );
 });
 
@@ -175,7 +167,7 @@ test("desktop launch options reject services without subscriber state", () => {
         "--subscriber-service",
         "ssh:2222",
       ]),
-    /subscriber service requires --subscriber-state/,
+    /complete \[publisher\] policy in TOML/,
   );
 });
 

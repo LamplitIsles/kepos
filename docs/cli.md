@@ -15,20 +15,17 @@ npm run kepos -- setup subscriber \
   --state ~/.local/state/kepos-neo/subscriber
 ```
 
-Create publisher state with a local label for each trusted subscriber device:
+Create the publisher's seed-derived identity:
 
 ```sh
 npm run kepos -- setup publisher \
-  --state ~/.local/state/kepos-neo/publisher \
-  --display-name kosmos \
-  --subscriber-device 'nuc:<subscriber-public-key>' \
-  --service ssh:SSH:22 \
-  --service navidrome:Navidrome:4533:http
+  --state ~/.local/state/kepos-neo/publisher
 ```
 
-Publisher service declarations use `id:name:target-port[:tcp|http]`.
-The final segment is optional and defaults to `tcp`; choose `http` only for a
-plaintext HTTP/1.1 target that should receive Kepos subscriber authentication.
+Publisher setup accepts only `--state`. It creates one strict
+`publisher.json` containing the seed, reuses a valid identity without key
+rotation, and rejects partial, extra, or malformed state. Publisher display
+name, subscriber devices, services, and service allowlists belong in TOML.
 
 Print an existing publisher's public key without repeating or changing its
 policy:
@@ -42,7 +39,8 @@ Run the publisher, then pin its public key on the subscriber:
 
 ```sh
 npm run kepos -- publisher run \
-  --state ~/.local/state/kepos-neo/publisher
+  --state ~/.local/state/kepos-neo/publisher \
+  --config ~/.config/kepos/config.toml
 
 npm run kepos -- subscriber set-publisher \
   --state ~/.local/state/kepos-neo/subscriber \
@@ -91,9 +89,11 @@ id = "ssh"
 local_port = 2222
 ```
 
-Use `--config <path>` to select another file. A missing default file retains
-state-based publisher policy and runtime defaults; a missing explicit file is
-an error. An empty bootstrap array selects HyperDHT defaults.
+Use `--config <path>` to select another file. A publisher run, or a
+publisher-enabled `device run`, requires that the selected/default file exists
+and contains a complete `[publisher]` table. Subscriber-only commands remain
+independent of publisher policy. An empty bootstrap array selects HyperDHT
+defaults.
 
 When `[publisher]` exists, `display_name`, `subscribers`, and `services` form the
 complete runtime policy. `enabled` controls desktop auto-start only. Identities
@@ -126,30 +126,10 @@ Publisher subscriber-device policy and service-specific allowlists fail closed:
 - restricted services are omitted from registries returned to unauthorized
   subscribers.
 
-Do not mix publisher setup flags with a configured `[publisher]` table. Kepos
-rejects that ambiguous operation.
-
-Without a `[publisher]` table, state-owned subscriber devices and services can
-still be changed while the publisher is stopped:
-
-```sh
-npm run kepos -- publisher set-subscribers \
-  --state ~/.local/state/kepos-neo/publisher
-
-npm run kepos -- publisher set-subscribers \
-  --state ~/.local/state/kepos-neo/publisher \
-  --subscriber-device 'nuc:<subscriber-public-key>'
-
-npm run kepos -- publisher set-services \
-  --state ~/.local/state/kepos-neo/publisher \
-  --service ssh:SSH:22 \
-  --service navidrome:Navidrome:4533:http
-```
-
-These commands fail instead of editing inactive state when TOML owns the
-publisher policy. Neither command rotates the publisher key. A device value is
-`label:public-key` (or `label=public-key`); labels are publisher-local device
-metadata, not account or person identities.
+There are no publisher state-policy mutation commands. Edit the TOML
+`display_name`, `subscribers`, `services`, and `allow` values instead. A
+publisher state directory contains identity only; the separate service
+manifest and state policy snapshot are not read or migrated.
 
 ## Publisher metrics and dashboard
 

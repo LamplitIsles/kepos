@@ -6,10 +6,7 @@ import {
 import { defaultKeposConfigPath } from "../../../src/platform/paths.js";
 import type { SubscriberDevice } from "../../../src/config.js";
 import type { DesktopRuntimeConfiguration } from "./runtime.js";
-import {
-  parseDesktopOptions,
-  type DesktopOptions,
-} from "./options.js";
+import { parseDesktopOptions, type DesktopOptions } from "./options.js";
 
 export interface ApplyDesktopConfigContext {
   homeDirectory: string;
@@ -58,8 +55,8 @@ export async function persistDesktopPublisherSubscribers(
   } = {},
 ): Promise<void> {
   const config = await (dependencies.loadConfig ?? loadKeposConfig)(configPath);
-  if (!config?.publisher?.enabled) {
-    throw new Error("Desktop publisher config is not enabled");
+  if (!config?.publisher) {
+    throw new Error("Desktop publisher config is not configured");
   }
   await (dependencies.saveConfig ?? saveKeposConfig)(
     {

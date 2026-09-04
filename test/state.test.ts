@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
@@ -12,16 +13,14 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  parsePublisherConfig,
-  parsePublisherManifest,
+  parsePublisherIdentity,
   parseSubscriberContact,
 } from "../src/config.js";
 import { replaceFileAtomically } from "../src/state/files.js";
 import { parseClientIdentity } from "../src/keys.js";
 import {
   ensurePublisher,
-  setPublisherSubscribers,
-  setPublisherServices,
+  loadPublisherIdentity,
   setupPublisher,
 } from "../src/state/publisher.js";
 import {
@@ -174,135 +173,40 @@ test("subscriber pairing persists only a pending publisher contact before approv
   );
 });
 
-test("publisher setup permits deny-all and rejects a different repeated topology", async () => {
+test("publisher setup creates one seed-only identity and reuses its key", async () => {
   const stateDir = await stateDirectory("publisher");
-  const options = {
-    stateDir,
-    displayName: "kosmos",
-    subscriberDevices: [],
-    services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
-  };
-  const first = await setupPublisher(options);
+  const first = await setupPublisher({ stateDir });
 
   assert.equal(first.created, true);
-  assert.deepEqual(
-    parsePublisherConfig(
-      await readJson(path.join(stateDir, "publisher.json")),
-    ).subscribers,
-    [],
-  );
-  assert.deepEqual(await setupPublisher(options), {
+  assert.deepEqual(await readdir(stateDir), ["publisher.json"]);
+  assert.deepEqual(parsePublisherIdentity(await readJson(path.join(stateDir, "publisher.json"))), {
+    seed: (await loadPublisherIdentity(stateDir)).seed,
+  });
+  assert.deepEqual(await setupPublisher({ stateDir }), {
     ...first,
     created: false,
   });
-  await assert.rejects(
-    () =>
-      setupPublisher({
-        ...options,
-        subscriberDevices: [{ label: "phone", publicKey: "11".repeat(32) }],
-      }),
-    /allowlist|existing/i,
-  );
-  await assert.rejects(
-    () =>
-      setupPublisher({
-        ...options,
-        services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
-      }),
-    /topology|manifest|existing/i,
-  );
-});
-
-test("desktop publisher ensure reuses state while TOML policy changes", async () => {
-  const stateDir = await stateDirectory("publisher-desktop-policy");
-  const initial = {
-    stateDir,
-    displayName: "kosmos",
-    subscriberDevices: [{ label: "phone", publicKey: "11".repeat(32) }],
-    services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
-  };
-  await setupPublisher(initial);
-  const manifestBefore = await readFile(
-    path.join(stateDir, "publisher.manifest.json"),
-  );
-  const configBefore = await readFile(path.join(stateDir, "publisher.json"));
-
-  const ensured = await ensurePublisher({
-    ...initial,
-    displayName: "renamed in TOML",
-    subscriberDevices: [{ label: "tablet", publicKey: "22".repeat(32) }],
-    services: [{ id: "navidrome", name: "Navidrome", targetPort: 4533 }],
-  });
-
-  assert.deepEqual(ensured, {
+  assert.deepEqual(await ensurePublisher({ stateDir }), {
+    ...first,
     created: false,
-    publisherKey: (await setupPublisher(initial)).publisherKey,
   });
-  assert.deepEqual(
-    await readFile(path.join(stateDir, "publisher.manifest.json")),
-    manifestBefore,
-  );
-  assert.deepEqual(await readFile(path.join(stateDir, "publisher.json")), configBefore);
 });
 
-test("publisher subscriber devices and services replace independently without rotating its key", async () => {
-  const stateDir = await stateDirectory("publisher-update");
-  const setup = await setupPublisher({
-    stateDir,
-    displayName: "kosmos",
-    subscriberDevices: [{ label: "phone", publicKey: "11".repeat(32) }],
-    services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
-  });
-  const configPath = path.join(stateDir, "publisher.json");
-  const seed = parsePublisherConfig(await readJson(configPath)).seed;
+test("publisher state rejects partial, extra, and malformed identities", async () => {
+  const partial = await stateDirectory("publisher-partial");
+  await mkdir(partial, { recursive: true, mode: 0o700 });
+  await writeFile(path.join(partial, "publisher.manifest.json"), "{}");
+  await assert.rejects(() => loadPublisherIdentity(partial), /partial or invalid state/);
 
-  await setPublisherSubscribers({
-    stateDir,
-    subscriberDevices: [],
-  });
-  await setPublisherServices({
-    stateDir,
-    services: [
-      { id: "navidrome", name: "Navidrome", targetPort: 4533 },
-    ],
-  });
+  const extra = await stateDirectory("publisher-extra");
+  await setupPublisher({ stateDir: extra });
+  await writeFile(path.join(extra, "stale.json"), "{}");
+  await assert.rejects(() => loadPublisherIdentity(extra), /partial or invalid state/);
 
-  assert.deepEqual(parsePublisherConfig(await readJson(configPath)), {
-    seed,
-    subscribers: [],
+  const malformed = await stateDirectory("publisher-malformed");
+  await mkdir(malformed, { recursive: true, mode: 0o700 });
+  await writeFile(path.join(malformed, "publisher.json"), JSON.stringify({ seed: "00" }), {
+    mode: 0o600,
   });
-  assert.deepEqual(
-    parsePublisherManifest(
-      await readJson(path.join(stateDir, "publisher.manifest.json")),
-    ).services,
-    [
-      {
-        id: "navidrome",
-        name: "Navidrome",
-        kind: "tcp",
-        targetPort: 4533,
-      },
-    ],
-  );
-  assert.equal(
-    (
-      await setupPublisher({
-        stateDir,
-        displayName: "kosmos",
-        subscriberDevices: [],
-        services: [
-          { id: "navidrome", name: "Navidrome", targetPort: 4533 },
-        ],
-      })
-    ).publisherKey,
-    setup.publisherKey,
-  );
-
-  await setPublisherServices({ stateDir, services: [] });
-  assert.deepEqual(
-    parsePublisherManifest(
-      await readJson(path.join(stateDir, "publisher.manifest.json")),
-    ).services,
-    [],
-  );
+  await assert.rejects(() => loadPublisherIdentity(malformed), /seed|invalid state/);
 });

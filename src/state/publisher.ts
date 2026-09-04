@@ -1,14 +1,9 @@
 import path from "node:path";
 
 import {
-  parsePublisherConfig,
-  parsePublisherManifest,
-  serializePublisherConfig,
-  serializePublisherManifest,
-  parseSubscriberDevices,
-  type SubscriberDevice,
-  type PublisherManifest,
-  type PublisherService,
+  parsePublisherIdentity,
+  serializePublisherIdentity,
+  type PublisherIdentity,
 } from "../config.js";
 import { derivePublisherHomeKey, generatePublisherSeed } from "../keys.js";
 import {
@@ -16,25 +11,12 @@ import {
   readStateJson,
   validateStateDirectory,
   writeStateDirectoryAtomically,
-  writeStateFileAtomically,
 } from "./files.js";
 
-const manifestFileName = "publisher.manifest.json";
-const configFileName = "publisher.json";
-
-export interface PublisherStateService {
-  id: string;
-  name: string;
-  kind?: "tcp" | "http";
-  targetPort: number;
-  allow?: string[];
-}
+const identityFileName = "publisher.json";
 
 export interface SetupPublisherOptions {
   stateDir: string;
-  displayName: string;
-  subscriberDevices: SubscriberDevice[];
-  services: PublisherStateService[];
 }
 
 export interface SetupPublisherResult {
@@ -42,46 +24,40 @@ export interface SetupPublisherResult {
   publisherKey: string;
 }
 
-export interface SetPublisherSubscribersOptions {
-  stateDir: string;
-  subscriberDevices: SubscriberDevice[];
-}
-
-export interface SetPublisherServicesOptions {
-  stateDir: string;
-  services: PublisherStateService[];
-}
-
 export async function getPublisherPublicKey(stateDir: string): Promise<string> {
-  const { config } = await loadPublisherState(stateDir);
-  return derivePublisherHomeKey(config.seed);
+  const identity = await loadPublisherIdentity(stateDir);
+  return derivePublisherHomeKey(identity.seed);
 }
 
+/**
+ * Create the publisher's stable seed-derived identity when it is absent.
+ *
+ * Publisher policy intentionally does not live in this directory. The
+ * directory is validated as a complete one-file state before an existing
+ * identity is reused, so stale manifests, policy snapshots, and partial
+ * writes fail closed.
+ */
 export async function setupPublisher(
   options: SetupPublisherOptions,
 ): Promise<SetupPublisherResult> {
   const stateDir = path.resolve(options.stateDir);
-  const manifest = createManifest(options.displayName, options.services);
-  const subscribers = parseSubscriberDevices(options.subscriberDevices);
-
   if (await pathExists(stateDir)) {
-    return readPublisherResult(stateDir, manifest, subscribers, false);
+    const identity = await loadPublisherIdentity(stateDir);
+    return {
+      created: false,
+      publisherKey: derivePublisherHomeKey(identity.seed),
+    };
   }
 
+  const identity = parsePublisherIdentity({ seed: generatePublisherSeed() });
   await writeStateDirectoryAtomically(
     stateDir,
-    new Map([
-      [manifestFileName, serializePublisherManifest(manifest)],
-      [
-        configFileName,
-        serializePublisherConfig({
-          seed: generatePublisherSeed(),
-          subscribers,
-        }),
-      ],
-    ]),
+    new Map([[identityFileName, serializePublisherIdentity(identity)]]),
   );
-  return readPublisherResult(stateDir, manifest, subscribers, true);
+  return {
+    created: true,
+    publisherKey: derivePublisherHomeKey(identity.seed),
+  };
 }
 
 export async function ensurePublisher(
@@ -89,109 +65,21 @@ export async function ensurePublisher(
 ): Promise<SetupPublisherResult> {
   const stateDir = path.resolve(options.stateDir);
   if (!(await pathExists(stateDir))) {
-    return setupPublisher({ ...options, stateDir });
+    return setupPublisher({ stateDir });
   }
-
-  const { config } = await loadPublisherState(stateDir);
+  const identity = await loadPublisherIdentity(stateDir);
   return {
     created: false,
-    publisherKey: derivePublisherHomeKey(config.seed),
+    publisherKey: derivePublisherHomeKey(identity.seed),
   };
 }
 
-export async function setPublisherSubscribers(
-  options: SetPublisherSubscribersOptions,
-): Promise<void> {
-  const stateDir = path.resolve(options.stateDir);
-  const { config, manifest } = await loadPublisherState(stateDir);
-  await writeStateFileAtomically(
-    stateDir,
-    manifest.publisherConfig,
-    serializePublisherConfig({
-      seed: config.seed,
-      subscribers: parseSubscriberDevices(options.subscriberDevices),
-    }),
-  );
-  await validatePublisherState(stateDir, manifest);
-}
-
-export async function setPublisherServices(
-  options: SetPublisherServicesOptions,
-): Promise<void> {
-  const stateDir = path.resolve(options.stateDir);
-  const { manifest } = await loadPublisherState(stateDir);
-  const nextManifest = createManifest(
-    manifest.displayName,
-    options.services,
-  );
-  await writeStateFileAtomically(
-    stateDir,
-    manifestFileName,
-    serializePublisherManifest(nextManifest),
-  );
-  await validatePublisherState(stateDir, nextManifest);
-}
-
-function createManifest(
-  displayName: string,
-  services: PublisherStateService[],
-): PublisherManifest {
-  return parsePublisherManifest({
-    displayName,
-    publisherConfig: configFileName,
-    services: services.map(
-      (service): PublisherService => ({
-        ...service,
-        kind: service.kind ?? "tcp",
-      }),
-    ),
-  });
-}
-
-async function readPublisherResult(
+export async function loadPublisherIdentity(
   stateDir: string,
-  expectedManifest: PublisherManifest,
-  expectedSubscribers: readonly SubscriberDevice[],
-  created: boolean,
-): Promise<SetupPublisherResult> {
-  const { config, manifest } = await loadPublisherState(stateDir);
-  if (
-    serializePublisherManifest(manifest) !==
-    serializePublisherManifest(expectedManifest)
-  ) {
-    throw new Error(
-      "existing publisher manifest does not match requested topology",
-    );
-  }
-  if (JSON.stringify(config.subscribers) !== JSON.stringify(expectedSubscribers)) {
-    throw new Error(
-      "existing publisher subscriber devices do not match requested subscribers",
-    );
-  }
-  return {
-    created,
-    publisherKey: derivePublisherHomeKey(config.seed),
-  };
-}
-
-export async function loadPublisherState(stateDir: string) {
+): Promise<PublisherIdentity> {
   stateDir = path.resolve(stateDir);
-  const manifest = parsePublisherManifest(
-    await readStateJson(path.join(stateDir, manifestFileName)),
+  await validateStateDirectory(stateDir, [identityFileName]);
+  return parsePublisherIdentity(
+    await readStateJson(path.join(stateDir, identityFileName)),
   );
-  await validatePublisherState(stateDir, manifest);
-  const config = parsePublisherConfig(
-    await readStateJson(path.join(stateDir, manifest.publisherConfig)),
-  );
-  return { config, manifest };
-}
-
-async function validatePublisherState(
-  stateDir: string,
-  manifest: PublisherManifest,
-): Promise<void> {
-  await validateStateDirectory(stateDir, [
-    manifestFileName,
-    manifest.publisherConfig,
-  ]);
 }

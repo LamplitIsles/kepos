@@ -318,11 +318,11 @@ target_port = 4533</code></pre>
 
             <h3 id="publisher-desktop-identity">Let startup create the identity</h3>
             <p>
-              When <code>enabled = true</code>, desktop startup creates missing publisher state from this policy before
-              starting the role. On later launches it validates the existing state and reuses the same seed and public
-              key; it never rotates or overwrites that state. TOML subscriber-device and service changes are runtime policy, so
-              they can change without rewriting the identity. Use <code>--metrics-listen host:port</code> on a publisher
-              run to expose the read-only Prometheus endpoint.
+              When <code>enabled = true</code>, desktop loads the default TOML (writing it on first run) before creating
+              missing publisher state. The state is one strict seed-only <code>publisher.json</code>; later launches validate and reuse the
+              same seed and public key. TOML owns the display name, subscriber devices, services, and allowlists, so policy
+              edits never rewrite identity. Use <code>--metrics-listen host:port</code> on a publisher run to expose the
+              read-only Prometheus endpoint.
             </p>
 
             <h3 id="publisher-desktop-pairing">Launch and approve a device</h3>
@@ -371,26 +371,20 @@ id = "navidrome"
 name = "Navidrome"
 target_port = 4533</code></pre>
             <pre class="docs-code"><code>npm run kepos -- setup publisher \
-  --state &lt;publisher-state-directory&gt; \
-  --config &lt;publisher-config.toml&gt;</code></pre>
+  --state &lt;publisher-state-directory&gt;</code></pre>
             <p>
-              This creates the publisher with the labeled subscriber device already trusted. The setup command writes the manifest and
-              identity into the explicit state directory. Repeat it only with the same policy; CLI setup remains strict
-              and never rotates an identity. Without a TOML publisher table, the same command accepts
-              <code>--display-name</code>, <code>--subscriber-device</code>, and repeated <code>--service</code> options instead.
+              Setup creates or reuses only the seed-derived identity in one strict <code>publisher.json</code>. Repeat it
+              safely to validate the same identity; it never rotates a key. The publisher's display name, subscribers,
+              services, and allowlists are read only from TOML. Missing or incomplete TOML prevents a publisher run.
             </p>
 
             <h3 id="publisher-cli-config">Update subscriber devices and pin the publisher</h3>
             <p>
-              If publisher state already exists in deny-all mode and no <code>[publisher]</code> TOML table owns its
-              policy, add the labeled subscriber device with <code>publisher set-subscribers</code>. For a TOML-owned publisher,
-              edit its <code>subscribers</code> array instead; do not combine TOML policy with CLI policy flags.
+              Edit the TOML <code>subscribers</code> array and service tables to change publisher policy. Publisher state
+              has no policy mutators or manifest. Use <code>publisher key</code> to print the stable public key, then pin
+              it on the subscriber.
             </p>
-            <pre class="docs-code"><code>npm run kepos -- publisher set-subscribers \
-  --state &lt;publisher-state-directory&gt; \
-  --subscriber-device 'android:&lt;subscriber-public-key&gt;'
-
-npm run kepos -- publisher key \
+            <pre class="docs-code"><code>npm run kepos -- publisher key \
   --state &lt;publisher-state-directory&gt;
 
 npm run kepos -- subscriber set-publisher \
@@ -409,8 +403,8 @@ npm run kepos -- subscriber set-publisher \
 npm run kepos -- subscriber run \
   --state &lt;subscriber-state-directory&gt;</code></pre>
             <p>
-              Start the publisher before the subscriber. A headless process reconciles valid TOML subscriber-device or
-              service edits while it runs. Scrape <code>GET /metrics</code> when <code>--metrics-listen</code> is enabled;
+              Start the publisher before the subscriber. The headless process requires a complete <code>[publisher]</code>
+              table and reconciles valid TOML subscriber-device or service edits while it runs. Scrape <code>GET /metrics</code> when <code>--metrics-listen</code> is enabled;
               use the repository's Nix, container, Windows, and NUC deployment guides for process supervision and
               platform-specific lifecycle details.
             </p>
@@ -451,7 +445,8 @@ npm run kepos -- subscriber run \
             <h3 id="identity-lifecycle">Configuration and role state</h3>
             <p>
               TOML is mutable role policy: it names services and allowed subscriber keys. Role state is private identity
-              storage: publisher state holds its seed and subscriber state holds its key pair and publisher contact.
+              storage: publisher state holds only its seed in <code>publisher.json</code>, while subscriber state holds its
+              key pair and publisher contact.
               Packaged startup behavior is described in <a href="#publisher-desktop-identity">Publisher (Desktop)</a>;
               Android keeps its subscriber identity in app-private storage across an in-place update.
             </p>

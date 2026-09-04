@@ -63,22 +63,11 @@
   };
   initialize = pkgs.writeShellApplication {
     name = "kepos-initialize-publisher";
-    runtimeInputs = [pkgs.coreutils];
     text = ''
       state_dir=${lib.escapeShellArg cfg.stateDir}
-      if [[ -f "$state_dir/publisher.manifest.json" && -f "$state_dir/publisher.json" ]]; then
-        exit 0
-      fi
-      if [[ -e "$state_dir" ]]; then
-        echo "Kepos publisher state is partial or invalid: $state_dir" >&2
-        exit 1
-      fi
-
       umask 077
-      mkdir -p "$(dirname "$state_dir")"
       exec ${lib.getExe cfg.package} setup publisher \
-        --state "$state_dir" \
-        --config ${lib.escapeShellArg (toString configFile)}
+        --state "$state_dir"
     '';
   };
 in {

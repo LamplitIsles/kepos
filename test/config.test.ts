@@ -2,72 +2,98 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  parsePublisherIdentity,
+  parsePublisherService,
+  parsePublisherServices,
   parseSubscriberContact,
-  parsePublisherManifest,
-  parsePublisherConfig,
+  serializePublisherIdentity,
   serializeSubscriberContact,
-  serializePublisherManifest,
-  serializePublisherConfig,
 } from "../src/config.js";
 
 const publicKey = "11".repeat(32);
 const otherPublicKey = "22".repeat(32);
 const seed = "33".repeat(32);
 
-test("publisher config accepts an empty subscriber-device list as deny-all", () => {
-  assert.deepEqual(parsePublisherConfig({ seed, subscribers: [] }), { seed, subscribers: [] });
-});
-
-test("publisher config round-trips seed and labeled subscriber devices", () => {
-  const config = {
-    seed,
-    subscribers: [
-      { label: "phone", publicKey },
-      { label: "tablet", publicKey: otherPublicKey },
-    ],
-  };
-
-  assert.deepEqual(parsePublisherConfig(JSON.parse(serializePublisherConfig(config))), config);
+test("publisher identity round-trips one strict seed", () => {
+  const identity = { seed };
+  assert.deepEqual(
+    parsePublisherIdentity(JSON.parse(serializePublisherIdentity(identity))),
+    identity,
+  );
+  assert.deepEqual(Object.keys(JSON.parse(serializePublisherIdentity(identity))), [
+    "seed",
+  ]);
 });
 
 for (const [name, value] of [
-  ["missing", { seed }],
-  ["null", { seed, subscribers: null }],
-  ["non-array", { seed, subscribers: publicKey }],
+  ["missing seed", {}],
+  ["null", null],
+  ["non-object", seed],
+  ["extra field", { seed, subscribers: [] }],
+  ["malformed seed", { seed: "ff".repeat(31) }],
+  ["uppercase seed", { seed: "ab".repeat(32).toUpperCase() }],
 ] as const) {
-  test(`publisher config rejects ${name} subscribers instead of accepting fail-open state`, () => {
-    assert.throws(() => parsePublisherConfig(value), /subscriber/i);
+  test(`publisher identity rejects ${name}`, () => {
+    assert.throws(() => parsePublisherIdentity(value), /identity|seed|field/i);
   });
 }
 
-for (const malformed of ["", "0", "gg".repeat(32), "aa".repeat(31), "AA".repeat(32)]) {
-  test(`publisher config rejects malformed subscriber key ${JSON.stringify(malformed)}`, () => {
+test("publisher service parser preserves TCP and HTTP policy", () => {
+  assert.deepEqual(
+    parsePublisherServices([
+      { id: "ssh", name: "SSH", targetPort: 22 },
+      {
+        id: "web",
+        name: "Web",
+        kind: "http",
+        targetPort: 8080,
+        allow: [publicKey],
+      },
+    ]),
+    [
+      { id: "ssh", name: "SSH", kind: "tcp", targetPort: 22 },
+      {
+        id: "web",
+        name: "Web",
+        kind: "http",
+        targetPort: 8080,
+        allow: [publicKey],
+      },
+    ],
+  );
+  assert.deepEqual(
+    parsePublisherService({ id: "other", name: "Other", targetPort: 1 }),
+    { id: "other", name: "Other", kind: "tcp", targetPort: 1 },
+  );
+});
+
+test("publisher services reject duplicate, reserved, or unsafe identifiers", () => {
+  const service = { id: "ssh", name: "SSH", targetPort: 22 };
+  for (const services of [
+    [service, service],
+    [{ ...service, id: "home" }],
+    [{ ...service, id: "../ssh" }],
+  ]) {
     assert.throws(
-      () => parsePublisherConfig({ seed, subscribers: [{ label: "device", publicKey: malformed }] }),
-      /publicKey|subscriber/i,
+      () => parsePublisherServices(services),
+      /service|id|duplicate|reserved/i,
     );
-  });
-}
-
-test("publisher config rejects malformed publisher seeds", () => {
-  assert.throws(() => parsePublisherConfig({ seed: "ff".repeat(31), subscribers: [] }), /seed/i);
+  }
 });
 
-test("publisher config contains no separate publisher or person identity key", () => {
-  const serialized = JSON.parse(serializePublisherConfig({ seed, subscribers: [{ label: "device", publicKey }] })) as Record<
-    string,
-    unknown
-  >;
-
-  assert.deepEqual(Object.keys(serialized).sort(), ["seed", "subscribers"]);
-  assert.equal("publisherKey" in serialized, false);
-  assert.equal("personKey" in serialized, false);
-});
-
-test("publisher config rejects fields outside the native seed and subscriber shape", () => {
+test("publisher services reject arbitrary targets and malformed allowlists", () => {
+  const base = { id: "ssh", name: "SSH", targetPort: 22 };
   assert.throws(
-    () => parsePublisherConfig({ seed, subscribers: [], secretKey: "ff".repeat(64) }),
-    /field|property|shape/i,
+    () => parsePublisherService({ ...base, targetHost: "0.0.0.0" }),
+    /field|targetHost/i,
+  );
+  assert.throws(
+    () => parsePublisherService({ ...base, targetPort: 0 }),
+    /targetPort/i,
+  );
+  assert.throws(
+    () => parsePublisherService({ ...base, allow: ["ab".repeat(32).toUpperCase()] }),
+    /allow/i,
   );
 });
 
@@ -81,90 +107,5 @@ test("subscriber contact round-trips one pinned publisher key", () => {
   assert.deepEqual(
     parseSubscriberContact(JSON.parse(serializeSubscriberContact(contact))),
     contact,
-  );
-});
-
-test("publisher manifest round-trips one config and loopback TCP services", () => {
-  const manifest = {
-    displayName: "kosmos",
-    publisherConfig: "publisher.json",
-    services: [
-      {
-        id: "ssh",
-        name: "SSH",
-        kind: "tcp" as const,
-        targetPort: 22,
-      },
-    ],
-  };
-
-  assert.deepEqual(
-    parsePublisherManifest(JSON.parse(serializePublisherManifest(manifest))),
-    manifest,
-  );
-});
-
-test("publisher manifest rejects duplicate, reserved, or unsafe service identifiers", () => {
-  const service = {
-    id: "ssh",
-    name: "SSH",
-    kind: "tcp",
-    targetPort: 22,
-  };
-
-  for (const services of [
-    [service, service],
-    [{ ...service, id: "home" }],
-    [{ ...service, id: "../ssh" }],
-  ]) {
-    assert.throws(
-      () =>
-        parsePublisherManifest({
-          displayName: "kosmos",
-          publisherConfig: "publisher.json",
-          services,
-        }),
-      /service|id|duplicate|reserved/i,
-    );
-  }
-});
-
-test("publisher manifest rejects arbitrary targets and unsafe config paths", () => {
-  const base = {
-    displayName: "kosmos",
-    publisherConfig: "publisher.json",
-    services: [
-      {
-        id: "ssh",
-        name: "SSH",
-        kind: "tcp",
-        targetPort: 22,
-      },
-    ],
-  };
-
-  assert.throws(
-    () =>
-      parsePublisherManifest({
-        ...base,
-        services: [{ ...base.services[0], targetHost: "0.0.0.0" }],
-      }),
-    /field|targetHost/i,
-  );
-  assert.throws(
-    () =>
-      parsePublisherManifest({
-        ...base,
-        publisherConfig: "../publisher.json",
-      }),
-    /config/i,
-  );
-  assert.throws(
-    () =>
-      parsePublisherManifest({
-        ...base,
-        services: [{ ...base.services[0], targetPort: 0 }],
-      }),
-    /targetPort/i,
   );
 });

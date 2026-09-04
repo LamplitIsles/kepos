@@ -1,5 +1,9 @@
 # ADR 0007: Pair on the final publisher connection
 
+> Superseded in part by [ADR 0010](0010-publisher-identity-state-and-toml-policy.md):
+> publisher policy is TOML-only, so pairing approval never updates publisher
+> state.
+
 Status: Accepted
 
 Date: 2026-07-25
@@ -71,8 +75,8 @@ users retain explicit public-key setup.
   handshake work only while the user has an active invitation.
 - An invitation screenshot can submit one request before expiry, but it cannot
   grant access without local publisher approval.
-- TOML-owned desktop publishers update their fresh config atomically; state-owned
-  publishers update their existing state config.
+- Desktop publishers update their TOML policy atomically; publisher identity
+  state is never used as a policy persistence target.
 - Closing or replacing an invitation closes its unknown candidates. Expiry also
   closes candidates that connected without submitting a request while leaving
   the QR visibly expired until the user generates another.

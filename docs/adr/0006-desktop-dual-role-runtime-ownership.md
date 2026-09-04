@@ -4,8 +4,10 @@ Status: Accepted
 
 Date: 2026-07-25
 
-Superseded in part by ADR 0008. The original decision that Desktop roles do not
-share a DHT instance is replaced by device-owned shared HyperDHT transport.
+Superseded in part by ADR 0008 and ADR 0010. The original decision that
+Desktop roles do not share a DHT instance is replaced by device-owned shared
+HyperDHT transport. Its state-owned publisher-policy consequences are replaced
+by identity-only publisher state and TOML-only policy ownership.
 Separate role identities, state locks, no implicit self-connection, failure
 reporting, and native UI lifecycle remain in force.
 
@@ -47,8 +49,9 @@ until its network runtime has stopped. Startup and runtime failures are isolated
 one failed role does not stop the other or close the control window. Quit stops
 publisher first, then subscriber, and attempts every remaining cleanup step.
 
-The first desktop publisher slice reads existing publisher state. State setup,
-service editing, allowlist editing, and live pairing remain separate work.
+The first desktop publisher slice reads the seed-only publisher identity and
+receives its complete policy from TOML. State setup, service editing,
+allowlist editing, and live pairing remain separate work.
 On macOS, the same process owns a native menu-bar item and retains its single
 WebView control window when the red close button hides it.
 

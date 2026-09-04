@@ -51,15 +51,21 @@ Import and configure the module:
 ```
 
 The Home Manager module currently publishes only raw `tcp` services: its
-`services.<id>` schema has no `kind` option. Use a TOML or CLI publisher
-configuration for a `kind = "http"` target rather than adding an unsupported
-Nix attribute; see [the HTTP service contract](cli.md#http-service-device-authentication).
+`services.<id>` schema has no `kind` option. Use a TOML publisher configuration
+for a `kind = "http"` target rather than adding an unsupported Nix attribute;
+see [the HTTP service contract](cli.md#http-service-device-authentication).
 
-On first start, the user service creates publisher identity under
-`$XDG_STATE_HOME/kepos-neo/publisher`. Complete state is reused without
-rotation; partial state fails closed. The module generates public TOML policy
-in the Nix store. Private identity material is created later in the mutable
-state directory and never enters the store.
+On first start, the user service runs `setup publisher --state` to create the
+seed-only `publisher.json` under `$XDG_STATE_HOME/kepos-neo/publisher`.
+Repeated starts validate and reuse that identity without rotation; partial,
+extra, or malformed state fails closed. The module generates the complete
+publisher TOML policy in the Nix store and starts Kepos with that file. Private
+identity material is created later in the mutable state directory and never
+enters the store.
+
+Publisher state contains no display name, subscriber devices, services, or
+service manifest. Edit the generated TOML to change publisher policy; there are
+no state-policy mutation commands.
 
 The CLI is also available directly:
 

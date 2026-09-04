@@ -88,7 +88,9 @@ export async function ensureDesktopBootstrap(
     context.platform,
   );
   if (config === undefined) {
-    const bootstrap = await (context.readBootstrapAsset ?? readDesktopBootstrapAsset)(
+    const bootstrap = await (
+      context.readBootstrapAsset ?? readDesktopBootstrapAsset
+    )(
       desktopBootstrapAssetPath(
         context.executablePath ?? process.execPath,
         context.platform,
@@ -128,9 +130,6 @@ export async function ensureDesktopRoleState(
     config.publisher?.enabled === true
       ? await (context.ensurePublisher ?? ensurePublisher)({
           stateDir: paths.publisherStateDir,
-          displayName: config.publisher.displayName,
-          subscriberDevices: config.publisher.subscribers,
-          services: config.publisher.services,
         })
       : undefined;
   const subscriber =

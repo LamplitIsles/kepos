@@ -8,27 +8,21 @@ import {
   type Server as HttpServer,
 } from "node:http";
 import type { Duplex } from "node:stream";
-import {
-  createConnection,
-  createServer,
-  type Server,
-} from "node:net";
+import { createConnection, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import {
   startPublisher,
+  type PublisherRuntimePolicy,
   type RunningPublisher,
 } from "../src/runtime/publisher.js";
 import {
   startSubscriber,
   type RunningSubscriber,
 } from "../src/runtime/subscriber.js";
-import {
-  loadPublisherState,
-  setupPublisher,
-} from "../src/state/publisher.js";
+import { setupPublisher } from "../src/state/publisher.js";
 import {
   setSubscriberPendingPublisher,
   setSubscriberPublisher,
@@ -59,7 +53,8 @@ interface HyperDhtTestnet {
 type CreateHyperDhtTestnet = (size: number) => Promise<HyperDhtTestnet>;
 
 const require = createRequire(import.meta.url);
-const createHyperDhtTestnet = require("hyperdht/testnet") as CreateHyperDhtTestnet;
+const createHyperDhtTestnet =
+  require("hyperdht/testnet") as CreateHyperDhtTestnet;
 const noLog = (): void => undefined;
 
 function subscriberDevices(
@@ -69,6 +64,26 @@ function subscriberDevices(
     publicKey,
     label: `subscriber-${index + 1}`,
   }));
+}
+
+async function setupTestPublisher(options: {
+  stateDir: string;
+  displayName: string;
+  subscriberDevices: Array<{ publicKey: string; label: string }>;
+  services: PublisherRuntimePolicy["services"];
+}): Promise<{
+  publisherSetup: Awaited<ReturnType<typeof setupPublisher>>;
+  policy: PublisherRuntimePolicy;
+}> {
+  const publisherSetup = await setupPublisher({ stateDir: options.stateDir });
+  return {
+    publisherSetup,
+    policy: {
+      displayName: options.displayName,
+      subscribers: options.subscriberDevices,
+      services: options.services,
+    },
+  };
 }
 
 async function listen(server: Server | HttpServer): Promise<number> {
@@ -97,7 +112,9 @@ async function exchangeTcp(port: number, payload: string): Promise<string> {
     const socket = createConnection({ host: "127.0.0.1", port });
     let response = "";
     socket.setEncoding("utf8");
-    socket.setTimeout(5_000, () => socket.destroy(new Error("TCP exchange timed out")));
+    socket.setTimeout(5_000, () =>
+      socket.destroy(new Error("TCP exchange timed out")),
+    );
     socket.once("connect", () => socket.end(payload));
     socket.on("data", (chunk) => {
       response += chunk;
@@ -139,7 +156,10 @@ async function requestWithHost(
   });
 }
 
-async function waitForHttpOk(url: string, timeoutMs = 8_000): Promise<Response> {
+async function waitForHttpOk(
+  url: string,
+  timeoutMs = 8_000,
+): Promise<Response> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
@@ -282,7 +302,9 @@ async function readExactly(
     };
     socket.on("data", onData);
     socket.once("error", reject);
-    socket.once("close", () => reject(new Error("raw WebSocket socket closed")));
+    socket.once("close", () =>
+      reject(new Error("raw WebSocket socket closed")),
+    );
   });
 }
 
@@ -326,13 +348,16 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
       "content-type": "audio/flac",
       "x-request-path": request.url ?? "/",
     });
-    response.end(status === 200 ? Buffer.alloc(64 * 1024, 7) : `HTTP ${status}`);
+    response.end(
+      status === 200 ? Buffer.alloc(64 * 1024, 7) : `HTTP ${status}`,
+    );
   });
   const navidromeAuthorizations: string[][] = [];
   navidromeServer.on("request", (request) => {
     const values: string[] = [];
     for (let index = 0; index < request.rawHeaders.length; index += 2) {
-      if (request.rawHeaders[index]?.toLowerCase() !== "authorization") continue;
+      if (request.rawHeaders[index]?.toLowerCase() !== "authorization")
+        continue;
       const value = request.rawHeaders[index + 1];
       if (value !== undefined) values.push(value);
     }
@@ -353,7 +378,7 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
     });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -377,6 +402,7 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       observe: (event) => publisherEvents.push(event),
     });
@@ -403,9 +429,7 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
       sshResponse,
     ] = await Promise.all([
       fetch(`${subscriber.home.url}/healthz`),
-      fetch(
-        `http://navidrome.localhost:${subscriber.home.port}/rest/stream`,
-      ),
+      fetch(`http://navidrome.localhost:${subscriber.home.port}/rest/stream`),
       requestWithHost(
         subscriber.home.port,
         "navidrome.kepos.internal",
@@ -467,21 +491,19 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
       ({ event }) => event === "channel.open-ok",
     );
     assert.ok(subscriberEvents.some(({ event }) => event === "outer.attempt"));
-    assert.ok(subscriberEvents.some(({ event }) => event === "outer.handshake"));
+    assert.ok(
+      subscriberEvents.some(({ event }) => event === "outer.handshake"),
+    );
     assert.ok(subscriberConnected?.outerId);
     assert.equal(subscriberConnected.route, "auto");
     assert.equal(subscriberChannel?.outerId, subscriberConnected.outerId);
     assert.equal(
-      typeof (subscriberChannel?.transport as { udx?: { rtt?: unknown } })
-        ?.udx?.rtt,
+      typeof (subscriberChannel?.transport as { udx?: { rtt?: unknown } })?.udx
+        ?.rtt,
       "number",
     );
-    assert.ok(
-      publisherEvents.some(({ event }) => event === "outer.accepted"),
-    );
-    assert.ok(
-      publisherEvents.some(({ event }) => event === "outer.connected"),
-    );
+    assert.ok(publisherEvents.some(({ event }) => event === "outer.accepted"));
+    assert.ok(publisherEvents.some(({ event }) => event === "outer.connected"));
   } catch (error) {
     testError = error;
   }
@@ -495,7 +517,9 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -550,8 +574,10 @@ test("forwards fragmented persistent HTTP/1.1 requests with per-request identity
 
   try {
     const targetPort = await listen(target);
-    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -573,6 +599,7 @@ test("forwards fragmented persistent HTTP/1.1 requests with per-request identity
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -584,7 +611,10 @@ test("forwards fragmented persistent HTTP/1.1 requests with per-request identity
       log: noLog,
     });
 
-    client = createConnection({ host: "127.0.0.1", port: subscriber.home.port });
+    client = createConnection({
+      host: "127.0.0.1",
+      port: subscriber.home.port,
+    });
     await once(client, "connect");
     const readResponse = persistentResponseReader(client);
     const firstBody = Buffer.from("first-body");
@@ -682,7 +712,9 @@ test("forwards fragmented persistent HTTP/1.1 requests with per-request identity
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -723,8 +755,10 @@ test("delivers a target response after an HTTP client half-closes", async () => 
 
   try {
     const targetPort = await listen(target);
-    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -746,6 +780,7 @@ test("delivers a target response after an HTTP client half-closes", async () => 
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -783,7 +818,9 @@ test("delivers a target response after an HTTP client half-closes", async () => 
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -804,7 +841,8 @@ test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", a
   target.on("upgrade", (request, socket, head) => {
     const values: string[] = [];
     for (let index = 0; index < request.rawHeaders.length; index += 2) {
-      if (request.rawHeaders[index]?.toLowerCase() !== "authorization") continue;
+      if (request.rawHeaders[index]?.toLowerCase() !== "authorization")
+        continue;
       const value = request.rawHeaders[index + 1];
       if (value !== undefined) values.push(value);
     }
@@ -828,8 +866,10 @@ test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", a
 
   try {
     const targetPort = await listen(target);
-    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -851,6 +891,7 @@ test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", a
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -862,7 +903,10 @@ test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", a
       log: noLog,
     });
 
-    client = createConnection({ host: "127.0.0.1", port: subscriber.home.port });
+    client = createConnection({
+      host: "127.0.0.1",
+      port: subscriber.home.port,
+    });
     await once(client, "connect");
     const handshake = Buffer.from(
       "GET /socket HTTP/1.1\r\nHost: websocket.kepos.internal\r\nUpgrade: WebSocket\r\nConnection: Upgrade\r\nAuthorization: Bearer forged\r\naUtHoRiZaTiOn: Basic forged\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGVzdC1rZXk=\r\n\r\n",
@@ -896,7 +940,9 @@ test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", a
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -923,8 +969,10 @@ test("subscriber stop closes an active service tunnel before its listener", asyn
 
   try {
     const targetPort = await listen(target);
-    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -939,6 +987,7 @@ test("subscriber stop closes an active service tunnel before its listener", asyn
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -989,7 +1038,7 @@ test("one publisher accepts multiple subscribers with independent connections", 
       setupSubscriber({ stateDir: subscriberAState }),
       setupSubscriber({ stateDir: subscriberBState }),
     ]);
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([
@@ -1015,6 +1064,7 @@ test("one publisher accepts multiple subscribers with independent connections", 
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriberA = await startSubscriber({
@@ -1052,7 +1102,9 @@ test("one publisher accepts multiple subscribers with independent connections", 
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -1077,7 +1129,7 @@ test("publisher replaces an older outer for the same subscriber key", async () =
     const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
     });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -1092,6 +1144,7 @@ test("publisher replaces an older outer for the same subscriber key", async () =
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       observe: (event) => {
         publisherEvents.push(event);
@@ -1131,8 +1184,7 @@ test("publisher replaces an older outer for the same subscriber key", async () =
     assert.equal(publisher.activeSubscribers(), 1);
     assert.ok(publisher.acceptedConnections() >= 2);
     assert.equal(
-      publisherEvents.filter(({ event }) => event === "outer.replaced")
-        .length,
+      publisherEvents.filter(({ event }) => event === "outer.replaced").length,
       1,
     );
   } catch (error) {
@@ -1147,7 +1199,9 @@ test("publisher replaces an older outer for the same subscriber key", async () =
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -1173,7 +1227,7 @@ test("publisher denies a non-current outer using the same subscriber key", async
     const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
     });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -1188,6 +1242,7 @@ test("publisher denies a non-current outer using the same subscriber key", async
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -1237,7 +1292,9 @@ test("publisher denies a non-current outer using the same subscriber key", async
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -1270,7 +1327,7 @@ test("service allowlists restrict channels and subscriber registries", async () 
       setupSubscriber({ stateDir: allowedState }),
       setupSubscriber({ stateDir: deniedState }),
     ]);
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([
@@ -1398,7 +1455,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
       setupSubscriber({ stateDir: allowedState }),
       setupSubscriber({ stateDir: removedState }),
     ]);
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "original",
       subscriberDevices: subscriberDevices([
@@ -1530,7 +1587,10 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
     };
     assert.deepEqual(
       updatedRegistry.services.map(({ id, name }) => [id, name]),
-      [["home", "Home"], ["echo", "Echo B"]],
+      [
+        ["home", "Home"],
+        ["echo", "Echo B"],
+      ],
     );
     assert.equal(await exchangeTcp(allowedEcho.port, "new"), "target-b:new");
     existing.write("after");
@@ -1553,10 +1613,17 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
       ],
     });
     const restrictedRegistry = (await fetch(registryUrl).then((response) =>
-      response.json())) as { services: Array<{ id: string }> };
-    assert.deepEqual(restrictedRegistry.services.map(({ id }) => id), ["home"]);
+      response.json(),
+    )) as { services: Array<{ id: string }> };
+    assert.deepEqual(
+      restrictedRegistry.services.map(({ id }) => id),
+      ["home"],
+    );
     assert.equal(await exchangeTcp(allowedEcho.port, "denied"), "");
-    assert.equal(await exchangeTcp(removedEcho.port, "allowed"), "target-b:allowed");
+    assert.equal(
+      await exchangeTcp(removedEcho.port, "allowed"),
+      "target-b:allowed",
+    );
 
     await publisher.applyPolicy({
       displayName: "retargeted",
@@ -1570,20 +1637,22 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
         },
       ],
     });
-    await waitFor(
-      () => {
-        const keys = publisher?.status().activeSubscriberKeys;
-        return keys?.length === 1 && keys[0] === allowedSetup.publicKey;
-      },
-      "global ACL removal did not leave the expected subscriber active",
-    );
-    assert.deepEqual(publisher.status().activeSubscriberKeys, [allowedSetup.publicKey]);
+    await waitFor(() => {
+      const keys = publisher?.status().activeSubscriberKeys;
+      return keys?.length === 1 && keys[0] === allowedSetup.publicKey;
+    }, "global ACL removal did not leave the expected subscriber active");
+    assert.deepEqual(publisher.status().activeSubscriberKeys, [
+      allowedSetup.publicKey,
+    ]);
     await waitFor(
       () => removed?.status().connection === "reconnecting",
       "removed subscriber did not get a reconnect opportunity",
     );
     assert.equal(await exchangeTcp(removedEcho.port, "reconnect"), "");
-    assert.equal(await exchangeTcp(allowedEcho.port, "unaffected"), "target-b:unaffected");
+    assert.equal(
+      await exchangeTcp(allowedEcho.port, "unaffected"),
+      "target-b:unaffected",
+    );
     assert.equal((await fetch(`${allowed.home.url}/healthz`)).status, 200);
     assert.equal((await fetch(`${publisher.home.url}/healthz`)).status, 200);
   } finally {
@@ -1617,7 +1686,7 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
       setupSubscriber({ stateDir: allowedState }),
       setupSubscriber({ stateDir: unknownState }),
     ]);
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([allowedSetup.publicKey]),
@@ -1638,21 +1707,19 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       observe: (event) => publisherEvents.push(event),
     });
-    await assert.rejects(
-      async () => {
-        unknown = await startSubscriber({
-          stateDir: unknownState,
-          bootstrap: testnet?.bootstrap,
-          gatewayPort: 0,
-          services: [],
-          log: noLog,
-        });
-      },
-      /firewall|denied|connection|handshake|closed/i,
-    );
+    await assert.rejects(async () => {
+      unknown = await startSubscriber({
+        stateDir: unknownState,
+        bootstrap: testnet?.bootstrap,
+        gatewayPort: 0,
+        services: [],
+        log: noLog,
+      });
+    }, /firewall|denied|connection|handshake|closed/i);
     assert.equal(publisher.acceptedConnections(), 0);
     assert.equal(publisher.activeSubscribers(), 0);
     const rejected = publisherEvents.find(
@@ -1684,7 +1751,9 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -1704,10 +1773,13 @@ test("publisher approves an unknown subscriber on its pairing outer", async () =
   let subscriberMux: RunningMuxSubscriber | undefined;
   let testError: unknown;
   const pairingEvents: Observation[] = [];
+  let persistedSubscribers: Array<{ publicKey: string; label: string }> = [];
 
   try {
-    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: [],
@@ -1722,8 +1794,12 @@ test("publisher approves an unknown subscriber on its pairing outer", async () =
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       observe: (event) => pairingEvents.push(event),
+      persistSubscribers: async (subscribers) => {
+        persistedSubscribers = subscribers;
+      },
     });
     const invitation = publisher.createPairingInvitation();
     const parsed = parsePairingInvitation(invitation.uri);
@@ -1760,19 +1836,14 @@ test("publisher approves an unknown subscriber on its pairing outer", async () =
       () => publisher?.activeSubscribers() === 1,
       "approved subscriber did not become active",
     );
-    const persisted = await loadPublisherState(publisherState);
-    assert.deepEqual(persisted.config.subscribers, [
+    assert.deepEqual(persistedSubscribers, [
       { publicKey: subscriberSetup.publicKey, label: "Neil's test device" },
     ]);
     assert.deepEqual(
       pairingEvents
         .filter(({ event }) => event.startsWith("pairing."))
         .map(({ event }) => event),
-      [
-        "pairing.invitation-created",
-        "pairing.requested",
-        "pairing.approved",
-      ],
+      ["pairing.invitation-created", "pairing.requested", "pairing.approved"],
     );
     assert.equal(JSON.stringify(pairingEvents).includes(parsed.token), false);
   } catch (error) {
@@ -1787,7 +1858,9 @@ test("publisher approves an unknown subscriber on its pairing outer", async () =
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -1814,7 +1887,7 @@ test("publisher closes an idle pairing candidate when its invitation expires", a
 
   try {
     await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: [],
@@ -1830,6 +1903,7 @@ test("publisher closes an idle pairing candidate when its invitation expires", a
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       now: () => now,
       observe: (event) => pairingEvents.push(event),
@@ -1844,7 +1918,9 @@ test("publisher closes an idle pairing candidate when its invitation expires", a
     const invitation = publisher.createPairingInvitation();
     assert.equal(expiryTask?.delayMs, 120_000);
 
-    const keyPair = keyPairFromSecretKey(subscriberStateValue.identity.secretKey);
+    const keyPair = keyPairFromSecretKey(
+      subscriberStateValue.identity.secretKey,
+    );
     subscriberDht = createDht({ bootstrap: testnet.bootstrap, keyPair });
     candidateOuter = subscriberDht.connect(
       Buffer.from(publisherSetup.publisherKey, "hex"),
@@ -1872,9 +1948,7 @@ test("publisher closes an idle pairing candidate when its invitation expires", a
     });
     assert.equal(publisher.activeSubscribers(), 0);
     assert.equal(
-      pairingEvents.some(
-        ({ event }) => event === "pairing.invitation-expired",
-      ),
+      pairingEvents.some(({ event }) => event === "pairing.invitation-expired"),
       true,
     );
   } catch (error) {
@@ -1888,7 +1962,9 @@ test("publisher closes an idle pairing candidate when its invitation expires", a
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     const errors = [testError, ...cleanupErrors].filter(
@@ -1914,16 +1990,17 @@ test("publisher closes non-selected candidates when one reserves the invitation"
   let testError: unknown;
 
   try {
-    const [, , publisherSetup] = await Promise.all([
+    const [, , publisherBundle] = await Promise.all([
       setupSubscriber({ stateDir: selectedState }),
       setupSubscriber({ stateDir: idleState }),
-      setupPublisher({
+      setupTestPublisher({
         stateDir: publisherState,
         displayName: "kosmos",
         subscriberDevices: [],
         services: [],
       }),
     ]);
+    const { publisherSetup, policy } = publisherBundle;
     await Promise.all([
       setSubscriberPendingPublisher({
         stateDir: selectedState,
@@ -1940,6 +2017,7 @@ test("publisher closes non-selected candidates when one reserves the invitation"
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     const invitation = parsePairingInvitation(
@@ -1951,7 +2029,10 @@ test("publisher closes non-selected candidates when one reserves the invitation"
     ]);
     const selectedKeyPair = keyPairFromSecretKey(selected.identity.secretKey);
     const idleKeyPair = keyPairFromSecretKey(idle.identity.secretKey);
-    selectedDht = createDht({ bootstrap: testnet.bootstrap, keyPair: selectedKeyPair });
+    selectedDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: selectedKeyPair,
+    });
     idleDht = createDht({ bootstrap: testnet.bootstrap, keyPair: idleKeyPair });
     const selectedOuter = selectedDht.connect(
       Buffer.from(publisherSetup.publisherKey, "hex"),
@@ -1976,11 +2057,13 @@ test("publisher closes non-selected candidates when one reserves the invitation"
       authorized: false,
       heartbeat: false,
     });
-    void selectedMux.pair({
-      token: invitation.token,
-      label: "Selected phone",
-      platform: "test",
-    }).catch(() => undefined);
+    void selectedMux
+      .pair({
+        token: invitation.token,
+        label: "Selected phone",
+        platform: "test",
+      })
+      .catch(() => undefined);
 
     await waitFor(
       () => publisher?.pairingStatus().phase === "pending",
@@ -2003,7 +2086,9 @@ test("publisher closes non-selected candidates when one reserves the invitation"
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     const errors = [testError, ...cleanupErrors].filter(
@@ -2017,7 +2102,9 @@ test("publisher closes non-selected candidates when one reserves the invitation"
 });
 
 test("publisher persistence failure never authorizes the pairing candidate", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "kepos-pairing-persist-fail-"));
+  const root = await mkdtemp(
+    path.join(tmpdir(), "kepos-pairing-persist-fail-"),
+  );
   const publisherState = path.join(root, "publisher");
   const subscriberState = path.join(root, "subscriber");
   let testnet: HyperDhtTestnet | undefined;
@@ -2028,7 +2115,7 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
 
   try {
     await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: [],
@@ -2044,6 +2131,7 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       persistSubscribers: async () => {
         throw new Error("disk full");
@@ -2052,7 +2140,9 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
     const invitation = parsePairingInvitation(
       publisher.createPairingInvitation().uri,
     );
-    const keyPair = keyPairFromSecretKey(subscriberStateValue.identity.secretKey);
+    const keyPair = keyPairFromSecretKey(
+      subscriberStateValue.identity.secretKey,
+    );
     subscriberDht = createDht({ bootstrap: testnet.bootstrap, keyPair });
     const outer = subscriberDht.connect(
       Buffer.from(publisherSetup.publisherKey, "hex"),
@@ -2078,10 +2168,7 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
     assert.equal(publisher.activeSubscribers(), 0);
     assert.equal(publisher.pairingStatus().phase, "pending");
     await assert.rejects(() => subscriberMux!.open("home"), /not approved/i);
-    assert.deepEqual(
-      (await loadPublisherState(publisherState)).config.subscribers,
-      [],
-    );
+    assert.deepEqual(policy.subscribers, []);
 
     publisher.denyPairing();
     await assert.rejects(pairing, /denied|closed/i);
@@ -2100,7 +2187,9 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -2118,10 +2207,11 @@ test("subscriber runtime pairs and promotes its pending contact without reconnec
   let publisher: RunningPublisher | undefined;
   let subscriber: RunningSubscriber | undefined;
   let testError: unknown;
+  let persistedSubscribers: PublisherRuntimePolicy["subscribers"] | undefined;
 
   try {
     await setupSubscriber({ stateDir: subscriberState });
-    await setupPublisher({
+    const { policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: [],
@@ -2131,6 +2221,10 @@ test("subscriber runtime pairs and promotes its pending contact without reconnec
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
+      persistSubscribers: async (subscribers) => {
+        persistedSubscribers = subscribers;
+      },
       log: noLog,
     });
     const invitation = publisher.createPairingInvitation();
@@ -2156,7 +2250,17 @@ test("subscriber runtime pairs and promotes its pending contact without reconnec
 
     assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
     assert.equal(publisher.acceptedConnections(), 1);
-    assert.equal((await loadSubscriberState(subscriberState)).contact.label, "kosmos");
+    assert.deepEqual(persistedSubscribers, [
+      {
+        publicKey: (await loadSubscriberState(subscriberState)).identity
+          .publicKey,
+        label: "Neil's test device",
+      },
+    ]);
+    assert.equal(
+      (await loadSubscriberState(subscriberState)).contact.label,
+      "kosmos",
+    );
   } catch (error) {
     testError = error;
   }
@@ -2168,7 +2272,9 @@ test("subscriber runtime pairs and promotes its pending contact without reconnec
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -2188,8 +2294,10 @@ test("subscriber recovers a pending contact after publisher approval response is
   let testError: unknown;
 
   try {
-    const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const subscriberSetup = await setupSubscriber({
+      stateDir: subscriberState,
+    });
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -2204,6 +2312,7 @@ test("subscriber recovers a pending contact after publisher approval response is
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -2215,7 +2324,10 @@ test("subscriber recovers a pending contact after publisher approval response is
     });
 
     assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
-    assert.equal((await loadSubscriberState(subscriberState)).contact.label, "kosmos");
+    assert.equal(
+      (await loadSubscriberState(subscriberState)).contact.label,
+      "kosmos",
+    );
   } catch (error) {
     testError = error;
   }
@@ -2227,7 +2339,9 @@ test("subscriber recovers a pending contact after publisher approval response is
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(
@@ -2251,7 +2365,7 @@ test("subscriber reconnects in the background without changing local ports", asy
     const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
     });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -2266,6 +2380,7 @@ test("subscriber reconnects in the background without changing local ports", asy
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -2283,6 +2398,7 @@ test("subscriber reconnects in the background without changing local ports", asy
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
 
@@ -2308,7 +2424,9 @@ test("subscriber reconnects in the background without changing local ports", asy
     rm(root, { recursive: true, force: true }),
   ]);
   const cleanupErrors = cleanup
-    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    )
     .map((result) => result.reason as unknown);
   if (testError || cleanupErrors.length > 0) {
     throw new AggregateError(

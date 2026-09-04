@@ -1,19 +1,9 @@
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { parse, stringify } from "smol-toml";
 
-import {
-  parsePublisherConfig,
-  parsePublisherManifest,
-  parseSubscriberDevices,
-} from "./config.js";
+import { parseSubscriberDevices, parsePublisherServices } from "./config.js";
 import type { DhtAddress } from "./mux/hyperdht.js";
 import { parseRoute, type Route } from "./mux/route.js";
 import {
@@ -22,10 +12,7 @@ import {
 } from "./home/gateway-options.js";
 import type { PublisherRuntimePolicy } from "./runtime/publisher.js";
 import type { SubscriberService } from "./runtime/subscriber.js";
-import {
-  parseBootstrapValues,
-  parseSubscriberService,
-} from "./cli/options.js";
+import { parseBootstrapValues, parseSubscriberService } from "./cli/options.js";
 import { defaultKeposConfigPath } from "./platform/paths.js";
 import { replaceFileAtomically } from "./state/files.js";
 
@@ -138,9 +125,10 @@ export function serializeKeposConfig(config: KeposConfig): string {
         ? {}
         : { enabled: config.publisher.enabled }),
       display_name: config.publisher.displayName,
-      subscribers: config.publisher.subscribers.map(
-        ({ label, publicKey }) => ({ label, public_key: publicKey }),
-      ),
+      subscribers: config.publisher.subscribers.map(({ label, publicKey }) => ({
+        label,
+        public_key: publicKey,
+      })),
       services: config.publisher.services.map(
         ({ id, name, kind, targetPort, allow }) => ({
           id,
@@ -224,14 +212,19 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
     ["publisher"],
     ["enabled", "display_name", "subscribers", "services"],
   );
+  if (
+    typeof publisher.display_name !== "string" ||
+    publisher.display_name.trim().length === 0
+  ) {
+    throw new Error("publisher.display_name must be a non-empty string");
+  }
   if (!Array.isArray(publisher.subscribers)) {
     throw new Error("publisher.subscribers must be an array");
   }
   if (!Array.isArray(publisher.services)) {
     throw new Error("publisher.services must be an array");
   }
-
-  const services = publisher.services.map((value, index) => {
+  const rawServices = publisher.services.map((value, index) => {
     const service = requireTable(value, `publisher.services[${index}]`);
     rejectUnknownFields(
       service,
@@ -246,20 +239,10 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
       ...(service.allow === undefined ? {} : { allow: service.allow }),
     };
   });
-  const manifest = parsePublisherManifest({
-    displayName: publisher.display_name,
-    publisherConfig: "publisher.json",
-    services: services.map((service) => ({
-      ...service,
-      kind: service.kind ?? "tcp",
-    })),
-  });
+  const services = parsePublisherServices(rawServices, "publisher.services");
   const subscribers = parseSubscriberDevices(
     publisher.subscribers.map((value, index) => {
-      const subscriber = requireTable(
-        value,
-        `publisher.subscribers[${index}]`,
-      );
+      const subscriber = requireTable(value, `publisher.subscribers[${index}]`);
       rejectUnknownFields(
         subscriber,
         ["publisher", `subscribers[${index}]`],
@@ -272,20 +255,16 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
     }),
     "publisher.subscribers",
   );
-  parsePublisherConfig({
-    seed: "00".repeat(32),
-    subscribers,
-  });
   return {
     ...(publisher.enabled === undefined
       ? {}
       : { enabled: parseBoolean(publisher.enabled, "publisher.enabled") }),
-    displayName: manifest.displayName,
+    displayName: publisher.display_name,
     subscribers,
-    services: manifest.services.map(({ id, name, kind, targetPort, allow }, index) => ({
+    services: services.map(({ id, name, kind, targetPort, allow }, index) => ({
       id,
       name,
-      ...(services[index]?.kind === undefined ? {} : { kind }),
+      ...(rawServices[index]?.kind === undefined ? {} : { kind }),
       targetPort,
       ...(allow === undefined ? {} : { allow }),
     })),
@@ -395,10 +374,7 @@ function parsePort(value: unknown, field: string, allowZero = false): number {
   return value;
 }
 
-function requireTable(
-  value: unknown,
-  name: string,
-): Record<string, unknown> {
+function requireTable(value: unknown, name: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${name} must be a TOML table`);
   }

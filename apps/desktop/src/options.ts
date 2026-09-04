@@ -5,10 +5,7 @@ import {
   saveKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
-import {
-  ensureDesktopBootstrap,
-  ensureDesktopRoleState,
-} from "./bootstrap.js";
+import { ensureDesktopBootstrap, ensureDesktopRoleState } from "./bootstrap.js";
 import { defaultDesktopPaths } from "./paths.js";
 import { DEFAULT_GATEWAY_PORT } from "../../../src/home/gateway.js";
 import type { DhtAddress } from "../../../src/mux/hyperdht.js";
@@ -37,7 +34,7 @@ export interface DesktopSubscriberOptions {
 export interface DesktopPublisherOptions {
   stateDir: string;
   configPath?: string;
-  policy?: PublisherRuntimePolicy;
+  policy: PublisherRuntimePolicy;
 }
 
 export interface DesktopOptions {
@@ -157,6 +154,11 @@ export function parseDesktopOptions(
   if (subscriberStateDir === undefined && publisherStateDir === undefined) {
     throw new Error("desktop requires at least one role");
   }
+  if (publisherStateDir !== undefined) {
+    throw new Error(
+      "desktop publisher requires a complete [publisher] policy in TOML",
+    );
+  }
   if (subscriberStateDir === undefined && services.length > 0) {
     throw new Error("subscriber service requires --subscriber-state");
   }
@@ -165,9 +167,6 @@ export function parseDesktopOptions(
   }
 
   return {
-    ...(publisherStateDir
-      ? { publisher: { stateDir: publisherStateDir } }
-      : {}),
     ...(subscriberStateDir
       ? {
           subscriber: {

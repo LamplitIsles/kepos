@@ -79,10 +79,12 @@ id = "ssh"
 local_port = 2222
 ```
 
-Use `--config <path>` for an isolated configuration. Role-explicit state flags
-remain available for smoke tests. Bootstrap is device-wide. A publisher policy
-or subscriber binding change restarts only that role and preserves the shared
-node; a bootstrap change replaces the node and restarts every enabled role.
+Use `--config <path>` for an isolated configuration. Publisher startup requires
+that file (or the default) to contain a complete `[publisher]` table; state
+flags alone cannot supply publisher policy. Bootstrap is device-wide. A
+publisher policy or subscriber binding change restarts only that role and
+preserves the shared node; a bootstrap change replaces the node and restarts
+every enabled role.
 One role's startup failure remains visible without stopping a healthy sibling.
 
 ## Native surface
@@ -115,4 +117,5 @@ Lifecycle and pairing decisions are documented in
 [ADR 0004](../adr/0004-two-level-subscriber-runtime-locking.md),
 [ADR 0006](../adr/0006-desktop-dual-role-runtime-ownership.md),
 [ADR 0007](../adr/0007-pair-on-the-final-publisher-connection.md), and
-[ADR 0008](../adr/0008-share-one-hyperdht-node-per-device-runtime.md).
+[ADR 0008](../adr/0008-share-one-hyperdht-node-per-device-runtime.md), and
+[ADR 0010](../adr/0010-publisher-identity-state-and-toml-policy.md).

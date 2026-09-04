@@ -28,7 +28,7 @@ import {
   type StartSubscriberOptions,
   type SubscriberRuntimeStatus,
 } from "../../../src/runtime/subscriber.js";
-import { loadPublisherState } from "../../../src/state/publisher.js";
+import { loadPublisherIdentity } from "../../../src/state/publisher.js";
 import { loadSubscriberConnectionState } from "../../../src/state/subscriber.js";
 import type { SubscriberDevice } from "../../../src/config.js";
 import type { Observation } from "../../../src/mux/observability.js";
@@ -52,7 +52,7 @@ export interface StartDesktopPublisherOptions {
   stateDir: string;
   configPath?: string;
   lock?: RuntimeLock;
-  policy?: PublisherRuntimePolicy;
+  policy: PublisherRuntimePolicy;
 }
 
 export interface StartDesktopSubscriberOptions {
@@ -84,7 +84,7 @@ export interface DesktopRuntimeDependencies {
   createDht: typeof createDht;
   acquirePublisherLock(stateDir: string): Promise<RuntimeLock>;
   acquireSubscriberLock(stateDir: string): Promise<RuntimeLock>;
-  loadPublisherState: typeof loadPublisherState;
+  loadPublisherIdentity: typeof loadPublisherIdentity;
   loadSubscriberConnectionState: typeof loadSubscriberConnectionState;
   startPublisher(options: StartPublisherOptions): Promise<RunningPublisher>;
   startSubscriber(options: StartSubscriberOptions): Promise<RunningSubscriber>;
@@ -108,15 +108,13 @@ export interface RunningDesktopRuntime {
   stop(): Promise<void>;
 }
 
-type RoleStartResult =
-  | { ok: true }
-  | { ok: false; error: unknown };
+type RoleStartResult = { ok: true } | { ok: false; error: unknown };
 
 const defaultDependencies: DesktopRuntimeDependencies = {
   createDht,
   acquirePublisherLock: acquirePublisherRuntimeLock,
   acquireSubscriberLock: acquireSubscriberRuntimeLock,
-  loadPublisherState,
+  loadPublisherIdentity,
   loadSubscriberConnectionState,
   startPublisher,
   startSubscriber,
@@ -179,23 +177,20 @@ export async function startDesktopRuntime(
   let pollTask: Promise<void> | undefined;
   let reconfigureTail = Promise.resolve();
   let stopTask: Promise<void> | undefined;
-  let pairingInvitation:
-    | { expiresAt: number; qrSvg: string }
-    | undefined;
+  let pairingInvitation: { expiresAt: number; qrSvg: string } | undefined;
   let pairingError: string | undefined;
 
   const snapshot = (): DesktopSnapshot => ({
     type: "snapshot",
     appPhase,
-    ...(subscriberRole ? { subscriber: cloneSubscriberRole(subscriberRole) } : {}),
+    ...(subscriberRole
+      ? { subscriber: cloneSubscriberRole(subscriberRole) }
+      : {}),
     ...(publisherRole ? { publisher: clonePublisherRole(publisherRole) } : {}),
   });
   const publish = (): void => options.onSnapshot(snapshot());
   const subscriberAttemptLimit = 16;
-  const subscriberAttempts = new Map<
-    string,
-    { connected: boolean }
-  >();
+  const subscriberAttempts = new Map<string, { connected: boolean }>();
   let failedSubscriberSequences = 0;
   let connectionHintVisible = false;
 
@@ -249,7 +244,9 @@ export async function startDesktopRuntime(
     if (failedSubscriberSequences >= 3) setConnectionHint(true);
   };
 
-  const reportObservation = (observation: DesktopDiagnosticObservation): void => {
+  const reportObservation = (
+    observation: DesktopDiagnosticObservation,
+  ): void => {
     if ("component" in observation && observation.component === "kepos") {
       try {
         handleSubscriberObservation(observation);
@@ -283,28 +280,23 @@ export async function startDesktopRuntime(
       return publisherPreparation.result;
     }
     const currentOptions = publisherOptions;
+    if (!currentOptions.policy) {
+      return Promise.reject(
+        new Error(
+          "desktop publisher requires a complete [publisher] policy in TOML",
+        ),
+      );
+    }
     preparedPublisherRole = undefined;
     const result = (async (): Promise<PublisherRuntimePolicy> => {
       publisherLock ??= await dependencies.acquirePublisherLock(
         currentOptions.stateDir,
       );
-      const { config, manifest } = await dependencies.loadPublisherState(
+      const identity = await dependencies.loadPublisherIdentity(
         currentOptions.stateDir,
       );
-      const policy: PublisherRuntimePolicy =
-        currentOptions.policy ?? {
-          displayName: manifest.displayName,
-          subscribers: config.subscribers,
-          services: manifest.services.map(
-            ({ id, name, targetPort, allow }) => ({
-              id,
-              name,
-              targetPort,
-              ...(allow === undefined ? {} : { allow }),
-            }),
-          ),
-        };
-      const publisherKey = derivePublisherHomeKey(config.seed);
+      const policy = currentOptions.policy;
+      const publisherKey = derivePublisherHomeKey(identity.seed);
       preparedPublisherRole = {
         phase: "starting",
         displayName: policy.displayName,
@@ -380,7 +372,7 @@ export async function startDesktopRuntime(
         stateDir: publisherOptions.stateDir,
         dht: requireDht(dht),
         ...(roleObservation ? { observe: roleObservation } : {}),
-        ...(publisherOptions.policy ? { policy } : {}),
+        policy,
         ...(configPath
           ? {
               persistSubscribers: async (subscribers: SubscriberDevice[]) => {
@@ -469,7 +461,7 @@ export async function startDesktopRuntime(
         ? { ...status.pairing, ...pairingInvitation }
         : status.pairing.phase === "pending" && pairingError
           ? { ...status.pairing, error: pairingError }
-        : status.pairing;
+          : status.pairing;
     publisherRole = {
       ...current,
       phase: status.state === "stopped" ? "stopped" : "running",
@@ -526,7 +518,9 @@ export async function startDesktopRuntime(
           return;
         }
         if (next.publisher.publisherKey !== runningSubscriber.publisherKey) {
-          throw new Error("Home registry publisher does not match the connection");
+          throw new Error(
+            "Home registry publisher does not match the connection",
+          );
         }
         reportDeviceObservation(
           createDesktopRegistryObservation(
@@ -565,7 +559,8 @@ export async function startDesktopRuntime(
         }
         const registryOutcome =
           error instanceof Error &&
-          error.message === "Home registry publisher does not match the connection"
+          error.message ===
+            "Home registry publisher does not match the connection"
             ? "failed"
             : "retry";
         reportDeviceObservation(
@@ -586,10 +581,12 @@ export async function startDesktopRuntime(
         ) {
           resetIssuedGeneration = attemptGeneration;
           forcedResetStreak++;
-          nextForcedResetAt = dependencies.now() + jitteredDelay(
-            forcedResetDelay(forcedResetStreak),
-            dependencies.random(),
-          );
+          nextForcedResetAt =
+            dependencies.now() +
+            jitteredDelay(
+              forcedResetDelay(forcedResetStreak),
+              dependencies.random(),
+            );
           runningSubscriber.invalidateConnection(
             attemptGeneration,
             "home.registry.timeout",
@@ -613,10 +610,8 @@ export async function startDesktopRuntime(
   function scheduleRegistryRetry(): void {
     const delay = registryRetryDelay(registryRetryAttempt);
     registryRetryAttempt++;
-    nextRegistryAttemptAt = dependencies.now() + jitteredDelay(
-      delay,
-      dependencies.random(),
-    );
+    nextRegistryAttemptAt =
+      dependencies.now() + jitteredDelay(delay, dependencies.random());
   }
 
   async function releaseLock(role: "publisher" | "subscriber"): Promise<void> {
@@ -695,9 +690,7 @@ export async function startDesktopRuntime(
     publisherRole = configuration.publisher
       ? {
           ...withoutActiveSubscribers(
-            preparedPublisherRole ??
-              publisherRole ??
-              initialPublisherRole(),
+            preparedPublisherRole ?? publisherRole ?? initialPublisherRole(),
           ),
           phase: "failed",
           acceptedConnections: 0,
@@ -723,14 +716,12 @@ export async function startDesktopRuntime(
     const transportChanged =
       dht === undefined ||
       !sameTransportConfiguration(bootstrap, configuration.bootstrap);
-    const publisherChanged = transportChanged || !sameRoleConfiguration(
-      publisherOptions,
-      configuration.publisher,
-    );
-    const subscriberChanged = transportChanged || !sameRoleConfiguration(
-      subscriberOptions,
-      configuration.subscriber,
-    );
+    const publisherChanged =
+      transportChanged ||
+      !sameRoleConfiguration(publisherOptions, configuration.publisher);
+    const subscriberChanged =
+      transportChanged ||
+      !sameRoleConfiguration(subscriberOptions, configuration.subscriber);
     if (!publisherChanged && !subscriberChanged) return;
 
     await pollTask;
@@ -774,7 +765,9 @@ export async function startDesktopRuntime(
     if (publisherChanged) {
       publisherOptions = configuration.publisher;
       publisherLock = configuration.publisher?.lock;
-      publisherRole = configuration.publisher ? initialPublisherRole() : undefined;
+      publisherRole = configuration.publisher
+        ? initialPublisherRole()
+        : undefined;
       preparedPublisherRole = undefined;
       publisherPreparation = undefined;
     }
@@ -784,7 +777,9 @@ export async function startDesktopRuntime(
       connectionHintVisible = false;
       subscriberOptions = configuration.subscriber;
       subscriberLock = configuration.subscriber?.lock;
-      subscriberRole = configuration.subscriber ? initialSubscriberRole() : undefined;
+      subscriberRole = configuration.subscriber
+        ? initialSubscriberRole()
+        : undefined;
       preparedSubscriberRole = undefined;
       subscriberPreparation = undefined;
       registry = undefined;
@@ -798,9 +793,7 @@ export async function startDesktopRuntime(
       nextForcedResetAt = 0;
     }
     await Promise.allSettled([
-      publisherChanged && publisherOptions
-        ? preparePublisherRole()
-        : undefined,
+      publisherChanged && publisherOptions ? preparePublisherRole() : undefined,
       subscriberChanged && subscriberOptions
         ? prepareSubscriberRole()
         : undefined,
@@ -1035,7 +1028,9 @@ function sameRoleConfiguration(
   if (!left || !right) return left === right;
   const { lock: _leftLock, ...leftConfiguration } = left;
   const { lock: _rightLock, ...rightConfiguration } = right;
-  return JSON.stringify(leftConfiguration) === JSON.stringify(rightConfiguration);
+  return (
+    JSON.stringify(leftConfiguration) === JSON.stringify(rightConfiguration)
+  );
 }
 
 function sameTransportConfiguration(
@@ -1152,7 +1147,9 @@ function clonePublisherRole(role: DesktopPublisherRole): DesktopPublisherRole {
   };
 }
 
-function cloneSubscriberRole(role: DesktopSubscriberRole): DesktopSubscriberRole {
+function cloneSubscriberRole(
+  role: DesktopSubscriberRole,
+): DesktopSubscriberRole {
   return {
     ...role,
     services: role.services.map((service) => ({ ...service })),

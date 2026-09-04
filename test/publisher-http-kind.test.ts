@@ -5,61 +5,33 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { parseKeposConfig, serializeKeposConfig } from "../src/app-config.js";
-import { parsePublisherManifest } from "../src/config.js";
-import { parsePublisherService } from "../src/cli/options.js";
-import { loadPublisherState, setupPublisher } from "../src/state/publisher.js";
+import { parsePublisherIdentity, parsePublisherService } from "../src/config.js";
+import { loadPublisherIdentity, setupPublisher } from "../src/state/publisher.js";
 
 const subscriberKey = "11".repeat(32);
 
-test("publisher manifest defaults a missing kind to TCP and accepts HTTP", () => {
-  const base = {
-    displayName: "publisher",
-    publisherConfig: "publisher.json",
-    services: [{ id: "site", name: "Site", targetPort: 8080 }],
-  };
-  assert.equal(parsePublisherManifest(base).services[0]?.kind, "tcp");
+test("publisher service policy defaults a missing kind to TCP and accepts HTTP", () => {
+  assert.equal(parsePublisherService({ id: "site", name: "Site", targetPort: 8080 }).kind, "tcp");
   assert.equal(
-    parsePublisherManifest({
-      ...base,
-      services: [{ ...base.services[0], kind: "http" }],
-    }).services[0]?.kind,
+    parsePublisherService({ id: "site", name: "Site", targetPort: 8080, kind: "http" }).kind,
     "http",
   );
   assert.throws(
-    () => parsePublisherManifest({ ...base, services: [{ ...base.services[0], kind: "udp" }] }),
+    () => parsePublisherService({ id: "site", name: "Site", targetPort: 8080, kind: "udp" }),
     /tcp or http/,
   );
 });
 
-test("publisher state persists an HTTP kind while CLI omission remains TCP", async () => {
+test("publisher identity state contains no service policy", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-http-kind-"));
   try {
     const stateDir = path.join(root, "publisher");
     await setupPublisher({
       stateDir,
-      displayName: "publisher",
-      subscriberDevices: [{ label: "subscriber", publicKey: subscriberKey }],
-      services: [
-        { id: "site", name: "Site", kind: "http", targetPort: 8080 },
-        { id: "ssh", name: "SSH", targetPort: 22 },
-      ],
     });
-    const { manifest } = await loadPublisherState(stateDir);
-    assert.deepEqual(manifest.services.map(({ id, kind }) => ({ id, kind })), [
-      { id: "site", kind: "http" },
-      { id: "ssh", kind: "tcp" },
-    ]);
-    assert.deepEqual(parsePublisherService("site:Site:8080:http"), {
-      id: "site",
-      name: "Site",
-      targetPort: 8080,
-      kind: "http",
-    });
-    assert.equal(parsePublisherService("ssh:SSH:22").kind, undefined);
-    assert.throws(
-      () => parsePublisherService("site:Site:8080:udp"),
-      /kind must be tcp or http/,
-    );
+    const identity = await loadPublisherIdentity(stateDir);
+    assert.deepEqual(Object.keys(identity), ["seed"]);
+    assert.equal(parsePublisherIdentity(identity).seed.length, 64);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
