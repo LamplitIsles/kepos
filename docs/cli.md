@@ -100,8 +100,8 @@ complete runtime policy. `enabled` controls desktop auto-start only. Identities
 and the subscriber's pinned publisher contact always stay in the state
 directory.
 
-Create the publisher identity from that TOML without repeating its policy on
-the command line:
+Create the publisher identity independently with its state path; setup reads
+only `--state`. The TOML supplies the publisher policy when the runtime starts:
 
 ```sh
 npm run kepos -- setup publisher \

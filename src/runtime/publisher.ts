@@ -162,10 +162,7 @@ export async function startPublisher(
       const nextSubscribers = [...subscribers.values(), device];
       await persistSubscribers(nextSubscribers);
       subscribers.set(device.publicKey, device);
-      appliedPolicy = clonePolicy({
-        ...appliedPolicy,
-        subscribers: nextSubscribers,
-      });
+      appliedPolicy = clonePolicy({ ...appliedPolicy, subscribers: nextSubscribers });
       metrics.applyPolicy(appliedPolicy);
     },
   });
@@ -426,9 +423,7 @@ export async function startPublisher(
   options.log?.(`Publisher ready: ${publisherKey}`);
 
   let policyApplication: Promise<void> = Promise.resolve();
-  const applyPolicy = (
-    nextPolicy: PublisherRuntimePolicy,
-  ): Promise<boolean> => {
+  const applyPolicy = (nextPolicy: PublisherRuntimePolicy): Promise<boolean> => {
     const result = policyApplication.then(async () => {
       const next = clonePolicy(nextPolicy);
       if (publisherPoliciesEqual(appliedPolicy, next)) return false;
@@ -436,13 +431,13 @@ export async function startPublisher(
       const removedSubscribers = new Set(
         [...subscribers.keys()].filter(
           (subscriberKey) =>
-            !next.subscribers.some(
-              (device) => device.publicKey === subscriberKey,
-            ),
+            !next.subscribers.some((device) => device.publicKey === subscriberKey),
         ),
       );
       displayName = next.displayName;
-      services = new Map(next.services.map((service) => [service.id, service]));
+      services = new Map(
+        next.services.map((service) => [service.id, service]),
+      );
       subscribers = new Map(
         next.subscribers.map((device) => [device.publicKey, device]),
       );
@@ -457,17 +452,15 @@ export async function startPublisher(
         })),
       });
       await Promise.all(
-        [...subscriberHomes.entries()].map(
-          async ([subscriberKey, starting]) => {
-            const subscriberHome = await starting;
-            subscriberHome.updateRegistry({
-              displayName,
-              services: [...services.values()]
-                .filter((service) => serviceAllows(service, subscriberKey))
-                .map(({ id, name }) => ({ id, name, kind: "tcp" })),
-            });
-          },
-        ),
+        [...subscriberHomes.entries()].map(async ([subscriberKey, starting]) => {
+          const subscriberHome = await starting;
+          subscriberHome.updateRegistry({
+            displayName,
+            services: [...services.values()]
+              .filter((service) => serviceAllows(service, subscriberKey))
+              .map(({ id, name }) => ({ id, name, kind: "tcp" })),
+          });
+        }),
       );
       for (const [subscriberKey, current] of activeBySubscriberKey) {
         if (removedSubscribers.has(subscriberKey)) current.mux.close();

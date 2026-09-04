@@ -50,10 +50,21 @@ export async function setupPublisher(
   }
 
   const identity = parsePublisherIdentity({ seed: generatePublisherSeed() });
-  await writeStateDirectoryAtomically(
-    stateDir,
-    new Map([[identityFileName, serializePublisherIdentity(identity)]]),
-  );
+  try {
+    await writeStateDirectoryAtomically(
+      stateDir,
+      new Map([[identityFileName, serializePublisherIdentity(identity)]]),
+    );
+  } catch (error) {
+    if (!isDestinationExistsRace(error) || !(await pathExists(stateDir))) {
+      throw error;
+    }
+    const winner = await loadPublisherIdentity(stateDir);
+    return {
+      created: false,
+      publisherKey: derivePublisherHomeKey(winner.seed),
+    };
+  }
   return {
     created: true,
     publisherKey: derivePublisherHomeKey(identity.seed),
@@ -82,4 +93,10 @@ export async function loadPublisherIdentity(
   return parsePublisherIdentity(
     await readStateJson(path.join(stateDir, identityFileName)),
   );
+}
+
+function isDestinationExistsRace(error: unknown): boolean {
+  if (error === null || typeof error !== "object") return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EEXIST" || code === "ENOTEMPTY";
 }

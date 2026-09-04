@@ -6,7 +6,10 @@ import {
 import { defaultKeposConfigPath } from "../../../src/platform/paths.js";
 import type { SubscriberDevice } from "../../../src/config.js";
 import type { DesktopRuntimeConfiguration } from "./runtime.js";
-import { parseDesktopOptions, type DesktopOptions } from "./options.js";
+import {
+  parseDesktopOptions,
+  type DesktopOptions,
+} from "./options.js";
 
 export interface ApplyDesktopConfigContext {
   homeDirectory: string;

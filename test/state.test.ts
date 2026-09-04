@@ -17,7 +17,7 @@ import {
   parseSubscriberContact,
 } from "../src/config.js";
 import { replaceFileAtomically } from "../src/state/files.js";
-import { parseClientIdentity } from "../src/keys.js";
+import { derivePublisherHomeKey, parseClientIdentity } from "../src/keys.js";
 import {
   ensurePublisher,
   loadPublisherIdentity,
@@ -190,6 +190,21 @@ test("publisher setup creates one seed-only identity and reuses its key", async 
     ...first,
     created: false,
   });
+});
+
+test("concurrent publisher setup returns the winner identity to every caller", async () => {
+  const stateDir = await stateDirectory("publisher-concurrent");
+  const results = await Promise.all(
+    Array.from({ length: 4 }, () => setupPublisher({ stateDir })),
+  );
+
+  assert.equal(results.filter(({ created }) => created).length, 1);
+  assert.equal(new Set(results.map(({ publisherKey }) => publisherKey)).size, 1);
+  assert.deepEqual(await readdir(stateDir), ["publisher.json"]);
+  assert.equal(
+    results[0]?.publisherKey,
+    derivePublisherHomeKey((await loadPublisherIdentity(stateDir)).seed),
+  );
 });
 
 test("publisher state rejects partial, extra, and malformed identities", async () => {

@@ -44,9 +44,7 @@ function rejectUnknownFields(
   allowedFields: readonly string[],
   subject: string,
 ): void {
-  const unknownField = Object.keys(value).find(
-    (field) => !allowedFields.includes(field),
-  );
+  const unknownField = Object.keys(value).find((field) => !allowedFields.includes(field));
   if (unknownField) {
     throw new Error(`${subject} has unknown field: ${unknownField}`);
   }
@@ -98,9 +96,7 @@ export function parseSubscriberDevices(
       throw new Error(`duplicate subscriber device label: ${device.label}`);
     }
     if (keys.has(device.publicKey)) {
-      throw new Error(
-        `duplicate subscriber device public key: ${device.publicKey}`,
-      );
+      throw new Error(`duplicate subscriber device public key: ${device.publicKey}`);
     }
     labels.add(device.label);
     keys.add(device.publicKey);
@@ -109,12 +105,7 @@ export function parseSubscriberDevices(
 }
 
 function parseTargetPort(value: unknown, field = "targetPort"): number {
-  if (
-    typeof value !== "number" ||
-    !Number.isInteger(value) ||
-    value < 1 ||
-    value > 65_535
-  ) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65_535) {
     throw new Error(`${field} must be an integer from 1 through 65535`);
   }
   return value;
@@ -156,9 +147,7 @@ export function parseSubscriberContact(value: unknown): SubscriberContact {
     value.requestedLocalPort < 0 ||
     value.requestedLocalPort > 65_535
   ) {
-    throw new Error(
-      "requestedLocalPort must be an integer from 0 through 65535",
-    );
+    throw new Error("requestedLocalPort must be an integer from 0 through 65535");
   }
 
   return {
@@ -210,7 +199,9 @@ function parseServiceAllow(value: unknown, field: string): string[] {
   if (!Array.isArray(value)) {
     throw new Error(`${field} must be an array`);
   }
-  return value.map((entry, index) => parseKeyHex(entry, `${field}[${index}]`));
+  return value.map((entry, index) =>
+    parseKeyHex(entry, `${field}[${index}]`),
+  );
 }
 
 export function parsePublisherServices(

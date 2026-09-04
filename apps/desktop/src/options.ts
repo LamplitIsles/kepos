@@ -5,7 +5,10 @@ import {
   saveKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
-import { ensureDesktopBootstrap, ensureDesktopRoleState } from "./bootstrap.js";
+import {
+  ensureDesktopBootstrap,
+  ensureDesktopRoleState,
+} from "./bootstrap.js";
 import { defaultDesktopPaths } from "./paths.js";
 import { DEFAULT_GATEWAY_PORT } from "../../../src/home/gateway.js";
 import type { DhtAddress } from "../../../src/mux/hyperdht.js";

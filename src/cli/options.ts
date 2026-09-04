@@ -39,7 +39,10 @@ export function requiredState(options: ParsedOptions): string {
   return path.resolve(state);
 }
 
-export function requiredOption(options: ParsedOptions, name: string): string {
+export function requiredOption(
+  options: ParsedOptions,
+  name: string,
+): string {
   const value = singleOption(options, name);
   if (!value) throw new Error(`${name} is required`);
   return value;
@@ -55,7 +58,10 @@ export function singleOption(
   return values[0];
 }
 
-export function repeatedOption(options: ParsedOptions, name: string): string[] {
+export function repeatedOption(
+  options: ParsedOptions,
+  name: string,
+): string[] {
   return [...(options.get(name) ?? [])];
 }
 
@@ -150,7 +156,9 @@ export function parseBootstrapValues(
   });
 }
 
-export function observationMode(options: ParsedOptions): "human" | "ndjson" {
+export function observationMode(
+  options: ParsedOptions,
+): "human" | "ndjson" {
   const mode = singleOption(options, "--observations") ?? "human";
   if (mode === "human" || mode === "ndjson") return mode;
   throw new Error("--observations must be human or ndjson");

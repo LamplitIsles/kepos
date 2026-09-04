@@ -1,7 +1,10 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { Observation, Observe } from "../mux/observability.js";
+import type {
+  Observation,
+  Observe,
+} from "../mux/observability.js";
 import {
   startPublisher,
   type PublisherRuntimeStatus,
@@ -12,7 +15,10 @@ import {
   type StartSubscriberOptions,
   type SubscriberRuntimeStatus,
 } from "../runtime/subscriber.js";
-import { startDevice, type StartDeviceOptions } from "../runtime/device.js";
+import {
+  startDevice,
+  type StartDeviceOptions,
+} from "../runtime/device.js";
 import {
   getPublisherPublicKey,
   setupPublisher,
@@ -47,7 +53,10 @@ import {
   type RuntimeLock,
 } from "../runtime/runtime-lock.js";
 import { waitForSignal } from "./signals.js";
-import { loadKeposConfig, type KeposConfig } from "../app-config.js";
+import {
+  loadKeposConfig,
+  type KeposConfig,
+} from "../app-config.js";
 import { HOME_REGISTRY_PATH } from "../home/registry.js";
 
 interface CliPublisher {
@@ -88,11 +97,19 @@ export interface CliDependencies {
     options: SetSubscriberPublisherOptions,
   ) => Promise<string>;
   getPublisherPublicKey: (stateDir: string) => Promise<string>;
-  startPublisher: (options: StartPublisherOptions) => Promise<CliPublisher>;
-  startSubscriber: (options: StartSubscriberOptions) => Promise<CliSubscriber>;
+  startPublisher: (
+    options: StartPublisherOptions,
+  ) => Promise<CliPublisher>;
+  startSubscriber: (
+    options: StartSubscriberOptions,
+  ) => Promise<CliSubscriber>;
   startDevice: (options: StartDeviceOptions) => Promise<CliDevice>;
-  acquireSubscriberRuntimeLock: (stateDir: string) => Promise<RuntimeLock>;
-  acquirePublisherRuntimeLock: (stateDir: string) => Promise<RuntimeLock>;
+  acquireSubscriberRuntimeLock: (
+    stateDir: string,
+  ) => Promise<RuntimeLock>;
+  acquirePublisherRuntimeLock: (
+    stateDir: string,
+  ) => Promise<RuntimeLock>;
   waitForSignal: (stop: () => Promise<void>) => Promise<void>;
   schedulePolicyReload: (
     callback: () => void,
@@ -101,7 +118,9 @@ export interface CliDependencies {
 }
 
 export function createDefaultCliDependencies(
-  output: Partial<Pick<CliDependencies, "stdout" | "stderr">> = {},
+  output: Partial<
+    Pick<CliDependencies, "stdout" | "stderr">
+  > = {},
 ): CliDependencies {
   return {
     stdout: output.stdout ?? console.log,
@@ -180,7 +199,9 @@ export async function runCli(
     await runDeviceCommand(rest, dependencies);
     return;
   }
-  throw new Error(`unknown command: ${arguments_.join(" ")}\n\n${CLI_USAGE}`);
+  throw new Error(
+    `unknown command: ${arguments_.join(" ")}\n\n${CLI_USAGE}`,
+  );
 }
 
 async function setupPublisherCommand(
@@ -296,10 +317,7 @@ async function runPublisherCommand(
         return stopping;
       };
     })();
-    statusWriter(
-      mode,
-      dependencies,
-    )(
+    statusWriter(mode, dependencies)(
       `Publisher running: key=${running.publisherKey} registry=${running.home.url}${HOME_REGISTRY_PATH}`,
     );
     await dependencies.waitForSignal(stop);
@@ -352,17 +370,13 @@ async function runSubscriberCommand(
       observe: observationWriter(mode, dependencies),
       waitForPublisher: false,
     });
-    statusWriter(
-      mode,
-      dependencies,
-    )(
+    statusWriter(mode, dependencies)(
       `Subscriber running: publisher=${running.publisherKey} registry=${running.home.url}${HOME_REGISTRY_PATH}`,
     );
     for (const service of running.services) {
-      statusWriter(
-        mode,
-        dependencies,
-      )(`Local service: ${service.id}=127.0.0.1:${service.port}`);
+      statusWriter(mode, dependencies)(
+        `Local service: ${service.id}=127.0.0.1:${service.port}`,
+      );
     }
     await dependencies.waitForSignal(running.stop);
   } finally {
@@ -467,25 +481,18 @@ async function runDeviceCommand(
         : {}),
     });
     if (running.publisher) {
-      statusWriter(
-        mode,
-        dependencies,
-      )(
+      statusWriter(mode, dependencies)(
         `Publisher running: key=${running.publisher.publisherKey} registry=${running.publisher.home.url}${HOME_REGISTRY_PATH}`,
       );
     }
     if (running.subscriber) {
-      statusWriter(
-        mode,
-        dependencies,
-      )(
+      statusWriter(mode, dependencies)(
         `Subscriber running: publisher=${running.subscriber.publisherKey} registry=${running.subscriber.home.url}${HOME_REGISTRY_PATH}`,
       );
       for (const service of running.subscriber.services) {
-        statusWriter(
-          mode,
-          dependencies,
-        )(`Local service: ${service.id}=127.0.0.1:${service.port}`);
+        statusWriter(mode, dependencies)(
+          `Local service: ${service.id}=127.0.0.1:${service.port}`,
+        );
       }
     }
     await dependencies.waitForSignal(running.stop);
@@ -550,9 +557,11 @@ function observationWriter(
   dependencies: CliDependencies,
 ): Observe {
   if (mode === "ndjson") {
-    return (observation) => dependencies.stdout(JSON.stringify(observation));
+    return (observation) =>
+      dependencies.stdout(JSON.stringify(observation));
   }
-  return (observation) => dependencies.stdout(formatObservation(observation));
+  return (observation) =>
+    dependencies.stdout(formatObservation(observation));
 }
 
 function statusWriter(

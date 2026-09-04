@@ -64,8 +64,10 @@ identity material is created later in the mutable state directory and never
 enters the store.
 
 Publisher state contains no display name, subscriber devices, services, or
-service manifest. Edit the generated TOML to change publisher policy; there are
-no state-policy mutation commands.
+service manifest. The generated TOML lives in the Nix store and is not edited
+in place. Change the Home Manager publisher options, then rebuild and switch
+the configuration to apply the new policy; there are no state-policy mutation
+commands.
 
 The CLI is also available directly:
 

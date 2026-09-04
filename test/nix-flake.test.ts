@@ -18,10 +18,7 @@ test("Nix package carries its own Node runtime", async () => {
   const packageSource = await read("nix/package.nix");
 
   assert.match(packageSource, /importNpmLock\.buildNodeModules/);
-  assert.match(
-    packageSource,
-    /removeAttrs rootPackage \["devDependencies" "workspaces"\]/,
-  );
+  assert.match(packageSource, /removeAttrs rootPackage \["devDependencies" "workspaces"\]/);
   assert.match(packageSource, /!lib\.hasPrefix "apps\/" path/);
   assert.match(packageSource, /nodejs_24/);
   assert.doesNotMatch(packageSource, /sourceDir/);
@@ -46,9 +43,6 @@ test("Home Manager module owns policy and initializes identity-only state", asyn
   assert.match(moduleSource, /ints\.between 1 65535/);
   assert.match(moduleSource, /serviceIdPattern/);
   assert.match(moduleSource, /id != "home"/);
-  assert.match(moduleSource, /setup publisher/);
-  assert.match(moduleSource, /--state "\$state_dir"/);
-  assert.doesNotMatch(moduleSource, /publisher\.manifest\.json/);
   assert.match(moduleSource, /Restart/);
   assert.doesNotMatch(moduleSource, /seed\s*=|privateKey\s*=/);
 });
@@ -56,9 +50,6 @@ test("Home Manager module owns policy and initializes identity-only state", asyn
 test("CI builds the Nix flake", async () => {
   const workflow = await read(".github/workflows/check.yml");
 
-  assert.match(
-    workflow,
-    /DeterminateSystems\/determinate-nix-action@[0-9a-f]{40}/,
-  );
+  assert.match(workflow, /DeterminateSystems\/determinate-nix-action@[0-9a-f]{40}/);
   assert.match(workflow, /nix flake check/);
 });

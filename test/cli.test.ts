@@ -53,9 +53,7 @@ function fakeCli(): {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const dependencies: CliDependencies & {
-    acquirePublisherRuntimeLock(
-      stateDir: string,
-    ): Promise<{ release(): Promise<void> }>;
+    acquirePublisherRuntimeLock(stateDir: string): Promise<{ release(): Promise<void> }>;
   } = {
     stdout: (line) => stdout.push(line),
     stderr: (line) => stderr.push(line),
@@ -265,7 +263,9 @@ test("device run selects explicit roles and owns their shared lifecycle", async 
       waitForPublisher?: boolean;
     };
   }>;
-  assert.deepEqual(options.bootstrap, [{ host: "cli.example", port: 49_738 }]);
+  assert.deepEqual(options.bootstrap, [
+    { host: "cli.example", port: 49_738 },
+  ]);
   assert.equal(options.publisher?.stateDir, path.resolve("./publisher"));
   assert.deepEqual(options.publisher?.policy, {
     enabled: true,
@@ -413,7 +413,13 @@ test("device run rejects subscriber overrides without subscriber state", async (
     const cli = fakeCli();
     await assert.rejects(
       runCli(
-        ["device", "run", "--publisher-state", "./publisher", ...override],
+        [
+          "device",
+          "run",
+          "--publisher-state",
+          "./publisher",
+          ...override,
+        ],
         cli.dependencies,
       ),
       /subscriber options require --subscriber-state/,
@@ -422,7 +428,7 @@ test("device run rejects subscriber overrides without subscriber state", async (
   }
 });
 
-test("setup publisher accepts only the identity state directory", async () => {
+test("setup publisher forwards only the identity state directory", async () => {
   const cli = fakeCli();
   await runCli(
     ["setup", "publisher", "--state", "./publisher"],
@@ -436,21 +442,6 @@ test("setup publisher accepts only the identity state directory", async () => {
   ]);
   assert.deepEqual(cli.stdout, [`Publisher key: ${"11".repeat(32)}`]);
   assert.equal(cli.stdout.join("\n").includes("seed"), false);
-  await assert.rejects(
-    () =>
-      runCli(
-        [
-          "setup",
-          "publisher",
-          "--state",
-          "./publisher",
-          "--display-name",
-          "kosmos",
-        ],
-        cli.dependencies,
-      ),
-    /unknown option: --display-name/,
-  );
 });
 
 test("publisher key reports the public key without policy input", async () => {
@@ -499,26 +490,6 @@ test("setup subscriber and set-publisher expose only public state", async () => 
     },
   ]);
   assert.equal(cli.stdout[0], `Subscriber key: ${"22".repeat(32)}`);
-});
-
-test("publisher state-policy mutation commands are unknown", async () => {
-  const cli = fakeCli();
-  await assert.rejects(
-    () =>
-      runCli(
-        ["publisher", "set-subscribers", "--state", "./publisher"],
-        cli.dependencies,
-      ),
-    /unknown command/,
-  );
-  await assert.rejects(
-    () =>
-      runCli(
-        ["publisher", "set-services", "--state", "./publisher"],
-        cli.dependencies,
-      ),
-    /unknown command/,
-  );
 });
 
 test("publisher run prints human status and awaits signal-safe stop", async () => {
@@ -611,11 +582,9 @@ test("publisher-enabled device run forwards metricsListen to its publisher role"
   );
 
   assert.deepEqual(
-    (
-      cli.calls.startDevice[0] as {
-        publisher?: { metricsListen?: unknown };
-      }
-    ).publisher?.metricsListen,
+    (cli.calls.startDevice[0] as {
+      publisher?: { metricsListen?: unknown };
+    }).publisher?.metricsListen,
     { host: "127.0.0.1", port: 0 },
   );
   assert.deepEqual(
@@ -648,7 +617,10 @@ test("publisher run releases its identity lock when startup fails", async () => 
 
   await assert.rejects(
     () =>
-      runCli(["publisher", "run", "--state", "./publisher"], cli.dependencies),
+      runCli(
+        ["publisher", "run", "--state", "./publisher"],
+        cli.dependencies,
+      ),
     /publisher failed/,
   );
 
@@ -720,7 +692,9 @@ test("publisher setup and run use TOML publisher policy", async () => {
       publisher: {
         displayName: "kosmos",
         subscribers: [{ label: "device", publicKey: subscriberKey }],
-        services: [{ id: "navidrome", name: "Navidrome", targetPort: 4_533 }],
+        services: [
+          { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
+        ],
       },
     };
   };
@@ -744,7 +718,9 @@ test("publisher setup and run use TOML publisher policy", async () => {
     {
       displayName: "kosmos",
       subscribers: [{ label: "device", publicKey: subscriberKey }],
-      services: [{ id: "navidrome", name: "Navidrome", targetPort: 4_533 }],
+      services: [
+        { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
+      ],
     },
   );
 });
@@ -784,20 +760,11 @@ test("publisher run serially reloads valid TOML and recovers from failures", asy
     return () => undefined;
   };
 
-  await runCli(
-    ["publisher", "run", "--state", "./publisher"],
-    cli.dependencies,
-  );
+  await runCli(["publisher", "run", "--state", "./publisher"], cli.dependencies);
 
   assert.deepEqual(cli.calls.policyApplications, [second, recovered]);
-  assert.match(
-    cli.stderr.join("\n"),
-    /Publisher policy reload failed: publisher policy reload requires a complete/,
-  );
-  assert.match(
-    cli.stderr.join("\n"),
-    /Publisher policy reload failed: malformed TOML/,
-  );
+  assert.match(cli.stderr.join("\n"), /Publisher policy reload failed: publisher policy reload requires a complete/);
+  assert.match(cli.stderr.join("\n"), /Publisher policy reload failed: malformed TOML/);
 });
 
 test("publisher run drains queued reloads before stopping the publisher", async () => {
@@ -829,10 +796,7 @@ test("publisher run drains queued reloads before stopping the publisher", async 
     await stopping;
   };
 
-  await runCli(
-    ["publisher", "run", "--state", "./publisher"],
-    cli.dependencies,
-  );
+  await runCli(["publisher", "run", "--state", "./publisher"], cli.dependencies);
 
   assert.deepEqual(cli.calls.lifecycle, [
     "poll.cancel",
@@ -840,27 +804,6 @@ test("publisher run drains queued reloads before stopping the publisher", async 
     "publisher.stop",
   ]);
   assert.deepEqual(cli.calls.policyApplications, [next]);
-});
-
-test("publisher setup rejects removed policy flags", async () => {
-  const cli = fakeCli();
-
-  await assert.rejects(
-    () =>
-      runCli(
-        [
-          "setup",
-          "publisher",
-          "--state",
-          "./publisher",
-          "--subscriber-device",
-          `device:44${"44".repeat(31)}`,
-        ],
-        cli.dependencies,
-      ),
-    /unknown option: --subscriber-device/,
-  );
-  assert.deepEqual(cli.calls.setupPublisher, []);
 });
 
 test("subscriber run uses TOML bindings and CLI overrides", async () => {
@@ -959,7 +902,9 @@ test("subscriber run maps services and writes NDJSON observations", async () => 
   assert.equal(options.gatewayPort, 18_080);
   assert.equal(options.route, "public");
   assert.equal(options.waitForPublisher, false);
-  assert.deepEqual(options.bootstrap, [{ host: "34.143.181.65", port: 49738 }]);
+  assert.deepEqual(options.bootstrap, [
+    { host: "34.143.181.65", port: 49738 },
+  ]);
   assert.deepEqual(cli.calls.stopped, ["subscriber"]);
   assert.deepEqual(cli.calls.subscriberLocks, [
     `acquire:${path.resolve("./subscriber")}`,

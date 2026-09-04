@@ -88,9 +88,7 @@ export async function ensureDesktopBootstrap(
     context.platform,
   );
   if (config === undefined) {
-    const bootstrap = await (
-      context.readBootstrapAsset ?? readDesktopBootstrapAsset
-    )(
+    const bootstrap = await (context.readBootstrapAsset ?? readDesktopBootstrapAsset)(
       desktopBootstrapAssetPath(
         context.executablePath ?? process.execPath,
         context.platform,
