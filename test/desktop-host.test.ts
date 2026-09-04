@@ -547,7 +547,7 @@ test("desktop host forwards configured role policy to the runtime", async () => 
   const bootstrap = [{ host: "bootstrap.example", port: 49_737 }];
   const policy = {
     displayName: "Configured publisher",
-    allow: [],
+    subscribers: [],
     services: [],
   };
   const options = dualDesktopOptions();

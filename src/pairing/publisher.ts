@@ -4,6 +4,7 @@ import {
   type CreatePairingInvitationOptions,
 } from "./invitation.js";
 import type { PairingRequest, PairingResponse } from "./protocol.js";
+import type { SubscriberDevice } from "../config.js";
 
 const publisherKeyPattern = /^[0-9a-f]{64}$/u;
 
@@ -44,7 +45,7 @@ export interface PublisherPairingOptions {
   displayName: string;
   now?: () => number;
   randomBytes?: CreatePairingInvitationOptions["randomBytes"];
-  persistSubscriber: (subscriberKey: string) => Promise<void>;
+  persistSubscriber: (subscriber: SubscriberDevice) => Promise<void>;
 }
 
 interface InvitationState {
@@ -135,7 +136,10 @@ export class PublisherPairing {
     if (this.approving) return this.approving;
     const pending = this.pending;
     const operation = (async () => {
-      await this.options.persistSubscriber(pending.subscriberKey);
+      await this.options.persistSubscriber({
+        publicKey: pending.subscriberKey,
+        label: pending.label,
+      });
       if (this.pending !== pending) {
         throw new Error("Pairing request changed during approval");
       }

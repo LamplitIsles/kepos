@@ -377,7 +377,7 @@ export MAC_SUBSCRIBER_PUBLIC_KEY='<64-character-lowercase-hex-key>'
 npm run kepos -- setup publisher \
   --state ~/.local/state/kepos-neo/mux-publisher \
   --display-name kosmos-wsl \
-  --allow "$MAC_SUBSCRIBER_PUBLIC_KEY" \
+  --subscriber-device "mac:$MAC_SUBSCRIBER_PUBLIC_KEY" \
   --service ssh:SSH:22 \
   --service navidrome:Navidrome:4533
 ```

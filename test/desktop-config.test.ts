@@ -17,6 +17,7 @@ test("desktop config writes desired state before applying it in memory", async (
 
   const options = await applyDesktopConfig(config, {
     homeDirectory: "/Users/neil",
+    environment: { XDG_STATE_HOME: "/Users/neil/.local/state" },
     platform: "linux",
     configPath: "/Users/neil/.config/kepos/config.toml",
     saveConfig: async (saved: unknown, configPath: string) => {
@@ -46,8 +47,8 @@ test("desktop config writes desired state before applying it in memory", async (
   });
 });
 
-test("desktop pairing appends allowlist through the fresh TOML config", async () => {
-  const { persistDesktopPublisherAllowlist } = await import(
+test("desktop pairing appends subscriber devices through the fresh TOML config", async () => {
+  const { persistDesktopPublisherSubscribers } = await import(
     "../apps/desktop/src/config.js"
   );
   const configPath = "/Users/neil/.config/kepos/config.toml";
@@ -56,15 +57,18 @@ test("desktop pairing appends allowlist through the fresh TOML config", async ()
     publisher: {
       enabled: true,
       displayName: "Neil",
-      allow: ["11".repeat(32)],
+      subscribers: [{ label: "phone", publicKey: "11".repeat(32) }],
       services: [],
     },
   };
   let saved: unknown;
 
-  await persistDesktopPublisherAllowlist(
+  await persistDesktopPublisherSubscribers(
     configPath,
-    ["11".repeat(32), "22".repeat(32)],
+    [
+      { label: "phone", publicKey: "11".repeat(32) },
+      { label: "tablet", publicKey: "22".repeat(32) },
+    ],
     {
       loadConfig: async (loadedPath) => {
         assert.equal(loadedPath, configPath);
@@ -81,7 +85,10 @@ test("desktop pairing appends allowlist through the fresh TOML config", async ()
     ...original,
     publisher: {
       ...original.publisher,
-      allow: ["11".repeat(32), "22".repeat(32)],
+      subscribers: [
+        { label: "phone", publicKey: "11".repeat(32) },
+        { label: "tablet", publicKey: "22".repeat(32) },
+      ],
     },
   });
 });

@@ -133,7 +133,7 @@ test("desktop runtime forwards both role observations, device events, and correl
   const snapshots: DesktopSnapshot[] = [];
   let publisherObserve: Observe | undefined;
   let subscriberObserve: Observe | undefined;
-  let persistAllowlist: ((allow: string[]) => Promise<void>) | undefined;
+  let persistSubscribers: ((subscribers: Array<{ label: string; publicKey: string }>) => Promise<void>) | undefined;
   let subscriberConnection: SubscriberRuntimeStatus["connection"] = "connected";
   const publisher = { stateDir: "/test-owned/publisher", configPath: "/test-owned/config.toml" };
   const subscriber = {
@@ -146,7 +146,7 @@ test("desktop runtime forwards both role observations, device events, and correl
     acquirePublisherLock: async () => ({ release: async () => undefined }),
     acquireSubscriberLock: async () => ({ release: async () => undefined }),
     loadPublisherState: async () => ({
-      config: { seed: "11".repeat(32), allow: [] },
+      config: { seed: "11".repeat(32), subscribers: [] },
       manifest: {
         displayName: "Local",
         publisherConfig: "publisher.json",
@@ -164,7 +164,7 @@ test("desktop runtime forwards both role observations, device events, and correl
     }),
     startPublisher: async (options) => {
       publisherObserve = options.observe;
-      persistAllowlist = options.persistAllowlist;
+      persistSubscribers = options.persistSubscribers;
       return runningPublisher();
     },
     startSubscriber: async (options) => {
@@ -175,7 +175,7 @@ test("desktop runtime forwards both role observations, device events, and correl
     now: () => 1_000,
     random: () => 0.5,
     renderPairingQr: async () => "<svg />",
-    persistPublisherAllowlist: async () => undefined,
+    persistPublisherSubscribers: async () => undefined,
   };
   const runtime = await startDesktopRuntime(
     {
@@ -199,7 +199,7 @@ test("desktop runtime forwards both role observations, device events, and correl
   assert.ok(deviceEvents.some((event) => event.event === "desktop.lifecycle"));
   assert.ok(deviceEvents.some((event) => event.event === "desktop.registry"));
 
-  await persistAllowlist?.([]);
+  await persistSubscribers?.([]);
 
   await runtime.reconfigure({ publisher, subscriber });
   assert.ok(deviceEvents.some((event) => event.event === "desktop.config"));
@@ -295,7 +295,7 @@ test("desktop runtime evicts the oldest subscriber attempt while retaining newer
       now: () => 1_000,
       random: () => 0.5,
       renderPairingQr: async () => "<svg />",
-      persistPublisherAllowlist: async () => undefined,
+      persistPublisherSubscribers: async () => undefined,
     },
   );
 

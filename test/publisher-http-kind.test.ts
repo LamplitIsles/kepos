@@ -38,7 +38,7 @@ test("publisher state persists an HTTP kind while CLI omission remains TCP", asy
     await setupPublisher({
       stateDir,
       displayName: "publisher",
-      subscriberPublicKeys: [subscriberKey],
+      subscriberDevices: [{ label: "subscriber", publicKey: subscriberKey }],
       services: [
         { id: "site", name: "Site", kind: "http", targetPort: 8080 },
         { id: "ssh", name: "SSH", targetPort: 22 },
@@ -69,7 +69,7 @@ test("shared TOML retains explicit HTTP service classification", () => {
   const config = parseKeposConfig(`
 [publisher]
 display_name = "publisher"
-allow = ["${subscriberKey}"]
+subscribers = [{ label = "subscriber", public_key = "${subscriberKey}" }]
 
 [[publisher.services]]
 id = "site"

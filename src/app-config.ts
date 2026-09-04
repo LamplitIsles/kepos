@@ -12,6 +12,7 @@ import { parse, stringify } from "smol-toml";
 import {
   parsePublisherConfig,
   parsePublisherManifest,
+  parseSubscriberDevices,
 } from "./config.js";
 import type { DhtAddress } from "./mux/hyperdht.js";
 import { parseRoute, type Route } from "./mux/route.js";
@@ -137,7 +138,9 @@ export function serializeKeposConfig(config: KeposConfig): string {
         ? {}
         : { enabled: config.publisher.enabled }),
       display_name: config.publisher.displayName,
-      allow: config.publisher.allow,
+      subscribers: config.publisher.subscribers.map(
+        ({ label, publicKey }) => ({ label, public_key: publicKey }),
+      ),
       services: config.publisher.services.map(
         ({ id, name, kind, targetPort, allow }) => ({
           id,
@@ -219,10 +222,10 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
   rejectUnknownFields(
     publisher,
     ["publisher"],
-    ["enabled", "display_name", "allow", "services"],
+    ["enabled", "display_name", "subscribers", "services"],
   );
-  if (!Array.isArray(publisher.allow)) {
-    throw new Error("publisher.allow must be an array");
+  if (!Array.isArray(publisher.subscribers)) {
+    throw new Error("publisher.subscribers must be an array");
   }
   if (!Array.isArray(publisher.services)) {
     throw new Error("publisher.services must be an array");
@@ -251,16 +254,34 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
       kind: service.kind ?? "tcp",
     })),
   });
-  const allow = parsePublisherConfig({
+  const subscribers = parseSubscriberDevices(
+    publisher.subscribers.map((value, index) => {
+      const subscriber = requireTable(
+        value,
+        `publisher.subscribers[${index}]`,
+      );
+      rejectUnknownFields(
+        subscriber,
+        ["publisher", `subscribers[${index}]`],
+        ["label", "public_key"],
+      );
+      return {
+        label: subscriber.label,
+        publicKey: subscriber.public_key,
+      };
+    }),
+    "publisher.subscribers",
+  );
+  parsePublisherConfig({
     seed: "00".repeat(32),
-    allow: publisher.allow,
-  }).allow;
+    subscribers,
+  });
   return {
     ...(publisher.enabled === undefined
       ? {}
       : { enabled: parseBoolean(publisher.enabled, "publisher.enabled") }),
     displayName: manifest.displayName,
-    allow,
+    subscribers,
     services: manifest.services.map(({ id, name, kind, targetPort, allow }, index) => ({
       id,
       name,

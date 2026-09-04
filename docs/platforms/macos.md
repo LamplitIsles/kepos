@@ -66,7 +66,7 @@ bootstrap = ["bootstrap.example:49737"]
 [publisher]
 enabled = true
 display_name = "kosmos"
-allow = []
+subscribers = []
 services = []
 
 [subscriber]
@@ -100,9 +100,11 @@ for the local publisher.
   authenticated candidate fingerprint before approval. Desktop subscribers use
   the manual public-key flow in the [public guide](https://kepos.guion.io/docs/).
 
-Allow writes the configured TOML allowlist atomically, updates the live
-publisher, and promotes the same peer connection. Unknown candidates cannot
-read the registry or open services.
+Allow writes the configured TOML subscriber-device policy atomically, updates
+the live publisher, and promotes the same peer connection. Unknown candidates
+cannot read the registry or open services. A publisher can expose the optional
+Prometheus endpoint with `--metrics-listen host:port`; the listener stops with
+the publisher.
 
 The release ZIP is an ad-hoc-signed Apple Silicon build and is not notarized.
 Developer ID signing, a Mac App Store package, an updater, and pre-login service

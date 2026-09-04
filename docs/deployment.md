@@ -29,7 +29,12 @@ Import and configure the module:
   services.kepos.publisher = {
     enable = true;
     displayName = "kosmos";
-    allow = ["<subscriber-public-key>"];
+    subscribers = [
+      {
+        label = "nuc";
+        publicKey = "<subscriber-public-key>";
+      }
+    ];
     services = {
       ssh = {
         name = "SSH";
@@ -78,6 +83,12 @@ state locks. Kepos does not install the systemd unit or choose host paths; the
 host configuration still owns setup, restart policy, firewall rules, and
 deployment timing. Keep the standalone role commands when the roles need
 different transport policy or failure boundaries.
+
+For a publisher scrape endpoint, add `--metrics-listen 127.0.0.1:9464` to the
+publisher or dual-role command and permit only the deployment's Prometheus
+scraper to reach it. Build the owned dashboard with `nix build
+github:LamplitIsles/kepos#grafana-dashboard`; the resulting opaque JSON is at
+`share/kepos/grafana/kepos-publisher-observability.json`.
 
 ## Container image
 

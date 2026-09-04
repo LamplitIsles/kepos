@@ -15,7 +15,7 @@ test("desktop derives enabled roles from shared config and fixed state paths", (
         publisher: {
           enabled: false,
           displayName: "Neil",
-          allow: [],
+          subscribers: [],
           services: [],
         },
         subscriber: {
@@ -83,7 +83,7 @@ test("desktop loads the shared config when no role flags are given", async () =>
   });
 });
 
-test("desktop retains the TOML path that owns publisher allowlist changes", async () => {
+test("desktop retains the TOML path that owns publisher subscriber-device changes", async () => {
   const { loadDesktopOptions } = await import(
     "../apps/desktop/src/options.js"
   );
@@ -95,7 +95,7 @@ test("desktop retains the TOML path that owns publisher allowlist changes", asyn
         publisher: {
           enabled: true,
           displayName: "Neil",
-          allow: [],
+          subscribers: [],
           services: [],
         },
       }),

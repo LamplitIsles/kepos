@@ -232,7 +232,7 @@
               <h2 id="subscriber-title">Connect as a subscriber</h2>
               <p>
                 A subscriber receives selected services from a publisher. Its device identity is a key pair; it shares only the
-                public key for approval. The publisher's allowlist names subscriber keys it accepts, and the subscriber
+                public key for approval. The publisher's labeled subscriber-device policy names the devices it accepts, and the subscriber
                 pins the publisher public key before connecting.
               </p>
             </header>
@@ -256,8 +256,8 @@
                 </p>
                 <p>
                   For a desktop subscriber, click <strong>Copy this device subscriber public key</strong>. On the desktop
-                  publisher, add that key to the <code>[publisher].allow</code> list and restart after the manual TOML
-                  edit. Copy the publisher public key from the publisher app, enter it in <strong>Connect this
+                  publisher, add that key with a local label to the <code>[publisher].subscribers</code> list. A running
+                  publisher reconciles valid TOML edits without a restart. Copy the publisher public key from the publisher app, enter it in <strong>Connect this
                   subscriber</strong>, and choose <strong>Connect / Save</strong>. Desktop QR or deep-link receipt is
                   not supported in this release.
                 </p>
@@ -298,29 +298,31 @@
             <p>
               The packaged app uses the normal Kepos configuration file: <code>~/.config/kepos/config.toml</code> on
               macOS unless <code>XDG_CONFIG_HOME</code> is set, and <code>%APPDATA%\Kepos\config.toml</code> on
-              Windows. Edit the file before launch when you need to enable publishing or change the services, then
-              restart after a manual policy edit. There is no graphical service editor in this preview.
+              Windows. Edit the file before launch when you need to enable publishing or change the services; a running
+              publisher reconciles valid subscriber-device and service policy edits. There is no graphical service editor
+              in this preview.
             </p>
             <pre class="docs-code"><code>[publisher]
 enabled = true
 display_name = "Home"
-allow = []
+subscribers = []
 
 [[publisher.services]]
 id = "navidrome"
 name = "Navidrome"
 target_port = 4533</code></pre>
             <p>
-              List loopback TCP targets that already run on the publisher device. An empty <code>allow</code> list
-              starts in deny-all mode; approving a device later adds its public key to the running policy.
+              List loopback TCP targets that already run on the publisher device. An empty <code>subscribers</code> list
+              starts in deny-all mode; approving a device later adds its labeled public key to the running policy.
             </p>
 
             <h3 id="publisher-desktop-identity">Let startup create the identity</h3>
             <p>
               When <code>enabled = true</code>, desktop startup creates missing publisher state from this policy before
               starting the role. On later launches it validates the existing state and reuses the same seed and public
-              key; it never rotates or overwrites that state. TOML allowlist and service changes are runtime policy, so
-              they can change without rewriting the identity.
+              key; it never rotates or overwrites that state. TOML subscriber-device and service changes are runtime policy, so
+              they can change without rewriting the identity. Use <code>--metrics-listen host:port</code> on a publisher
+              run to expose the read-only Prometheus endpoint.
             </p>
 
             <h3 id="publisher-desktop-pairing">Launch and approve a device</h3>
@@ -335,7 +337,7 @@ target_port = 4533</code></pre>
               </li>
               <li>
                 <h3>Inspect, then Allow</h3>
-                <p>Check the label, platform hint, and public-key fingerprint. Allow persists the subscriber public key, updates the live allowlist, and promotes the same connection without restarting.</p>
+                <p>Check the label, platform hint, and public-key fingerprint. Allow persists the labeled subscriber device, updates the live policy, and promotes the same connection without restarting.</p>
               </li>
             </ol>
 
@@ -362,7 +364,7 @@ target_port = 4533</code></pre>
             <p>On the publisher device, put that public key in the publisher TOML policy:</p>
             <pre class="docs-code"><code>[publisher]
 display_name = "Home"
-allow = ["&lt;subscriber-public-key&gt;"]
+subscribers = [{ label = "android", public_key = "&lt;subscriber-public-key&gt;" }]
 
 [[publisher.services]]
 id = "navidrome"
@@ -372,21 +374,21 @@ target_port = 4533</code></pre>
   --state &lt;publisher-state-directory&gt; \
   --config &lt;publisher-config.toml&gt;</code></pre>
             <p>
-              This creates the publisher with the subscriber already allowed. The setup command writes the manifest and
+              This creates the publisher with the labeled subscriber device already trusted. The setup command writes the manifest and
               identity into the explicit state directory. Repeat it only with the same policy; CLI setup remains strict
               and never rotates an identity. Without a TOML publisher table, the same command accepts
-              <code>--display-name</code>, <code>--allow</code>, and repeated <code>--service</code> options instead.
+              <code>--display-name</code>, <code>--subscriber-device</code>, and repeated <code>--service</code> options instead.
             </p>
 
-            <h3 id="publisher-cli-config">Update the allowlist and pin the publisher</h3>
+            <h3 id="publisher-cli-config">Update subscriber devices and pin the publisher</h3>
             <p>
               If publisher state already exists in deny-all mode and no <code>[publisher]</code> TOML table owns its
-              policy, add the subscriber public key with <code>publisher set-allow</code>. For a TOML-owned publisher,
-              edit its <code>allow</code> array instead; do not combine TOML policy with CLI policy flags.
+              policy, add the labeled subscriber device with <code>publisher set-subscribers</code>. For a TOML-owned publisher,
+              edit its <code>subscribers</code> array instead; do not combine TOML policy with CLI policy flags.
             </p>
-            <pre class="docs-code"><code>npm run kepos -- publisher set-allow \
+            <pre class="docs-code"><code>npm run kepos -- publisher set-subscribers \
   --state &lt;publisher-state-directory&gt; \
-  --allow &lt;subscriber-public-key&gt;
+  --subscriber-device 'android:&lt;subscriber-public-key&gt;'
 
 npm run kepos -- publisher key \
   --state &lt;publisher-state-directory&gt;
@@ -407,10 +409,10 @@ npm run kepos -- subscriber set-publisher \
 npm run kepos -- subscriber run \
   --state &lt;subscriber-state-directory&gt;</code></pre>
             <p>
-              Start the publisher before the subscriber. A headless process reads its policy at startup, so restart
-              <code>publisher run</code> after a TOML allowlist or service edit, then restart the subscriber if its
-              pinned contact changed. Use the repository's Nix, container, Windows, and NUC deployment guides for
-              process supervision and platform-specific lifecycle details.
+              Start the publisher before the subscriber. A headless process reconciles valid TOML subscriber-device or
+              service edits while it runs. Scrape <code>GET /metrics</code> when <code>--metrics-listen</code> is enabled;
+              use the repository's Nix, container, Windows, and NUC deployment guides for process supervision and
+              platform-specific lifecycle details.
             </p>
 
             <p id="architecture" class="docs-related">
@@ -438,7 +440,7 @@ npm run kepos -- subscriber run \
               </div>
               <div>
                 <dt>Local approval</dt>
-                <dd>The publisher's allowlist and optional per-service allowlist decide what an approved subscriber may open.</dd>
+                <dd>The publisher's labeled subscriber-device policy and optional per-service allowlist decide what an approved subscriber may open.</dd>
               </div>
               <div>
                 <dt>No secret copies</dt>
@@ -610,7 +612,7 @@ npm run kepos -- subscriber run \
                   </tr>
                   <tr>
                     <th scope="row">Per-service allowlists</th>
-                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Services may narrow the publisher allowlist.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Services may narrow the publisher subscriber-device policy.</span></span></td>
                     <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Private mode checks the connection key; public mode has no key authentication.</span></span></td>
                   </tr>
                   <tr>
@@ -690,7 +692,7 @@ npm run kepos -- subscriber run \
             <h3 id="troubleshoot-connecting">Configured but still Connecting</h3>
             <ol>
               <li>Confirm the subscriber's pinned publisher public key is the key shown by the intended publisher.</li>
-              <li>Confirm the publisher is running and its subscriber public key is in the publisher allowlist. An empty allowlist denies everyone.</li>
+              <li>Confirm the publisher is running and the subscriber device (label plus public key) is in its policy. An empty subscriber-device list denies everyone.</li>
               <li>Keep the desktop process in the tray or menu bar. Closing the window hides it; <strong>Quit Kepos</strong> stops publishing.</li>
               <li>Wait for a direct attempt to finish, then check local diagnostics rather than copying state files or secrets into a report.</li>
             </ol>
@@ -714,8 +716,8 @@ npm run kepos -- subscriber run \
             <h3 id="troubleshoot-policy">Allowlist and policy edits</h3>
             <p>
               A desktop <strong>Add device</strong> approval updates the live publisher. A headless TOML edit does not:
-              restart the headless <code>publisher run</code> process after changing the publisher allowlist or service
-              policy. A per-service allowlist can be narrower than the publisher-wide list, so an approved device may
+              a headless <code>publisher run</code> reconciles subscriber-device or service policy changes while it runs.
+              A per-service allowlist can be narrower than the publisher-wide device policy, so an approved device may
               still be unable to open one service.
             </p>
 

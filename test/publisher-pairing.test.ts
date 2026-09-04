@@ -29,8 +29,11 @@ test("publisher pairing persists before activating one approved candidate", asyn
     displayName: "Kosmos",
     now: () => now,
     randomBytes: () => Buffer.alloc(32, 7),
-    persistSubscriber: async (subscriberKey) => {
-      assert.equal(subscriberKey, "cd".repeat(32));
+    persistSubscriber: async (subscriber) => {
+      assert.deepEqual(subscriber, {
+        publicKey: "cd".repeat(32),
+        label: "Neil's Pixel",
+      });
       events.push("persisted");
     },
   });

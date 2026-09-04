@@ -30,6 +30,7 @@ import {
 } from "../../../src/runtime/subscriber.js";
 import { loadPublisherState } from "../../../src/state/publisher.js";
 import { loadSubscriberConnectionState } from "../../../src/state/subscriber.js";
+import type { SubscriberDevice } from "../../../src/config.js";
 import type { Observation } from "../../../src/mux/observability.js";
 import {
   createDesktopConfigObservation,
@@ -44,7 +45,7 @@ import type {
   DesktopSnapshot,
   DesktopSubscriberRole,
 } from "./protocol.js";
-import { persistDesktopPublisherAllowlist } from "./config.js";
+import { persistDesktopPublisherSubscribers } from "./config.js";
 import type { DesktopSubscriberSetup } from "./options.js";
 
 export interface StartDesktopPublisherOptions {
@@ -91,7 +92,10 @@ export interface DesktopRuntimeDependencies {
   now(): number;
   random(): number;
   renderPairingQr(uri: string): Promise<string>;
-  persistPublisherAllowlist(configPath: string, allow: string[]): Promise<void>;
+  persistPublisherSubscribers(
+    configPath: string,
+    subscribers: SubscriberDevice[],
+  ): Promise<void>;
 }
 
 export interface RunningDesktopRuntime {
@@ -126,7 +130,7 @@ const defaultDependencies: DesktopRuntimeDependencies = {
       blackColor: "#0d1209",
       whiteColor: "#f0f1e7",
     }),
-  persistPublisherAllowlist: persistDesktopPublisherAllowlist,
+  persistPublisherSubscribers: persistDesktopPublisherSubscribers,
 };
 
 export async function startDesktopRuntime(
@@ -290,7 +294,7 @@ export async function startDesktopRuntime(
       const policy: PublisherRuntimePolicy =
         currentOptions.policy ?? {
           displayName: manifest.displayName,
-          allow: config.allow,
+          subscribers: config.subscribers,
           services: manifest.services.map(
             ({ id, name, targetPort, allow }) => ({
               id,
@@ -379,11 +383,11 @@ export async function startDesktopRuntime(
         ...(publisherOptions.policy ? { policy } : {}),
         ...(configPath
           ? {
-              persistAllowlist: async (allow: string[]) => {
+              persistSubscribers: async (subscribers: SubscriberDevice[]) => {
                 try {
-                  await dependencies.persistPublisherAllowlist(
+                  await dependencies.persistPublisherSubscribers(
                     configPath,
-                    allow,
+                    subscribers,
                   );
                   reportDeviceObservation(
                     createDesktopConfigObservation(

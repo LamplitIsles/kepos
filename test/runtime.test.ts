@@ -14,6 +14,7 @@ import {
   type DhtNode,
 } from "../src/mux/hyperdht.js";
 import type { Observation } from "../src/mux/observability.js";
+import { startMetricsServer } from "../src/metrics/server.js";
 import {
   startPublisher,
   type PublisherRuntimeStatus,
@@ -39,6 +40,15 @@ const require = createRequire(import.meta.url);
 const createHyperDhtTestnet = require(
   "hyperdht/testnet",
 ) as CreateHyperDhtTestnet;
+
+function subscriberDevices(
+  keys: readonly string[],
+): Array<{ publicKey: string; label: string }> {
+  return keys.map((publicKey, index) => ({
+    publicKey,
+    label: `subscriber-${index + 1}`,
+  }));
+}
 
 function trackDht(node: DhtNode): {
   calls: { connect: number; createServer: number; destroy: number };
@@ -93,7 +103,7 @@ test("publisher stop reports cleanup failure after closing its Home server", asy
   await setupPublisher({
     stateDir,
     displayName: "cleanup",
-    subscriberPublicKeys: [],
+    subscriberDevices: [],
     services: [],
   });
   let serverCloseAttempts = 0;
@@ -121,6 +131,97 @@ test("publisher stop reports cleanup failure after closing its Home server", asy
     assert.equal(serverCloseAttempts, 1);
     await assert.rejects(fetch(`${publisher.home.url}/healthz`));
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("publisher runtime serves metrics on a loopback port and closes it on stop", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-publisher-metrics-"));
+  const stateDir = path.join(root, "publisher");
+  await setupPublisher({
+    stateDir,
+    displayName: "metrics",
+    subscriberDevices: [],
+    services: [],
+  });
+  const dht = {
+    stats: {
+      punches: { consistent: 0, random: 0, open: 0 },
+      relaying: { attempts: 0, successes: 0, aborts: 0 },
+    },
+    connect: () => {
+      throw new Error("unexpected connect");
+    },
+    createServer: () => ({
+      listen: async () => undefined,
+      close: async () => undefined,
+    }),
+    destroy: async () => undefined,
+  } as DhtNode;
+  const publisher = await startPublisher({
+    stateDir,
+    dht,
+    metricsListen: { host: "127.0.0.1", port: 0 },
+  });
+
+  try {
+    assert.ok(publisher.metrics);
+    const response = await fetch(publisher.metrics.url);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /kepos_publisher_subscriber_connected/);
+    await publisher.stop();
+    await assert.rejects(() => fetch(publisher.metrics!.url));
+  } finally {
+    await publisher.stop().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("publisher metrics bind failure closes the started publisher/DHT server", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-publisher-metrics-bind-"));
+  const stateDir = path.join(root, "publisher");
+  await setupPublisher({
+    stateDir,
+    displayName: "metrics-bind",
+    subscriberDevices: [],
+    services: [],
+  });
+  const blocker = await startMetricsServer({
+    listen: { host: "127.0.0.1", port: 0 },
+    render: () => "# TYPE kepos_blocker gauge\nkepos_blocker 1\n",
+  });
+  let serverCloseCalls = 0;
+  const dht = {
+    stats: {
+      punches: { consistent: 0, random: 0, open: 0 },
+      relaying: { attempts: 0, successes: 0, aborts: 0 },
+    },
+    connect: () => {
+      throw new Error("unexpected connect");
+    },
+    createServer: () => ({
+      listen: async () => undefined,
+      close: async () => {
+        serverCloseCalls++;
+      },
+    }),
+    destroy: async () => undefined,
+  } as DhtNode;
+
+  try {
+    await assert.rejects(
+      startPublisher({
+        stateDir,
+        dht,
+        metricsListen: { host: "127.0.0.1", port: blocker.port },
+      }),
+      /EADDRINUSE|address already in use/i,
+    );
+    assert.equal(serverCloseCalls, 1);
+    await blocker.close();
+    await assert.rejects(() => fetch(blocker.url));
+  } finally {
+    await blocker.close().catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -198,13 +299,13 @@ test("dual-role runtimes borrow one DHT without merging role identities", async 
   const devicePublisherIdentity = await setupPublisher({
     stateDir: devicePublisherState,
     displayName: "device",
-    subscriberPublicKeys: [remoteSubscriberIdentity.publicKey],
+    subscriberDevices: subscriberDevices([remoteSubscriberIdentity.publicKey]),
     services: [],
   });
   const remotePublisherIdentity = await setupPublisher({
     stateDir: remotePublisherState,
     displayName: "remote",
-    subscriberPublicKeys: [deviceSubscriberIdentity.publicKey],
+    subscriberDevices: subscriberDevices([deviceSubscriberIdentity.publicKey]),
     services: [],
   });
   await Promise.all([
@@ -327,8 +428,8 @@ test("publisher and subscriber expose synchronous status around an awaited lifec
       publisherState,
       "--display-name",
       "kosmos",
-      "--allow",
-      subscriberKey,
+      "--subscriber-device",
+      `kosmos:${subscriberKey}`,
     ],
     cli,
   );
@@ -425,7 +526,7 @@ test("publisher runtime rejects state that the shared state loader rejects", asy
   await setupPublisher({
     stateDir,
     displayName: "kosmos",
-    subscriberPublicKeys: [],
+    subscriberDevices: [],
     services: [],
   });
   await writeFile(path.join(stateDir, "unexpected.json"), "{}");
@@ -457,7 +558,7 @@ test("publisher runtime policy overrides legacy state policy", async () => {
   await setupPublisher({
     stateDir,
     displayName: "legacy",
-    subscriberPublicKeys: [],
+    subscriberDevices: [],
     services: [],
   });
   const testnet = await createHyperDhtTestnet(3);
@@ -469,7 +570,7 @@ test("publisher runtime policy overrides legacy state policy", async () => {
       bootstrap: testnet.bootstrap,
       policy: {
         displayName: "kosmos",
-        allow: [],
+        subscribers: [],
         services: [
           { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
         ],
@@ -503,7 +604,7 @@ test("subscriber runtime rejects state that the shared state loader rejects", as
   const publisher = await setupPublisher({
     stateDir: publisherState,
     displayName: "kosmos",
-    subscriberPublicKeys: [subscriber.publicKey],
+    subscriberDevices: subscriberDevices([subscriber.publicKey]),
     services: [],
   });
   await setSubscriberPublisher({

@@ -1,6 +1,13 @@
+import b4a from "b4a";
+
 export interface PublisherConfig {
   seed: string;
-  allow: string[];
+  subscribers: SubscriberDevice[];
+}
+
+export interface SubscriberDevice {
+  publicKey: string;
+  label: string;
 }
 
 export interface SubscriberContact {
@@ -26,6 +33,7 @@ export interface PublisherManifest {
 const keyHexPattern = /^[0-9a-f]{64}$/;
 const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
 const publisherConfigFilePattern = /^publisher\.json$/;
+const maximumSubscriberLabelBytes = 128;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -57,6 +65,53 @@ function parseNonEmptyString(value: unknown, field: string): string {
   return value;
 }
 
+export function parseSubscriberDevice(
+  value: unknown,
+  field = "subscriber device",
+): SubscriberDevice {
+  if (!isRecord(value)) {
+    throw new Error(`${field} must be an object`);
+  }
+  rejectUnknownFields(value, ["publicKey", "label"], field);
+  const publicKey = parseKeyHex(value.publicKey, `${field}.publicKey`);
+  const label = value.label;
+  if (
+    typeof label !== "string" ||
+    label.length === 0 ||
+    label.trim() !== label ||
+    b4a.byteLength(label, "utf8") > maximumSubscriberLabelBytes ||
+    /[\u0000-\u001f\u007f]/u.test(label)
+  ) {
+    throw new Error(`${field}.label must be a non-empty bounded label`);
+  }
+  return { publicKey, label };
+}
+
+export function parseSubscriberDevices(
+  value: unknown,
+  field = "subscribers",
+): SubscriberDevice[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array`);
+  }
+  const devices = value.map((entry, index) =>
+    parseSubscriberDevice(entry, `${field}[${index}]`),
+  );
+  const labels = new Set<string>();
+  const keys = new Set<string>();
+  for (const device of devices) {
+    if (labels.has(device.label)) {
+      throw new Error(`duplicate subscriber device label: ${device.label}`);
+    }
+    if (keys.has(device.publicKey)) {
+      throw new Error(`duplicate subscriber device public key: ${device.publicKey}`);
+    }
+    labels.add(device.label);
+    keys.add(device.publicKey);
+  }
+  return devices;
+}
+
 function parseTargetPort(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65_535) {
     throw new Error("targetPort must be an integer from 1 through 65535");
@@ -75,15 +130,11 @@ export function parsePublisherConfig(value: unknown): PublisherConfig {
   if (!isRecord(value)) {
     throw new Error("publisher config must be an object");
   }
-  rejectUnknownFields(value, ["seed", "allow"], "publisher config");
+  rejectUnknownFields(value, ["seed", "subscribers"], "publisher config");
 
   const seed = parseKeyHex(value.seed, "seed");
-  if (!Array.isArray(value.allow)) {
-    throw new Error("allow must be an array, including for deny-all");
-  }
-
-  const allow = value.allow.map((entry, index) => parseKeyHex(entry, `allow[${index}]`));
-  return { seed, allow };
+  const subscribers = parseSubscriberDevices(value.subscribers);
+  return { seed, subscribers };
 }
 
 export function serializePublisherConfig(config: PublisherConfig): string {

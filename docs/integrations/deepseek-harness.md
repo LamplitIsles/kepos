@@ -18,8 +18,9 @@ Settings, credentials, and plugin configuration behave as they do when dsh is
 opened directly on its host, including persistence across reloads.
 
 Kepos does not modify dsh, add `--trusted-host` entries, or add an application
-authentication layer. The publisher and per-service allowlists still determine
-which subscriber public keys may open the service.
+authentication layer. The publisher's labeled subscriber-device policy and
+per-service allowlists still determine which subscriber public keys may open
+the service.
 
 ## Setup
 
@@ -31,7 +32,7 @@ service port to the shared TOML policy:
 [publisher]
 enabled = true
 display_name = "dev"
-allow = ["<subscriber-public-key>"]
+subscribers = [{ label = "dev-phone", public_key = "<subscriber-public-key>" }]
 
 [[publisher.services]]
 id = "dsh"
@@ -44,7 +45,7 @@ service. It preserves dsh's loopback behavior but does not make dsh consume a
 Kepos device-identity header. Use `kind = "http"` only for a target that
 implements the [HTTP service authentication contract](../cli.md#http-service-device-authentication).
 
-Restart a running headless publisher after changing its TOML policy. The
+The running headless publisher reconciles valid TOML policy changes. The
 subscriber configuration used for dsh is:
 
 ```toml
@@ -76,7 +77,8 @@ TOML configuration is required.
 - The `127.0.0.1:13080` listener preserves dsh's loopback Host semantics. A
   Kepos `*.localhost` gateway URL does too; an ordinary hostname does not.
 - Unknown devices cannot use the service. Kepos authenticates peers by public
-  key and applies the publisher and service allowlists before exposing it.
+  key and applies the publisher subscriber-device policy and service allowlists
+  before exposing it.
 - Kepos transports the TCP byte stream over its authenticated, encrypted P2P
   connection. The service does not need a public IP or inbound port forward.
 - SSH forwarding offers the same loopback semantics, but requires a tunnel and

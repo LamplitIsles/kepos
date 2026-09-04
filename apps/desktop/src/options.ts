@@ -194,7 +194,7 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
             ...(context.configPath ? { configPath: context.configPath } : {}),
             policy: {
               displayName: publisherConfig.displayName,
-              allow: publisherConfig.allow,
+              subscribers: publisherConfig.subscribers,
               services: publisherConfig.services,
             },
           },

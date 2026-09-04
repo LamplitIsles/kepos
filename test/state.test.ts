@@ -20,7 +20,7 @@ import { replaceFileAtomically } from "../src/state/files.js";
 import { parseClientIdentity } from "../src/keys.js";
 import {
   ensurePublisher,
-  setPublisherAllowlist,
+  setPublisherSubscribers,
   setPublisherServices,
   setupPublisher,
 } from "../src/state/publisher.js";
@@ -179,7 +179,7 @@ test("publisher setup permits deny-all and rejects a different repeated topology
   const options = {
     stateDir,
     displayName: "kosmos",
-    subscriberPublicKeys: [] as string[],
+    subscriberDevices: [],
     services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
   };
   const first = await setupPublisher(options);
@@ -188,7 +188,7 @@ test("publisher setup permits deny-all and rejects a different repeated topology
   assert.deepEqual(
     parsePublisherConfig(
       await readJson(path.join(stateDir, "publisher.json")),
-    ).allow,
+    ).subscribers,
     [],
   );
   assert.deepEqual(await setupPublisher(options), {
@@ -199,7 +199,7 @@ test("publisher setup permits deny-all and rejects a different repeated topology
     () =>
       setupPublisher({
         ...options,
-        subscriberPublicKeys: ["11".repeat(32)],
+        subscriberDevices: [{ label: "phone", publicKey: "11".repeat(32) }],
       }),
     /allowlist|existing/i,
   );
@@ -218,7 +218,7 @@ test("desktop publisher ensure reuses state while TOML policy changes", async ()
   const initial = {
     stateDir,
     displayName: "kosmos",
-    subscriberPublicKeys: ["11".repeat(32)],
+    subscriberDevices: [{ label: "phone", publicKey: "11".repeat(32) }],
     services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
   };
   await setupPublisher(initial);
@@ -230,7 +230,7 @@ test("desktop publisher ensure reuses state while TOML policy changes", async ()
   const ensured = await ensurePublisher({
     ...initial,
     displayName: "renamed in TOML",
-    subscriberPublicKeys: ["22".repeat(32)],
+    subscriberDevices: [{ label: "tablet", publicKey: "22".repeat(32) }],
     services: [{ id: "navidrome", name: "Navidrome", targetPort: 4533 }],
   });
 
@@ -245,20 +245,20 @@ test("desktop publisher ensure reuses state while TOML policy changes", async ()
   assert.deepEqual(await readFile(path.join(stateDir, "publisher.json")), configBefore);
 });
 
-test("publisher allowlist and services replace independently without rotating its key", async () => {
+test("publisher subscriber devices and services replace independently without rotating its key", async () => {
   const stateDir = await stateDirectory("publisher-update");
   const setup = await setupPublisher({
     stateDir,
     displayName: "kosmos",
-    subscriberPublicKeys: ["11".repeat(32)],
+    subscriberDevices: [{ label: "phone", publicKey: "11".repeat(32) }],
     services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
   });
   const configPath = path.join(stateDir, "publisher.json");
   const seed = parsePublisherConfig(await readJson(configPath)).seed;
 
-  await setPublisherAllowlist({
+  await setPublisherSubscribers({
     stateDir,
-    subscriberPublicKeys: [],
+    subscriberDevices: [],
   });
   await setPublisherServices({
     stateDir,
@@ -269,7 +269,7 @@ test("publisher allowlist and services replace independently without rotating it
 
   assert.deepEqual(parsePublisherConfig(await readJson(configPath)), {
     seed,
-    allow: [],
+    subscribers: [],
   });
   assert.deepEqual(
     parsePublisherManifest(
@@ -289,7 +289,7 @@ test("publisher allowlist and services replace independently without rotating it
       await setupPublisher({
         stateDir,
         displayName: "kosmos",
-        subscriberPublicKeys: [],
+        subscriberDevices: [],
         services: [
           { id: "navidrome", name: "Navidrome", targetPort: 4533 },
         ],

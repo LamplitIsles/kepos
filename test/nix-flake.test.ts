@@ -14,7 +14,7 @@ test("Nix flake exports a package, app, and Home Manager module", async () => {
   assert.match(flake, /aarch64-linux/);
 });
 
-test("Nix package is locked and carries its own Node runtime", async () => {
+test("Nix package carries its own Node runtime", async () => {
   const packageSource = await read("nix/package.nix");
 
   assert.match(packageSource, /importNpmLock\.buildNodeModules/);
@@ -32,7 +32,7 @@ test("Home Manager module owns policy but keeps identity in mutable state", asyn
     "stateDir",
     "bootstrap",
     "displayName",
-    "allow",
+    "subscribers",
     "services",
   ]) {
     assert.match(moduleSource, new RegExp(option));
@@ -48,7 +48,7 @@ test("Home Manager module owns policy but keeps identity in mutable state", asyn
   assert.doesNotMatch(moduleSource, /seed\s*=|privateKey\s*=/);
 });
 
-test("CI builds the locked Nix flake", async () => {
+test("CI builds the Nix flake", async () => {
   const workflow = await read(".github/workflows/check.yml");
 
   assert.match(workflow, /DeterminateSystems\/determinate-nix-action@[0-9a-f]{40}/);
