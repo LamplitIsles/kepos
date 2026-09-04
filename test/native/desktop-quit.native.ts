@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -11,44 +11,49 @@ import { desktopAppBundle } from "../../scripts/build-desktop.js";
 const execute = promisify(execFile);
 const repository = process.cwd();
 
-test(
-  "desktop exits cleanly when AppKit receives an external Quit event",
-  { skip: process.platform !== "darwin" || process.arch !== "arm64" },
-  async () => {
-    const app = desktopAppBundle(repository);
-    const executable = path.join(app, "Contents", "MacOS", "Kepos");
-    const homeDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "kepos-native-quit-"),
-    );
-    const child = spawn(
-      executable,
-      ["--publisher-state", path.join(homeDirectory, "publisher")],
-      {
-        env: { ...process.env, HOME: homeDirectory },
-        stdio: ["ignore", "pipe", "inherit"],
-      },
-    );
+test("desktop exits cleanly when AppKit receives an external Quit event", {
+  skip: process.platform !== "darwin" || process.arch !== "arm64",
+}, async () => {
+  const app = desktopAppBundle(repository);
+  const executable = path.join(app, "Contents", "MacOS", "Kepos");
+  const homeDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "kepos-native-quit-"),
+  );
+  const configPath = path.join(homeDirectory, "config.toml");
+  const stateHome = path.join(homeDirectory, "state");
+  await writeFile(
+    configPath,
+    '[publisher]\nenabled = true\ndisplay_name = "Native test"\nsubscribers = []\nservices = []\n',
+  );
+  const child = spawn(executable, ["--config", configPath], {
+    env: {
+      ...process.env,
+      HOME: homeDirectory,
+      XDG_CONFIG_HOME: path.join(homeDirectory, "config"),
+      XDG_STATE_HOME: stateHome,
+    },
+    stdio: ["ignore", "pipe", "inherit"],
+  });
 
-    try {
-      await waitUntilReady(child);
-      await execute("/usr/bin/osascript", [
-        "-e",
-        `tell application "${app}" to quit`,
-      ]);
+  try {
+    await waitUntilReady(child);
+    await execute("/usr/bin/osascript", [
+      "-e",
+      `tell application "${app}" to quit`,
+    ]);
 
-      assert.deepEqual(await waitForExit(child), {
-        code: 0,
-        signal: null,
-      });
-    } finally {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGKILL");
-        await waitForExit(child).catch(() => undefined);
-      }
-      await rm(homeDirectory, { force: true, recursive: true });
+    assert.deepEqual(await waitForExit(child), {
+      code: 0,
+      signal: null,
+    });
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await waitForExit(child).catch(() => undefined);
     }
-  },
-);
+    await rm(homeDirectory, { force: true, recursive: true });
+  }
+});
 
 async function waitUntilReady(child: ChildProcess): Promise<void> {
   const stdout = child.stdout;

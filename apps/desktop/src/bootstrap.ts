@@ -128,9 +128,6 @@ export async function ensureDesktopRoleState(
     config.publisher?.enabled === true
       ? await (context.ensurePublisher ?? ensurePublisher)({
           stateDir: paths.publisherStateDir,
-          displayName: config.publisher.displayName,
-          subscriberDevices: config.publisher.subscribers,
-          services: config.publisher.services,
         })
       : undefined;
   const subscriber =

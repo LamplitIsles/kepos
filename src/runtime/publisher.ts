@@ -26,10 +26,7 @@ import {
   type PublisherPairingSnapshot,
 } from "../pairing/publisher.js";
 import type { PairingRequest } from "../pairing/protocol.js";
-import {
-  loadPublisherState,
-  setPublisherSubscribers,
-} from "../state/publisher.js";
+import { loadPublisherIdentity } from "../state/publisher.js";
 import type { PublisherService, SubscriberDevice } from "../config.js";
 import {
   createPublisherMetricsRecorder,
@@ -62,7 +59,7 @@ export interface StartPublisherOptions {
   stateDir: string;
   bootstrap?: DhtAddress[];
   dht?: DhtNode;
-  policy?: PublisherRuntimePolicy;
+  policy: PublisherRuntimePolicy;
   log?: (line: string) => void;
   now?: () => number;
   observe?: Observe;
@@ -104,13 +101,12 @@ export async function startPublisher(
   if (options.dht && options.bootstrap) {
     throw new Error("publisher dht and bootstrap are mutually exclusive");
   }
-  const { config, manifest } = await loadPublisherState(options.stateDir);
-  const policy = options.policy ?? {
-    displayName: manifest.displayName,
-    subscribers: config.subscribers,
-    services: manifest.services,
-  };
-  const keyPair = keyPairFromSeed(config.seed);
+  if (!options.policy) {
+    throw new Error("publisher policy is required");
+  }
+  const identity = await loadPublisherIdentity(options.stateDir);
+  const policy = options.policy;
+  const keyPair = keyPairFromSeed(identity.seed);
   const publisherKey = b4a.toString(keyPair.publicKey, "hex");
   let displayName = policy.displayName;
   let services = new Map(
@@ -152,17 +148,11 @@ export async function startPublisher(
   };
   const persistSubscribers =
     options.persistSubscribers ??
-    (options.policy
-      ? async (): Promise<void> => {
-          throw new Error(
-            "Publisher subscriber-device persistence is not configured for pairing",
-          );
-        }
-      : async (subscriberDevices: SubscriberDevice[]): Promise<void> =>
-          setPublisherSubscribers({
-            stateDir: options.stateDir,
-            subscriberDevices,
-          }));
+    (async (): Promise<void> => {
+      throw new Error(
+        "Publisher subscriber-device persistence is not configured for pairing",
+      );
+    });
   const pairing = new PublisherPairing({
     publisherKey,
     displayName: policy.displayName,

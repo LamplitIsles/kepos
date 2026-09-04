@@ -125,17 +125,18 @@ existing identity; the publisher sees the candidate fingerprint and must
 approve it before the connection is promoted to the normal registry and service
 protocols. A desktop subscriber currently uses the manual path: copy its public
 key and a local label into the desktop publisher's TOML subscriber-device policy;
-the running publisher reconciles that policy without a restart,
-copy the publisher public key, and enter it in **Connect this subscriber**. The
+the running publisher reconciles that policy without a restart; then copy the
+publisher public key and enter it in **Connect this subscriber**. The
 desktop app does not receive the QR invitation through a deep link.
 
-The packaged first run creates a default config and enabled role identities when
-they are absent. When publisher startup is enabled, it creates missing publisher
-state from the TOML display name, subscriber-device, and service policy. If publisher
-state already exists, startup validates the state files themselves and reuses
-their seed and public key; mutable TOML policy may change without rewriting
-that identity. CLI `setup publisher` retains its strict idempotency. A config
-or identity is never silently replaced to make startup succeed.
+The packaged first run creates a default config before ensuring any enabled role
+identity. When publisher startup is enabled, it creates missing publisher state
+with only a seed-derived identity. If publisher state already exists, startup
+validates the one-file state and reuses its seed and public key; mutable TOML
+policy supplies the display name, subscriber devices, services, and allowlists
+without rewriting that identity. CLI `setup publisher` has the same strict
+idempotency and accepts only a state directory. A config or identity is never
+silently replaced to make startup succeed.
 
 The desktop process hides rather than quits when its main window closes. Tray
 or menu-bar **Open Kepos** restores the window; **Quit Kepos** stops publisher,
@@ -167,10 +168,11 @@ On Windows they are under `%APPDATA%\\Kepos\\config.toml` and
 the corresponding state root.
 
 Role state is created atomically and validated as a complete directory. A
-publisher state contains its seed/config and service manifest. A subscriber
-state contains its identity plus one active or pending publisher contact. A
-pending contact is promoted after pairing approval; pairing tokens do not enter
-durable state.
+publisher state contains exactly one strict `publisher.json` seed document.
+Publisher policy is TOML-only; no manifest or policy snapshot is read or
+migrated. A subscriber state contains its identity plus one active or pending
+publisher contact. A pending contact is promoted after pairing approval;
+pairing tokens do not enter durable state.
 
 The desktop and CLI use matching per-role locks. A second process cannot use the
 same role identity concurrently. Runtime startup is visible as role phases:
@@ -187,12 +189,12 @@ A heartbeat replaces a silent outer path in bounded time, and a newer
 control-ready connection replaces an older connection for the same subscriber
 identity.
 
-A headless publisher reads its policy at startup and reconciles valid TOML
-changes while it runs. Removing a subscriber device closes its active
-connection; new devices and service authorizations appear immediately. Desktop
-**Add device** is a special live Android pairing path: approval persists the
-new labeled device, updates the in-memory policy, and promotes the final
-connection without a second NAT traversal.
+A headless publisher requires a complete `[publisher]` TOML policy at startup
+and reconciles valid changes while it runs. Removing a subscriber device closes
+its active connection; new devices and service authorizations appear
+immediately. Desktop **Add device** is a special live Android pairing path:
+approval persists the new labeled device to TOML, updates the in-memory policy,
+and promotes the final connection without a second NAT traversal.
 
 Publisher metrics are an optional `GET /metrics` endpoint. Its stable labels
 are a subscriber-local label, a short public-key fingerprint, service, and
@@ -222,3 +224,4 @@ rather than assume a fallback path.
 - [ADR 0006: Desktop dual-role runtime ownership](adr/0006-desktop-dual-role-runtime-ownership.md)
 - [ADR 0007: Pair on the final publisher connection](adr/0007-pair-on-the-final-publisher-connection.md)
 - [ADR 0008: Share one HyperDHT node per device runtime](adr/0008-share-one-hyperdht-node-per-device-runtime.md)
+- [ADR 0010: Publisher identity state and TOML policy ownership](adr/0010-publisher-identity-state-and-toml-policy.md)

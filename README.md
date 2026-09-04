@@ -7,8 +7,10 @@
 
 Kepos gives trusted devices access to selected services without exposing a
 public service port or joining every device to a virtual subnet. A publisher
-owns the service and its labeled subscriber-device policy; a subscriber
-receives the allowed service as an ordinary local URL or TCP port.
+keeps only its seed-derived identity in durable state; its display name,
+labeled subscriber-device policy, published services, and service allowlists
+live in the shared TOML configuration. A subscriber receives the allowed
+service as an ordinary local URL or TCP port.
 
 Kepos has no hosted account or Kepos-operated control plane. Device keys stay
 on the devices that created them. Kepos carries TCP byte streams through an
@@ -36,6 +38,10 @@ Developers and operators can continue with:
 - [Nix, container, and Kubernetes deployment](docs/deployment.md)
 - [Network transport and compatibility](docs/network-transport-and-compatibility.md)
 
+Publisher setup creates or reuses only the strict seed-only `publisher.json`;
+the old publisher manifest and state-policy mutation commands are removed.
+Headless publisher and publisher-enabled device runs require a complete
+`[publisher]` TOML table, while subscriber-only commands remain independent.
 Headless publishers can expose an optional read-only Prometheus endpoint with
 `publisher run --metrics-listen 127.0.0.1:9464` (or the same option on a
 publisher-enabled `device run`). It reports bounded subscriber labels and

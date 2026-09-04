@@ -25,7 +25,7 @@ test("Nix package carries its own Node runtime", async () => {
   assert.doesNotMatch(packageSource, /\.\.\/home|cp -r home/);
 });
 
-test("Home Manager module owns policy but keeps identity in mutable state", async () => {
+test("Home Manager module owns policy and initializes identity-only state", async () => {
   const moduleSource = await read("nix/home-manager-module.nix");
 
   for (const option of [
@@ -43,7 +43,6 @@ test("Home Manager module owns policy but keeps identity in mutable state", asyn
   assert.match(moduleSource, /ints\.between 1 65535/);
   assert.match(moduleSource, /serviceIdPattern/);
   assert.match(moduleSource, /id != "home"/);
-  assert.match(moduleSource, /publisher\.manifest\.json/);
   assert.match(moduleSource, /Restart/);
   assert.doesNotMatch(moduleSource, /seed\s*=|privateKey\s*=/);
 });

@@ -28,7 +28,7 @@ import {
   type StartSubscriberOptions,
   type SubscriberRuntimeStatus,
 } from "../../../src/runtime/subscriber.js";
-import { loadPublisherState } from "../../../src/state/publisher.js";
+import { loadPublisherIdentity } from "../../../src/state/publisher.js";
 import { loadSubscriberConnectionState } from "../../../src/state/subscriber.js";
 import type { SubscriberDevice } from "../../../src/config.js";
 import type { Observation } from "../../../src/mux/observability.js";
@@ -52,7 +52,7 @@ export interface StartDesktopPublisherOptions {
   stateDir: string;
   configPath?: string;
   lock?: RuntimeLock;
-  policy?: PublisherRuntimePolicy;
+  policy: PublisherRuntimePolicy;
 }
 
 export interface StartDesktopSubscriberOptions {
@@ -84,7 +84,7 @@ export interface DesktopRuntimeDependencies {
   createDht: typeof createDht;
   acquirePublisherLock(stateDir: string): Promise<RuntimeLock>;
   acquireSubscriberLock(stateDir: string): Promise<RuntimeLock>;
-  loadPublisherState: typeof loadPublisherState;
+  loadPublisherIdentity: typeof loadPublisherIdentity;
   loadSubscriberConnectionState: typeof loadSubscriberConnectionState;
   startPublisher(options: StartPublisherOptions): Promise<RunningPublisher>;
   startSubscriber(options: StartSubscriberOptions): Promise<RunningSubscriber>;
@@ -116,7 +116,7 @@ const defaultDependencies: DesktopRuntimeDependencies = {
   createDht,
   acquirePublisherLock: acquirePublisherRuntimeLock,
   acquireSubscriberLock: acquireSubscriberRuntimeLock,
-  loadPublisherState,
+  loadPublisherIdentity,
   loadSubscriberConnectionState,
   startPublisher,
   startSubscriber,
@@ -283,28 +283,23 @@ export async function startDesktopRuntime(
       return publisherPreparation.result;
     }
     const currentOptions = publisherOptions;
+    if (!currentOptions.policy) {
+      return Promise.reject(
+        new Error(
+          "desktop publisher requires a complete [publisher] policy in TOML",
+        ),
+      );
+    }
     preparedPublisherRole = undefined;
     const result = (async (): Promise<PublisherRuntimePolicy> => {
       publisherLock ??= await dependencies.acquirePublisherLock(
         currentOptions.stateDir,
       );
-      const { config, manifest } = await dependencies.loadPublisherState(
+      const identity = await dependencies.loadPublisherIdentity(
         currentOptions.stateDir,
       );
-      const policy: PublisherRuntimePolicy =
-        currentOptions.policy ?? {
-          displayName: manifest.displayName,
-          subscribers: config.subscribers,
-          services: manifest.services.map(
-            ({ id, name, targetPort, allow }) => ({
-              id,
-              name,
-              targetPort,
-              ...(allow === undefined ? {} : { allow }),
-            }),
-          ),
-        };
-      const publisherKey = derivePublisherHomeKey(config.seed);
+      const policy = currentOptions.policy;
+      const publisherKey = derivePublisherHomeKey(identity.seed);
       preparedPublisherRole = {
         phase: "starting",
         displayName: policy.displayName,
@@ -380,7 +375,7 @@ export async function startDesktopRuntime(
         stateDir: publisherOptions.stateDir,
         dht: requireDht(dht),
         ...(roleObservation ? { observe: roleObservation } : {}),
-        ...(publisherOptions.policy ? { policy } : {}),
+        policy,
         ...(configPath
           ? {
               persistSubscribers: async (subscribers: SubscriberDevice[]) => {

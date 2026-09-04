@@ -6,7 +6,10 @@ import {
   startDevice,
   type DeviceRuntimeDependencies,
 } from "../src/runtime/device.js";
-import type { RunningPublisher } from "../src/runtime/publisher.js";
+import type {
+  PublisherRuntimePolicy,
+  RunningPublisher,
+} from "../src/runtime/publisher.js";
 import type { RunningSubscriber } from "../src/runtime/subscriber.js";
 
 function deferred(): {
@@ -19,6 +22,12 @@ function deferred(): {
   });
   return { promise, resolve: () => resolve?.() };
 }
+
+const publisherPolicy: PublisherRuntimePolicy = {
+  displayName: "Publisher",
+  subscribers: [],
+  services: [],
+};
 
 function harness(options: {
   publisherStartError?: Error;
@@ -107,7 +116,7 @@ test("device starts requested roles concurrently on one node and stops once in o
   const starting = startDevice(
     {
       bootstrap: [{ host: "bootstrap.example", port: 49_737 }],
-      publisher: { stateDir: "/publisher" },
+      publisher: { stateDir: "/publisher", policy: publisherPolicy },
       subscriber: { stateDir: "/subscriber", services: [] },
     },
     first.dependencies,
@@ -141,7 +150,7 @@ test("device startup waits for all roles and cleans a partial start", async () =
   await assert.rejects(
     startDevice(
       {
-        publisher: { stateDir: "/publisher" },
+        publisher: { stateDir: "/publisher", policy: publisherPolicy },
         subscriber: { stateDir: "/subscriber", services: [] },
       },
       first.dependencies,
@@ -167,7 +176,7 @@ test("device startup preserves its failure after cleanup errors", async () => {
   await assert.rejects(
     startDevice(
       {
-        publisher: { stateDir: "/publisher" },
+        publisher: { stateDir: "/publisher", policy: publisherPolicy },
         subscriber: { stateDir: "/subscriber", services: [] },
       },
       first.dependencies,
@@ -191,7 +200,7 @@ test("device stop attempts every resource and reports the first failure", async 
   });
   const running = await startDevice(
     {
-      publisher: { stateDir: "/publisher" },
+      publisher: { stateDir: "/publisher", policy: publisherPolicy },
       subscriber: { stateDir: "/subscriber", services: [] },
     },
     first.dependencies,

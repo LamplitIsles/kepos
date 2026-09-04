@@ -58,8 +58,8 @@ export async function persistDesktopPublisherSubscribers(
   } = {},
 ): Promise<void> {
   const config = await (dependencies.loadConfig ?? loadKeposConfig)(configPath);
-  if (!config?.publisher?.enabled) {
-    throw new Error("Desktop publisher config is not enabled");
+  if (!config?.publisher) {
+    throw new Error("Desktop publisher config is not configured");
   }
   await (dependencies.saveConfig ?? saveKeposConfig)(
     {

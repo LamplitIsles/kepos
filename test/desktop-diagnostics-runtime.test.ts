@@ -10,6 +10,7 @@ import type { Observation, Observe } from "../src/mux/observability.js";
 import type { DhtNode } from "../src/mux/hyperdht.js";
 import type {
   PublisherRuntimeStatus,
+  PublisherRuntimePolicy,
   RunningPublisher,
 } from "../src/runtime/publisher.js";
 import type {
@@ -23,6 +24,11 @@ const publisherKey = "aa".repeat(32);
 const subscriberKey = "bb".repeat(32);
 const remotePublisherKey = "cc".repeat(32);
 const timestamp = "2026-08-10T12:00:00.000Z";
+const publisherPolicy: PublisherRuntimePolicy = {
+  displayName: "Local",
+  subscribers: [],
+  services: [],
+};
 
 const registry: HomeRegistry = {
   schemaVersion: 2,
@@ -135,7 +141,11 @@ test("desktop runtime forwards both role observations, device events, and correl
   let subscriberObserve: Observe | undefined;
   let persistSubscribers: ((subscribers: Array<{ label: string; publicKey: string }>) => Promise<void>) | undefined;
   let subscriberConnection: SubscriberRuntimeStatus["connection"] = "connected";
-  const publisher = { stateDir: "/test-owned/publisher", configPath: "/test-owned/config.toml" };
+  const publisher = {
+    stateDir: "/test-owned/publisher",
+    configPath: "/test-owned/config.toml",
+    policy: publisherPolicy,
+  };
   const subscriber = {
     stateDir: "/test-owned/subscriber",
     gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -145,14 +155,7 @@ test("desktop runtime forwards both role observations, device events, and correl
     createDht: dht,
     acquirePublisherLock: async () => ({ release: async () => undefined }),
     acquireSubscriberLock: async () => ({ release: async () => undefined }),
-    loadPublisherState: async () => ({
-      config: { seed: "11".repeat(32), subscribers: [] },
-      manifest: {
-        displayName: "Local",
-        publisherConfig: "publisher.json",
-        services: [],
-      },
-    }),
+    loadPublisherIdentity: async () => ({ seed: "11".repeat(32) }),
     loadSubscriberConnectionState: async () => ({
       identity: { publicKey: subscriberKey, secretKey: "22".repeat(64) },
       contact: {
@@ -272,7 +275,7 @@ test("desktop runtime evicts the oldest subscriber attempt while retaining newer
       createDht: dht,
       acquirePublisherLock: async () => ({ release: async () => undefined }),
       acquireSubscriberLock: async () => ({ release: async () => undefined }),
-      loadPublisherState: async () => {
+      loadPublisherIdentity: async () => {
         throw new Error("publisher is not configured");
       },
       loadSubscriberConnectionState: async () => ({

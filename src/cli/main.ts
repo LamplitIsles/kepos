@@ -21,11 +21,7 @@ import {
 } from "../runtime/device.js";
 import {
   getPublisherPublicKey,
-  setPublisherSubscribers,
-  setPublisherServices,
   setupPublisher,
-  type SetPublisherSubscribersOptions,
-  type SetPublisherServicesOptions,
   type SetupPublisherOptions,
   type SetupPublisherResult,
 } from "../state/publisher.js";
@@ -44,8 +40,6 @@ import {
   parseGatewayDomainOption,
   parseMetricsListenOption,
   parseOptions,
-  parsePublisherService,
-  parseSubscriberDeviceOption,
   parseRouteOption,
   parseSubscriberService,
   repeatedOption,
@@ -102,12 +96,6 @@ export interface CliDependencies {
   setSubscriberPublisher: (
     options: SetSubscriberPublisherOptions,
   ) => Promise<string>;
-  setPublisherSubscribers: (
-    options: SetPublisherSubscribersOptions,
-  ) => Promise<void>;
-  setPublisherServices: (
-    options: SetPublisherServicesOptions,
-  ) => Promise<void>;
   getPublisherPublicKey: (stateDir: string) => Promise<string>;
   startPublisher: (
     options: StartPublisherOptions,
@@ -141,8 +129,6 @@ export function createDefaultCliDependencies(
     setupPublisher,
     setupSubscriber,
     setSubscriberPublisher,
-    setPublisherSubscribers,
-    setPublisherServices,
     getPublisherPublicKey,
     startPublisher,
     startSubscriber,
@@ -165,8 +151,6 @@ const CLI_USAGE = [
   "Commands:",
   "  setup publisher",
   "  setup subscriber",
-  "  publisher set-subscribers",
-  "  publisher set-services",
   "  publisher key",
   "  publisher run",
   "  subscriber set-publisher",
@@ -199,14 +183,6 @@ export async function runCli(
     await setSubscriberPublisherCommand(rest, dependencies);
     return;
   }
-  if (group === "publisher" && action === "set-subscribers") {
-    await setPublisherSubscribersCommand(rest, dependencies);
-    return;
-  }
-  if (group === "publisher" && action === "set-services") {
-    await setPublisherServicesCommand(rest, dependencies);
-    return;
-  }
   if (group === "publisher" && action === "key") {
     await getPublisherPublicKeyCommand(rest, dependencies);
     return;
@@ -232,40 +208,9 @@ async function setupPublisherCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
 ): Promise<void> {
-  const options = parseOptions(arguments_, [
-    "--state",
-    "--display-name",
-    "--subscriber-device",
-    "--service",
-    "--config",
-  ]);
-  const config = await dependencies.loadConfig(configPath(options));
-  if (
-    config?.publisher &&
-    ["--display-name", "--subscriber-device", "--service"].some((name) =>
-      options.has(name),
-    )
-  ) {
-    throw new Error(
-      "publisher policy is managed by TOML; remove CLI policy options",
-    );
-  }
-  const displayName =
-    singleOption(options, "--display-name") ?? config?.publisher?.displayName;
-  if (!displayName) throw new Error("--display-name is required");
-  const subscriberDevices = options.has("--subscriber-device")
-    ? repeatedOption(options, "--subscriber-device").map(
-        parseSubscriberDeviceOption,
-      )
-    : (config?.publisher?.subscribers ?? []);
-  const services = options.has("--service")
-    ? repeatedOption(options, "--service").map(parsePublisherService)
-    : (config?.publisher?.services ?? []);
+  const options = parseOptions(arguments_, ["--state"]);
   const result = await dependencies.setupPublisher({
     stateDir: requiredState(options),
-    displayName,
-    subscriberDevices,
-    services,
   });
   dependencies.stdout(`Publisher key: ${result.publisherKey}`);
 }
@@ -298,44 +243,6 @@ async function setSubscriberPublisherCommand(
   dependencies.stdout("Publisher contact updated");
 }
 
-async function setPublisherSubscribersCommand(
-  arguments_: readonly string[],
-  dependencies: CliDependencies,
-): Promise<void> {
-  const options = parseOptions(arguments_, [
-    "--state",
-    "--subscriber-device",
-    "--config",
-  ]);
-  await rejectTomlPublisherPolicy(options, dependencies);
-  await dependencies.setPublisherSubscribers({
-    stateDir: requiredState(options),
-    subscriberDevices: repeatedOption(options, "--subscriber-device").map(
-      parseSubscriberDeviceOption,
-    ),
-  });
-  dependencies.stdout("Publisher subscriber devices updated");
-}
-
-async function setPublisherServicesCommand(
-  arguments_: readonly string[],
-  dependencies: CliDependencies,
-): Promise<void> {
-  const options = parseOptions(arguments_, [
-    "--state",
-    "--service",
-    "--config",
-  ]);
-  await rejectTomlPublisherPolicy(options, dependencies);
-  await dependencies.setPublisherServices({
-    stateDir: requiredState(options),
-    services: repeatedOption(options, "--service").map(
-      parsePublisherService,
-    ),
-  });
-  dependencies.stdout("Publisher services updated");
-}
-
 async function getPublisherPublicKeyCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
@@ -345,15 +252,6 @@ async function getPublisherPublicKeyCommand(
     requiredState(options),
   );
   dependencies.stdout(`Publisher key: ${publisherKey}`);
-}
-
-async function rejectTomlPublisherPolicy(
-  options: ReturnType<typeof parseOptions>,
-  dependencies: CliDependencies,
-): Promise<void> {
-  const config = await dependencies.loadConfig(configPath(options));
-  if (!config?.publisher) return;
-  throw new Error("publisher policy is managed by TOML; edit the config file");
 }
 
 async function runPublisherCommand(
@@ -369,6 +267,7 @@ async function runPublisherCommand(
   ]);
   const mode = observationMode(options);
   const config = await dependencies.loadConfig(configPath(options));
+  const policy = requirePublisherPolicy(config, "publisher run");
   const stateDir = requiredState(options);
   const lock = await dependencies.acquirePublisherRuntimeLock(stateDir);
   let stopPolicyReload: (() => void) | undefined;
@@ -377,36 +276,36 @@ async function runPublisherCommand(
     const running = await dependencies.startPublisher({
       stateDir,
       bootstrap: resolvedBootstrap(options, config),
-      policy: config?.publisher,
+      policy,
       observe: observationWriter(mode, dependencies),
       metricsListen: parseMetricsListenOption(options),
     });
-    if (config?.publisher) {
-      let polling = true;
-      let pollingStopped = false;
-      const pollPolicy = (): void => {
-        if (!polling) return;
-        policyReloads = policyReloads.then(async () => {
-          try {
-            const nextConfig = await dependencies.loadConfig(configPath(options));
-            if (!nextConfig?.publisher) {
-              throw new Error("publisher policy section is missing");
-            }
-            await running.applyPolicy(nextConfig.publisher);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            dependencies.stderr(`Publisher policy reload failed: ${message}`);
-          }
-        });
-      };
-      const cancel = dependencies.schedulePolicyReload(pollPolicy, 1_000);
-      stopPolicyReload = (): void => {
-        if (pollingStopped) return;
-        pollingStopped = true;
-        polling = false;
-        cancel();
-      };
-    }
+    let polling = true;
+    let pollingStopped = false;
+    const pollPolicy = (): void => {
+      if (!polling) return;
+      policyReloads = policyReloads.then(async () => {
+        try {
+          const nextConfig = await dependencies.loadConfig(configPath(options));
+          const nextPolicy = requirePublisherPolicy(
+            nextConfig,
+            "publisher policy reload",
+          );
+          await running.applyPolicy(nextPolicy);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          dependencies.stderr(`Publisher policy reload failed: ${message}`);
+        }
+      });
+    };
+    const cancel = dependencies.schedulePolicyReload(pollPolicy, 1_000);
+    stopPolicyReload = (): void => {
+      if (pollingStopped) return;
+      pollingStopped = true;
+      polling = false;
+      cancel();
+    };
     const stop = (() => {
       let stopping: Promise<void> | undefined;
       return (): Promise<void> => {
@@ -511,6 +410,9 @@ async function runDeviceCommand(
       "device run requires --publisher-state or --subscriber-state",
     );
   }
+  const publisherPolicy = publisherState
+    ? requirePublisherPolicy(config, "device run")
+    : undefined;
   if (
     !subscriberState &&
     [
@@ -549,7 +451,7 @@ async function runDeviceCommand(
         ? {
             publisher: {
               stateDir: publisherState,
-              policy: config?.publisher,
+              policy: publisherPolicy!,
               observe,
               metricsListen: parseMetricsListenOption(options),
             },
@@ -636,6 +538,18 @@ function configPath(
 ): string | undefined {
   const value = singleOption(options, "--config");
   return value === undefined ? undefined : path.resolve(value);
+}
+
+function requirePublisherPolicy(
+  config: KeposConfig | undefined,
+  command: string,
+): NonNullable<KeposConfig["publisher"]> {
+  if (!config?.publisher) {
+    throw new Error(
+      `${command} requires a complete [publisher] policy in TOML`,
+    );
+  }
+  return config.publisher;
 }
 
 function observationWriter(

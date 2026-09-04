@@ -13,6 +13,7 @@ import type { DhtNode } from "../src/mux/hyperdht.js";
 import { HomeRegistryTimeoutError } from "../src/runtime/registry-client.js";
 import type {
   PublisherRuntimeStatus,
+  PublisherRuntimePolicy,
   RunningPublisher,
 } from "../src/runtime/publisher.js";
 import type {
@@ -32,6 +33,11 @@ const replacementPublisherSeed = "33".repeat(32);
 const replacementPublisherKey = derivePublisherHomeKey(
   replacementPublisherSeed,
 );
+const localPublisherPolicy: PublisherRuntimePolicy = {
+  displayName: "Mac smoke",
+  subscribers: [{ label: "Pixel", publicKey: "22".repeat(32) }],
+  services: [{ id: "smoke", name: "Smoke", targetPort: 18_080 }],
+};
 const registry: HomeRegistry = {
   schemaVersion: 2,
   revision: 1,
@@ -68,7 +74,7 @@ test("desktop runtime starts and stops a publisher-only role", async () => {
   let startedPolicy: unknown = "not-started";
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
     },
     dependencies(events, {
@@ -80,7 +86,7 @@ test("desktop runtime starts and stops a publisher-only role", async () => {
     }),
   );
 
-  assert.equal(startedPolicy, undefined);
+  assert.deepEqual(startedPolicy, localPublisherPolicy);
 
   assert.deepEqual(snapshots, [
     {
@@ -113,7 +119,7 @@ test("desktop runtime starts and stops a publisher-only role", async () => {
   ]);
   assert.deepEqual(events.slice(0, 3), [
     "publisher-lock:acquire:/state/publisher",
-    "publisher-state:load:/state/publisher",
+    "publisher-identity:load:/state/publisher",
     "publisher:start:/state/publisher",
   ]);
 
@@ -583,7 +589,7 @@ test("desktop runtime starts both roles concurrently and polls publisher counter
   let publisherStatusValue = publisherStatus(0, 0);
   const startTask = startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -650,7 +656,7 @@ test("desktop runtime exposes publisher pairing invitation and approval actions"
   let status = publisherStatus(0, 0);
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
     },
     dependencies(events, {
@@ -725,7 +731,7 @@ test("desktop keeps a failed approval pending and exposes its error", async () =
   };
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       onSnapshot: (snapshot) => snapshots.push(snapshot),
     },
     dependencies([], {
@@ -873,7 +879,7 @@ test("desktop runtime reconfigures only the changed role", async () => {
     "publisher:stop",
     "publisher-lock:release",
     "publisher-lock:acquire:/state/publisher",
-    "publisher-state:load:/state/publisher",
+    "publisher-identity:load:/state/publisher",
     "publisher:start:/state/publisher",
   ]);
   assert.equal(events.slice(before).includes("subscriber:stop"), false);
@@ -884,7 +890,7 @@ test("desktop runtime reconfigures only the changed role", async () => {
 
 test("desktop transport reconfiguration replaces one node and restarts both roles", async () => {
   const events: string[] = [];
-  const publisher = { stateDir: "/state/publisher" };
+  const publisher = { stateDir: "/state/publisher", policy: localPublisherPolicy };
   const subscriber = {
     stateDir: "/state/subscriber",
     gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -962,7 +968,7 @@ test("desktop keeps the shared node when one role cannot start", async () => {
   const dht = trackedDht(events, "shared");
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1004,6 +1010,7 @@ test("desktop exposes an initial shared transport failure", async () => {
       {
         publisher: {
           stateDir: "/state/publisher",
+          policy: localPublisherPolicy,
           lock: {
             release: async () => {
               events.push("publisher-lock:release");
@@ -1059,7 +1066,7 @@ test("desktop transport replacement failure shows the target relationship", asyn
   const runtime = await startDesktopRuntime(
     {
       bootstrap: [{ host: "bootstrap-one.example", port: 49_737 }],
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1073,18 +1080,10 @@ test("desktop transport replacement failure shows the target relationship", asyn
         if (creates === 2) throw new Error("target transport unavailable");
         return trackedDht(events, options.bootstrap?.[0]?.host ?? "default");
       },
-      loadPublisherState: async (stateDir) => {
+      loadPublisherIdentity: async (stateDir) => {
         const replacement = stateDir === "/state/replacement-publisher";
         return {
-          config: {
-            seed: replacement ? replacementPublisherSeed : localPublisherSeed,
-            subscribers: [{ label: "Pixel", publicKey: "22".repeat(32) }],
-          },
-          manifest: {
-            displayName: replacement ? "Replacement Mac" : "Mac smoke",
-            publisherConfig: "publisher.json",
-            services: [],
-          },
+          seed: replacement ? replacementPublisherSeed : localPublisherSeed,
         };
       },
       loadSubscriberConnectionState: async (stateDir) => {
@@ -1112,7 +1111,14 @@ test("desktop transport replacement failure shows the target relationship", asyn
   await assert.rejects(
     runtime.reconfigure({
       bootstrap: [{ host: "bootstrap-two.example", port: 49_738 }],
-      publisher: { stateDir: "/state/replacement-publisher" },
+      publisher: {
+        stateDir: "/state/replacement-publisher",
+        policy: {
+          displayName: "Replacement Mac",
+          subscribers: localPublisherPolicy.subscribers,
+          services: [],
+        },
+      },
       subscriber: {
         stateDir: "/state/replacement-subscriber",
         gatewayPort: 17_481,
@@ -1142,7 +1148,7 @@ test("desktop transport replacement failure shows the target relationship", asyn
 test("desktop reports transport replacement failure and can retry it", async () => {
   const events: string[] = [];
   const snapshots: DesktopSnapshot[] = [];
-  const publisher = { stateDir: "/state/publisher" };
+  const publisher = { stateDir: "/state/publisher", policy: localPublisherPolicy };
   const subscriber = {
     stateDir: "/state/subscriber",
     gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1190,7 +1196,7 @@ test("desktop reports transport replacement failure and can retry it", async () 
 test("desktop recreates the original transport after a failed replacement is rolled back", async () => {
   const events: string[] = [];
   const snapshots: DesktopSnapshot[] = [];
-  const publisher = { stateDir: "/state/publisher" };
+  const publisher = { stateDir: "/state/publisher", policy: localPublisherPolicy };
   const subscriber = {
     stateDir: "/state/subscriber",
     gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1234,7 +1240,7 @@ test("desktop recreates the original transport after a failed replacement is rol
 
 test("desktop retains a transport until its failed destruction succeeds", async () => {
   const events: string[] = [];
-  const publisher = { stateDir: "/state/publisher" };
+  const publisher = { stateDir: "/state/publisher", policy: localPublisherPolicy };
   const subscriber = {
     stateDir: "/state/subscriber",
     gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1294,7 +1300,7 @@ test("desktop reconfiguration attempts both role cleanups after one fails", asyn
   const events: string[] = [];
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1325,7 +1331,7 @@ test("desktop runtime isolates publisher startup failure from subscriber", async
   const snapshots: DesktopSnapshot[] = [];
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1365,7 +1371,7 @@ test("desktop runtime isolates subscriber startup failure from publisher", async
   const snapshots: DesktopSnapshot[] = [];
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1406,7 +1412,7 @@ test("desktop runtime stops live roles before releasing locks after status failu
   const snapshots: DesktopSnapshot[] = [];
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1528,7 +1534,7 @@ test("desktop runtime attempts every cleanup step and preserves first failure", 
   const events: string[] = [];
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1557,7 +1563,7 @@ test("desktop runtime cleans every role when the stopping snapshot fails", async
   const events: string[] = [];
   const runtime = await startDesktopRuntime(
     {
-      publisher: { stateDir: "/state/publisher" },
+      publisher: { stateDir: "/state/publisher", policy: localPublisherPolicy },
       subscriber: {
         stateDir: "/state/subscriber",
         gatewayPort: DEFAULT_GATEWAY_PORT,
@@ -1686,21 +1692,9 @@ function dependencies(
         },
       };
     },
-    loadPublisherState: async (stateDir) => {
-      events.push(`publisher-state:load:${stateDir}`);
-      return {
-        config: {
-          seed: localPublisherSeed,
-          subscribers: [{ label: "Pixel", publicKey: "22".repeat(32) }],
-        },
-        manifest: {
-          displayName: "Mac smoke",
-          publisherConfig: "publisher.json",
-          services: [
-            { id: "smoke", name: "Smoke", kind: "tcp", targetPort: 18_080 },
-          ],
-        },
-      };
+    loadPublisherIdentity: async (stateDir) => {
+      events.push(`publisher-identity:load:${stateDir}`);
+      return { seed: localPublisherSeed };
     },
     loadSubscriberConnectionState: async (stateDir) => {
       events.push(`subscriber-state:load:${stateDir}`);

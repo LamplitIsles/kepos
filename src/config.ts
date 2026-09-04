@@ -1,8 +1,7 @@
 import b4a from "b4a";
 
-export interface PublisherConfig {
+export interface PublisherIdentity {
   seed: string;
-  subscribers: SubscriberDevice[];
 }
 
 export interface SubscriberDevice {
@@ -24,15 +23,8 @@ export interface PublisherService {
   allow?: string[];
 }
 
-export interface PublisherManifest {
-  displayName: string;
-  publisherConfig: string;
-  services: PublisherService[];
-}
-
 const keyHexPattern = /^[0-9a-f]{64}$/;
 const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
-const publisherConfigFilePattern = /^publisher\.json$/;
 const maximumSubscriberLabelBytes = 128;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -112,33 +104,27 @@ export function parseSubscriberDevices(
   return devices;
 }
 
-function parseTargetPort(value: unknown): number {
+function parseTargetPort(value: unknown, field = "targetPort"): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65_535) {
-    throw new Error("targetPort must be an integer from 1 through 65535");
+    throw new Error(`${field} must be an integer from 1 through 65535`);
   }
   return value;
 }
 
-function parsePublisherConfigFile(value: unknown, field: string): string {
-  if (typeof value !== "string" || !publisherConfigFilePattern.test(value)) {
-    throw new Error(`${field} must be a safe *.publisher.json filename`);
-  }
-  return value;
-}
-
-export function parsePublisherConfig(value: unknown): PublisherConfig {
+export function parsePublisherIdentity(value: unknown): PublisherIdentity {
   if (!isRecord(value)) {
-    throw new Error("publisher config must be an object");
+    throw new Error("publisher identity must be an object");
   }
-  rejectUnknownFields(value, ["seed", "subscribers"], "publisher config");
+  rejectUnknownFields(value, ["seed"], "publisher identity");
 
   const seed = parseKeyHex(value.seed, "seed");
-  const subscribers = parseSubscriberDevices(value.subscribers);
-  return { seed, subscribers };
+  return { seed };
 }
 
-export function serializePublisherConfig(config: PublisherConfig): string {
-  return `${JSON.stringify(parsePublisherConfig(config), null, 2)}\n`;
+export function serializePublisherIdentity(
+  identity: PublisherIdentity,
+): string {
+  return `${JSON.stringify(parsePublisherIdentity(identity), null, 2)}\n`;
 }
 
 export function parseSubscriberContact(value: unknown): SubscriberContact {
@@ -175,69 +161,38 @@ export function serializeSubscriberContact(contact: SubscriberContact): string {
   return `${JSON.stringify(parseSubscriberContact(contact), null, 2)}\n`;
 }
 
-export function parsePublisherManifest(value: unknown): PublisherManifest {
+export function parsePublisherService(
+  value: unknown,
+  field = "publisher service",
+): PublisherService {
   if (!isRecord(value)) {
-    throw new Error("publisher manifest must be an object");
+    throw new Error(`${field} must be an object`);
   }
   rejectUnknownFields(
     value,
-    ["displayName", "publisherConfig", "services"],
-    "publisher manifest",
+    ["id", "name", "kind", "targetPort", "allow"],
+    field,
   );
-
-  const displayName = parseNonEmptyString(value.displayName, "displayName");
-  const publisherConfig = parsePublisherConfigFile(
-    value.publisherConfig,
-    "publisherConfig",
-  );
-  if (!Array.isArray(value.services)) {
-    throw new Error("services must be an array");
+  if (typeof value.id !== "string" || !serviceIdPattern.test(value.id)) {
+    throw new Error(`${field}.id must be a lowercase service identifier`);
+  }
+  if (value.id === "home") {
+    throw new Error(`${field}.id uses reserved service id home`);
+  }
+  const kind = value.kind === undefined ? "tcp" : value.kind;
+  if (kind !== "tcp" && kind !== "http") {
+    throw new Error(`${field}.kind must be tcp or http`);
   }
 
-  const seenIds = new Set<string>();
-  const services = value.services.map((entry, index): PublisherService => {
-    if (!isRecord(entry)) {
-      throw new Error(`services[${index}] must be an object`);
-    }
-    rejectUnknownFields(
-      entry,
-      ["id", "name", "kind", "targetPort", "allow"],
-      `services[${index}]`,
-    );
-
-    if (typeof entry.id !== "string" || !serviceIdPattern.test(entry.id)) {
-      throw new Error(`services[${index}].id must be a lowercase service identifier`);
-    }
-    if (entry.id === "home") {
-      throw new Error(`services[${index}].id uses reserved service id home`);
-    }
-    if (seenIds.has(entry.id)) {
-      throw new Error(`duplicate service id: ${entry.id}`);
-    }
-    seenIds.add(entry.id);
-
-    const kind = entry.kind === undefined ? "tcp" : entry.kind;
-    if (kind !== "tcp" && kind !== "http") {
-      throw new Error(`services[${index}].kind must be tcp or http`);
-    }
-
-    return {
-      id: entry.id,
-      name: parseNonEmptyString(entry.name, `services[${index}].name`),
-      kind,
-      targetPort: parseTargetPort(entry.targetPort),
-      ...(entry.allow === undefined
-        ? {}
-        : {
-            allow: parseServiceAllow(
-              entry.allow,
-              `services[${index}].allow`,
-            ),
-          }),
-    };
-  });
-
-  return { displayName, publisherConfig, services };
+  return {
+    id: value.id,
+    name: parseNonEmptyString(value.name, `${field}.name`),
+    kind,
+    targetPort: parseTargetPort(value.targetPort, `${field}.targetPort`),
+    ...(value.allow === undefined
+      ? {}
+      : { allow: parseServiceAllow(value.allow, `${field}.allow`) }),
+  };
 }
 
 function parseServiceAllow(value: unknown, field: string): string[] {
@@ -249,6 +204,20 @@ function parseServiceAllow(value: unknown, field: string): string[] {
   );
 }
 
-export function serializePublisherManifest(manifest: PublisherManifest): string {
-  return `${JSON.stringify(parsePublisherManifest(manifest), null, 2)}\n`;
+export function parsePublisherServices(
+  value: unknown,
+  field = "services",
+): PublisherService[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${field} must be an array`);
+  }
+  const seenIds = new Set<string>();
+  return value.map((entry, index) => {
+    const service = parsePublisherService(entry, `${field}[${index}]`);
+    if (seenIds.has(service.id)) {
+      throw new Error(`duplicate service id: ${service.id}`);
+    }
+    seenIds.add(service.id);
+    return service;
+  });
 }

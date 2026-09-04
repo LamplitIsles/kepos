@@ -19,16 +19,14 @@ import { test } from "node:test";
 
 import {
   startPublisher,
+  type PublisherRuntimePolicy,
   type RunningPublisher,
 } from "../src/runtime/publisher.js";
 import {
   startSubscriber,
   type RunningSubscriber,
 } from "../src/runtime/subscriber.js";
-import {
-  loadPublisherState,
-  setupPublisher,
-} from "../src/state/publisher.js";
+import { setupPublisher } from "../src/state/publisher.js";
 import {
   setSubscriberPendingPublisher,
   setSubscriberPublisher,
@@ -69,6 +67,26 @@ function subscriberDevices(
     publicKey,
     label: `subscriber-${index + 1}`,
   }));
+}
+
+async function setupTestPublisher(options: {
+  stateDir: string;
+  displayName: string;
+  subscriberDevices: Array<{ publicKey: string; label: string }>;
+  services: PublisherRuntimePolicy["services"];
+}): Promise<{
+  publisherSetup: Awaited<ReturnType<typeof setupPublisher>>;
+  policy: PublisherRuntimePolicy;
+}> {
+  const publisherSetup = await setupPublisher({ stateDir: options.stateDir });
+  return {
+    publisherSetup,
+    policy: {
+      displayName: options.displayName,
+      subscribers: options.subscriberDevices,
+      services: options.services,
+    },
+  };
 }
 
 async function listen(server: Server | HttpServer): Promise<number> {
@@ -353,7 +371,7 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
     });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -377,6 +395,7 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       observe: (event) => publisherEvents.push(event),
     });
@@ -551,7 +570,7 @@ test("forwards fragmented persistent HTTP/1.1 requests with per-request identity
   try {
     const targetPort = await listen(target);
     const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -573,6 +592,7 @@ test("forwards fragmented persistent HTTP/1.1 requests with per-request identity
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -724,7 +744,7 @@ test("delivers a target response after an HTTP client half-closes", async () => 
   try {
     const targetPort = await listen(target);
     const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -746,6 +766,7 @@ test("delivers a target response after an HTTP client half-closes", async () => 
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -829,7 +850,7 @@ test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", a
   try {
     const targetPort = await listen(target);
     const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -851,6 +872,7 @@ test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", a
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -924,7 +946,7 @@ test("subscriber stop closes an active service tunnel before its listener", asyn
   try {
     const targetPort = await listen(target);
     const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -939,6 +961,7 @@ test("subscriber stop closes an active service tunnel before its listener", asyn
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -989,7 +1012,7 @@ test("one publisher accepts multiple subscribers with independent connections", 
       setupSubscriber({ stateDir: subscriberAState }),
       setupSubscriber({ stateDir: subscriberBState }),
     ]);
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([
@@ -1015,6 +1038,7 @@ test("one publisher accepts multiple subscribers with independent connections", 
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriberA = await startSubscriber({
@@ -1077,7 +1101,7 @@ test("publisher replaces an older outer for the same subscriber key", async () =
     const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
     });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -1092,6 +1116,7 @@ test("publisher replaces an older outer for the same subscriber key", async () =
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       observe: (event) => {
         publisherEvents.push(event);
@@ -1173,7 +1198,7 @@ test("publisher denies a non-current outer using the same subscriber key", async
     const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
     });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -1188,6 +1213,7 @@ test("publisher denies a non-current outer using the same subscriber key", async
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -1270,7 +1296,7 @@ test("service allowlists restrict channels and subscriber registries", async () 
       setupSubscriber({ stateDir: allowedState }),
       setupSubscriber({ stateDir: deniedState }),
     ]);
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([
@@ -1398,7 +1424,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
       setupSubscriber({ stateDir: allowedState }),
       setupSubscriber({ stateDir: removedState }),
     ]);
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "original",
       subscriberDevices: subscriberDevices([
@@ -1617,7 +1643,7 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
       setupSubscriber({ stateDir: allowedState }),
       setupSubscriber({ stateDir: unknownState }),
     ]);
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([allowedSetup.publicKey]),
@@ -1638,6 +1664,7 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       observe: (event) => publisherEvents.push(event),
     });
@@ -1704,10 +1731,11 @@ test("publisher approves an unknown subscriber on its pairing outer", async () =
   let subscriberMux: RunningMuxSubscriber | undefined;
   let testError: unknown;
   const pairingEvents: Observation[] = [];
+  let persistedSubscribers: Array<{ publicKey: string; label: string }> = [];
 
   try {
     const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: [],
@@ -1722,8 +1750,12 @@ test("publisher approves an unknown subscriber on its pairing outer", async () =
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       observe: (event) => pairingEvents.push(event),
+      persistSubscribers: async (subscribers) => {
+        persistedSubscribers = subscribers;
+      },
     });
     const invitation = publisher.createPairingInvitation();
     const parsed = parsePairingInvitation(invitation.uri);
@@ -1760,8 +1792,7 @@ test("publisher approves an unknown subscriber on its pairing outer", async () =
       () => publisher?.activeSubscribers() === 1,
       "approved subscriber did not become active",
     );
-    const persisted = await loadPublisherState(publisherState);
-    assert.deepEqual(persisted.config.subscribers, [
+    assert.deepEqual(persistedSubscribers, [
       { publicKey: subscriberSetup.publicKey, label: "Neil's test device" },
     ]);
     assert.deepEqual(
@@ -1814,7 +1845,7 @@ test("publisher closes an idle pairing candidate when its invitation expires", a
 
   try {
     await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: [],
@@ -1830,6 +1861,7 @@ test("publisher closes an idle pairing candidate when its invitation expires", a
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       now: () => now,
       observe: (event) => pairingEvents.push(event),
@@ -1914,16 +1946,17 @@ test("publisher closes non-selected candidates when one reserves the invitation"
   let testError: unknown;
 
   try {
-    const [, , publisherSetup] = await Promise.all([
+    const [, , publisherBundle] = await Promise.all([
       setupSubscriber({ stateDir: selectedState }),
       setupSubscriber({ stateDir: idleState }),
-      setupPublisher({
+      setupTestPublisher({
         stateDir: publisherState,
         displayName: "kosmos",
         subscriberDevices: [],
         services: [],
       }),
     ]);
+    const { publisherSetup, policy } = publisherBundle;
     await Promise.all([
       setSubscriberPendingPublisher({
         stateDir: selectedState,
@@ -1940,6 +1973,7 @@ test("publisher closes non-selected candidates when one reserves the invitation"
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     const invitation = parsePairingInvitation(
@@ -2028,7 +2062,7 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
 
   try {
     await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: [],
@@ -2044,6 +2078,7 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
       persistSubscribers: async () => {
         throw new Error("disk full");
@@ -2078,10 +2113,7 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
     assert.equal(publisher.activeSubscribers(), 0);
     assert.equal(publisher.pairingStatus().phase, "pending");
     await assert.rejects(() => subscriberMux!.open("home"), /not approved/i);
-    assert.deepEqual(
-      (await loadPublisherState(publisherState)).config.subscribers,
-      [],
-    );
+    assert.deepEqual(policy.subscribers, []);
 
     publisher.denyPairing();
     await assert.rejects(pairing, /denied|closed/i);
@@ -2118,10 +2150,11 @@ test("subscriber runtime pairs and promotes its pending contact without reconnec
   let publisher: RunningPublisher | undefined;
   let subscriber: RunningSubscriber | undefined;
   let testError: unknown;
+  let persistedSubscribers: PublisherRuntimePolicy["subscribers"] | undefined;
 
   try {
     await setupSubscriber({ stateDir: subscriberState });
-    await setupPublisher({
+    const { policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: [],
@@ -2131,6 +2164,10 @@ test("subscriber runtime pairs and promotes its pending contact without reconnec
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
+      persistSubscribers: async (subscribers) => {
+        persistedSubscribers = subscribers;
+      },
       log: noLog,
     });
     const invitation = publisher.createPairingInvitation();
@@ -2156,6 +2193,13 @@ test("subscriber runtime pairs and promotes its pending contact without reconnec
 
     assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
     assert.equal(publisher.acceptedConnections(), 1);
+    assert.deepEqual(persistedSubscribers, [
+      {
+        publicKey: (await loadSubscriberState(subscriberState)).identity
+          .publicKey,
+        label: "Neil's test device",
+      },
+    ]);
     assert.equal((await loadSubscriberState(subscriberState)).contact.label, "kosmos");
   } catch (error) {
     testError = error;
@@ -2189,7 +2233,7 @@ test("subscriber recovers a pending contact after publisher approval response is
 
   try {
     const subscriberSetup = await setupSubscriber({ stateDir: subscriberState });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -2204,6 +2248,7 @@ test("subscriber recovers a pending contact after publisher approval response is
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -2251,7 +2296,7 @@ test("subscriber reconnects in the background without changing local ports", asy
     const subscriberSetup = await setupSubscriber({
       stateDir: subscriberState,
     });
-    const publisherSetup = await setupPublisher({
+    const { publisherSetup, policy } = await setupTestPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
@@ -2266,6 +2311,7 @@ test("subscriber reconnects in the background without changing local ports", asy
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
     subscriber = await startSubscriber({
@@ -2283,6 +2329,7 @@ test("subscriber reconnects in the background without changing local ports", asy
     publisher = await startPublisher({
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
+      policy,
       log: noLog,
     });
 

@@ -4,10 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import {
-  loadKeposConfig,
-  parseKeposConfig,
-} from "../src/app-config.js";
+import { loadKeposConfig, parseKeposConfig } from "../src/app-config.js";
 import {
   defaultKeposConfigPath,
   defaultKeposStateRoot,
@@ -130,6 +127,24 @@ services = []
   );
 });
 
+test("shared config preserves an explicit TCP service kind", () => {
+  const config = parseKeposConfig(`
+[publisher]
+display_name = "kosmos"
+subscribers = []
+
+[[publisher.services]]
+id = "ssh"
+name = "SSH"
+kind = "tcp"
+target_port = 22
+`);
+
+  assert.deepEqual(config.publisher?.services, [
+    { id: "ssh", name: "SSH", kind: "tcp", targetPort: 22 },
+  ]);
+});
+
 test("shared config rejects incomplete or invalid role policy", () => {
   assert.throws(
     () => parseKeposConfig('[publisher]\ndisplay_name = "kosmos"'),
@@ -143,7 +158,7 @@ test("shared config rejects incomplete or invalid role policy", () => {
     /unknown field: publisher\.extra/,
   );
   assert.throws(
-    () => parseKeposConfig('[subscriber]\ngateway_port = 70000'),
+    () => parseKeposConfig("[subscriber]\ngateway_port = 70000"),
     /subscriber\.gateway_port.*65535/,
   );
   assert.throws(

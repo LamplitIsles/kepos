@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { DESKTOP_BOOTSTRAP_ASSET } from "../apps/desktop/src/paths.js";
 
 import { parseKeposConfig, type KeposConfig } from "../src/app-config.js";
-import { parsePublisherConfig } from "../src/config.js";
+import { parsePublisherIdentity } from "../src/config.js";
 import { DEFAULT_GATEWAY_PORT } from "../src/home/gateway.js";
 import { setupPublisher } from "../src/state/publisher.js";
 import { setupSubscriber } from "../src/state/subscriber.js";
@@ -338,13 +338,11 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
       environment,
       platform: "darwin",
     });
-    const publisherConfigPath = path.join(publisherStateDir, "publisher.json");
-    const publisherManifestPath = path.join(
+    const publisherIdentityPath = path.join(
       publisherStateDir,
-      "publisher.manifest.json",
+      "publisher.json",
     );
-    const publisherConfigBytes = await readFile(publisherConfigPath);
-    const publisherManifestBytes = await readFile(publisherManifestPath);
+    const publisherIdentityBytes = await readFile(publisherIdentityPath);
     const subscriberIdentityBytes = await readFile(
       path.join(subscriberStateDir, "client.identity.json"),
     );
@@ -366,8 +364,10 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
       },
     });
     assert.equal(
-      parsePublisherConfig(JSON.parse(publisherConfigBytes.toString())).subscribers[0]?.publicKey,
-      subscriberKey,
+      typeof parsePublisherIdentity(
+        JSON.parse(publisherIdentityBytes.toString()),
+      ).seed,
+      "string",
     );
 
     await writeFile(
@@ -387,10 +387,9 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
         { id: "navidrome", name: "Navidrome", targetPort: 4534 },
       ],
     });
-    assert.deepEqual(await readFile(publisherConfigPath), publisherConfigBytes);
     assert.deepEqual(
-      await readFile(publisherManifestPath),
-      publisherManifestBytes,
+      await readFile(publisherIdentityPath),
+      publisherIdentityBytes,
     );
     assert.deepEqual(
       await readFile(path.join(subscriberStateDir, "client.identity.json")),
@@ -416,12 +415,12 @@ test("desktop publisher bootstrap preserves an existing identity", async () => {
   try {
     const existing = await setupPublisher({
       stateDir: publisherStateDir,
-      displayName: "Home",
-      subscriberDevices: [],
-      services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     });
-    const publisherConfigPath = path.join(publisherStateDir, "publisher.json");
-    const originalPublisherConfig = await readFile(publisherConfigPath);
+    const publisherIdentityPath = path.join(
+      publisherStateDir,
+      "publisher.json",
+    );
+    const originalPublisherIdentity = await readFile(publisherIdentityPath);
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(
       configPath,
@@ -435,17 +434,19 @@ test("desktop publisher bootstrap preserves an existing identity", async () => {
     });
 
     assert.equal(
-      parsePublisherConfig(JSON.parse((await readFile(publisherConfigPath)).toString())).seed,
-      parsePublisherConfig(JSON.parse(originalPublisherConfig.toString())).seed,
+      parsePublisherIdentity(
+        JSON.parse((await readFile(publisherIdentityPath)).toString()),
+      ).seed,
+      parsePublisherIdentity(JSON.parse(originalPublisherIdentity.toString()))
+        .seed,
     );
     assert.equal(options.publisher?.stateDir, publisherStateDir);
     assert.equal(
-      (await setupPublisher({
-        stateDir: publisherStateDir,
-        displayName: "Home",
-        subscriberDevices: [],
-        services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
-      })).publisherKey,
+      (
+        await setupPublisher({
+          stateDir: publisherStateDir,
+        })
+      ).publisherKey,
       existing.publisherKey,
     );
   } finally {
@@ -507,9 +508,6 @@ test("desktop publisher bootstrap validates malformed state without changing ide
   try {
     await setupPublisher({
       stateDir: publisherStateDir,
-      displayName: "Other",
-      subscriberDevices: [],
-      services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     });
     const publisherStateBefore = await readFile(
       path.join(publisherStateDir, "publisher.json"),
@@ -549,10 +547,11 @@ test("desktop publisher bootstrap validates malformed state without changing ide
     assert.equal(subscriber.created, true);
 
     await rm(publisherStateDir, { recursive: true, force: true });
-    await mkdir(publisherStateDir, { recursive: true });
+    await mkdir(publisherStateDir, { recursive: true, mode: 0o700 });
     await writeFile(
-      path.join(publisherStateDir, "publisher.manifest.json"),
+      path.join(publisherStateDir, "publisher.json"),
       "not-json",
+      { mode: 0o600 },
     );
     await assert.rejects(
       loadDesktopOptions([], {
@@ -560,7 +559,7 @@ test("desktop publisher bootstrap validates malformed state without changing ide
         environment,
         platform: "darwin",
       }),
-      /invalid state file|publisher manifest/i,
+      /invalid state file|publisher identity/i,
     );
     assert.deepEqual(
       await readFile(path.join(subscriberStateDir, "client.identity.json")),
@@ -574,11 +573,7 @@ test("desktop publisher bootstrap validates malformed state without changing ide
 
 test("desktop publisher bootstrap selects the Windows packaged state path", async () => {
   const captured: { stateDir?: string; configPath?: string } = {};
-  const ensuredPolicies: Array<{
-    displayName: string;
-    subscribers: Array<{ label: string; publicKey: string }>;
-    services: NonNullable<KeposConfig["publisher"]>["services"];
-  }> = [];
+  const ensuredStates: string[] = [];
   let config: KeposConfig = {
     publisher: {
       enabled: true,
@@ -595,15 +590,11 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
     },
     platform: "win32",
     loadConfig: async () => config,
-    ensurePublisher: async ({ stateDir, displayName, subscriberDevices, services }) => {
+    ensurePublisher: async ({ stateDir }) => {
       captured.stateDir = stateDir;
-      ensuredPolicies.push({
-        displayName,
-        subscribers: subscriberDevices,
-        services,
-      });
+      ensuredStates.push(stateDir);
       return {
-        created: ensuredPolicies.length === 1,
+        created: ensuredStates.length === 1,
         publisherKey: "aa".repeat(32),
       };
     },
@@ -640,13 +631,9 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
     },
     platform: "win32",
     loadConfig: async () => config,
-    ensurePublisher: async ({ stateDir, displayName, subscriberDevices, services }) => {
+    ensurePublisher: async ({ stateDir }) => {
       captured.stateDir = stateDir;
-      ensuredPolicies.push({
-        displayName,
-        subscribers: subscriberDevices,
-        services,
-      });
+      ensuredStates.push(stateDir);
       return { created: false, publisherKey: "aa".repeat(32) };
     },
   });
@@ -655,13 +642,9 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
     subscribers: [{ label: "tablet", publicKey: "22".repeat(32) }],
     services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
   });
-  assert.deepEqual(ensuredPolicies, [
-    { displayName: "Windows home", subscribers: [], services: [] },
-    {
-      displayName: "Renamed Windows home",
-      subscribers: [{ label: "tablet", publicKey: "22".repeat(32) }],
-      services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
-    },
+  assert.deepEqual(ensuredStates, [
+    "C:\\Users\\kepos\\AppData\\Local\\Kepos\\state\\publisher",
+    "C:\\Users\\kepos\\AppData\\Local\\Kepos\\state\\publisher",
   ]);
 });
 

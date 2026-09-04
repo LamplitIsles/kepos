@@ -10,8 +10,7 @@ import path from "node:path";
 import { parse, stringify } from "smol-toml";
 
 import {
-  parsePublisherConfig,
-  parsePublisherManifest,
+  parsePublisherServices,
   parseSubscriberDevices,
 } from "./config.js";
 import type { DhtAddress } from "./mux/hyperdht.js";
@@ -224,14 +223,19 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
     ["publisher"],
     ["enabled", "display_name", "subscribers", "services"],
   );
+  if (
+    typeof publisher.display_name !== "string" ||
+    publisher.display_name.trim().length === 0
+  ) {
+    throw new Error("publisher.display_name must be a non-empty string");
+  }
   if (!Array.isArray(publisher.subscribers)) {
     throw new Error("publisher.subscribers must be an array");
   }
   if (!Array.isArray(publisher.services)) {
     throw new Error("publisher.services must be an array");
   }
-
-  const services = publisher.services.map((value, index) => {
+  const rawServices = publisher.services.map((value, index) => {
     const service = requireTable(value, `publisher.services[${index}]`);
     rejectUnknownFields(
       service,
@@ -246,14 +250,7 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
       ...(service.allow === undefined ? {} : { allow: service.allow }),
     };
   });
-  const manifest = parsePublisherManifest({
-    displayName: publisher.display_name,
-    publisherConfig: "publisher.json",
-    services: services.map((service) => ({
-      ...service,
-      kind: service.kind ?? "tcp",
-    })),
-  });
+  const services = parsePublisherServices(rawServices, "publisher.services");
   const subscribers = parseSubscriberDevices(
     publisher.subscribers.map((value, index) => {
       const subscriber = requireTable(
@@ -272,20 +269,16 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
     }),
     "publisher.subscribers",
   );
-  parsePublisherConfig({
-    seed: "00".repeat(32),
-    subscribers,
-  });
   return {
     ...(publisher.enabled === undefined
       ? {}
       : { enabled: parseBoolean(publisher.enabled, "publisher.enabled") }),
-    displayName: manifest.displayName,
+    displayName: publisher.display_name,
     subscribers,
-    services: manifest.services.map(({ id, name, kind, targetPort, allow }, index) => ({
+    services: services.map(({ id, name, kind, targetPort, allow }, index) => ({
       id,
       name,
-      ...(services[index]?.kind === undefined ? {} : { kind }),
+      ...(rawServices[index]?.kind === undefined ? {} : { kind }),
       targetPort,
       ...(allow === undefined ? {} : { allow }),
     })),
