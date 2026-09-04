@@ -76,7 +76,7 @@ test("Windows host input is sanitized and required generation rejects missing co
       "",
       "[publisher]",
       'display_name = "must not cross the NUC boundary"',
-      "allow = []",
+      "subscribers = []",
       "services = []",
       "",
       "[subscriber]",

@@ -3,6 +3,8 @@ import path from "node:path";
 import type { DhtAddress } from "../mux/hyperdht.js";
 import { parseRoute, type Route } from "../mux/route.js";
 import type { PublisherStateService } from "../state/publisher.js";
+import { parseSubscriberDevice, type SubscriberDevice } from "../config.js";
+import type { MetricsListenAddress } from "../metrics/server.js";
 import type { SubscriberService } from "../runtime/subscriber.js";
 import {
   parseGatewayDomain,
@@ -78,6 +80,42 @@ export function parsePublisherService(value: string): PublisherStateService {
     name,
     targetPort: parseTcpPort(port, "--service target port"),
     ...(kind === undefined ? {} : { kind }),
+  };
+}
+
+export function parseSubscriberDeviceOption(value: string): SubscriberDevice {
+  const separator = value.includes("=")
+    ? value.indexOf("=")
+    : value.lastIndexOf(":");
+  if (separator <= 0 || separator === value.length - 1) {
+    throw new Error(
+      "--subscriber-device must use label:public-key or label=public-key",
+    );
+  }
+  const label = value.slice(0, separator);
+  const publicKey = value.slice(separator + 1);
+  return parseSubscriberDevice({ label, publicKey }, "--subscriber-device");
+}
+
+export function parseMetricsListenOption(
+  options: ParsedOptions,
+): MetricsListenAddress | undefined {
+  const value = singleOption(options, "--metrics-listen");
+  if (value === undefined) return undefined;
+  const separator = value.startsWith("[")
+    ? value.indexOf("]:") + 1
+    : value.lastIndexOf(":");
+  if (separator <= 0 || separator >= value.length - 1) {
+    throw new Error("--metrics-listen must use host:port");
+  }
+  const host = value.startsWith("[")
+    ? value.slice(1, separator - 1)
+    : value.slice(0, separator);
+  const port = value.slice(separator + 1);
+  if (!host) throw new Error("--metrics-listen host must be non-empty");
+  return {
+    host,
+    port: parseTcpPort(port, "--metrics-listen port", true),
   };
 }
 

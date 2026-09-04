@@ -7,6 +7,20 @@
   cfg = config.services.kepos.publisher;
   toml = pkgs.formats.toml {};
   serviceIdPattern = "^[a-z][a-z0-9-]*$";
+  subscriberDeviceType = lib.types.submodule {
+    options = {
+      label = lib.mkOption {
+        type = lib.types.nonEmptyStr;
+        description = "Publisher-local label for a trusted subscriber device.";
+      };
+      publicKey = lib.mkOption {
+        type = lib.types.strMatching "[0-9a-f]{64}";
+        description = "Subscriber device public key in lowercase hexadecimal.";
+      };
+    };
+  };
+  subscriberLabels = map (subscriber: subscriber.label) cfg.subscribers;
+  subscriberKeys = map (subscriber: subscriber.publicKey) cfg.subscribers;
   serviceType = lib.types.submodule {
     options = {
       name = lib.mkOption {
@@ -20,7 +34,7 @@
       allow = lib.mkOption {
         type = lib.types.nullOr (lib.types.listOf (lib.types.strMatching "[0-9a-f]{64}"));
         default = null;
-        description = "Subscriber public keys allowed to open this service; null inherits the publisher allowlist.";
+        description = "Subscriber public keys allowed to open this service; null inherits publisher subscriber devices.";
       };
     };
   };
@@ -38,7 +52,12 @@
     network.bootstrap = cfg.bootstrap;
     publisher = {
       display_name = cfg.displayName;
-      inherit (cfg) allow;
+      subscribers =
+        map (subscriber: {
+          inherit (subscriber) label;
+          public_key = subscriber.publicKey;
+        })
+        cfg.subscribers;
       services = publisherServices;
     };
   };
@@ -91,10 +110,10 @@ in {
       description = "Publisher name displayed by Kepos Home.";
     };
 
-    allow = lib.mkOption {
-      type = lib.types.listOf (lib.types.strMatching "[0-9a-f]{64}");
+    subscribers = lib.mkOption {
+      type = lib.types.listOf subscriberDeviceType;
       default = [];
-      description = "Allowed subscriber public keys; empty denies every subscriber.";
+      description = "Trusted subscriber devices; an empty list denies every subscriber.";
     };
 
     services = lib.mkOption {
@@ -115,6 +134,14 @@ in {
           id: id != "home" && builtins.match serviceIdPattern id != null
         ) (lib.attrNames cfg.services);
         message = "services.kepos.publisher.services names must be lowercase, non-reserved service IDs";
+      }
+      {
+        assertion = lib.length (lib.unique subscriberLabels) == lib.length subscriberLabels;
+        message = "services.kepos.publisher.subscribers labels must be unique";
+      }
+      {
+        assertion = lib.length (lib.unique subscriberKeys) == lib.length subscriberKeys;
+        message = "services.kepos.publisher.subscribers public keys must be unique";
       }
     ];
 

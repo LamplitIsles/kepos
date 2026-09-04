@@ -51,7 +51,7 @@ The tracer exercised this sequence:
 3. Confirmed the deny-all publisher policy produced no transferred bytes.
 4. Confirmed publisher and subscriber conflicting runtime ownership failed with
    the expected lock errors.
-5. Updated the publisher allowlist with `publisher set-allow`, terminated the
+5. Updated the publisher subscriber-device policy with `publisher set-subscribers`, terminated the
    publisher, observed its stale lock, and restarted it.
 6. Confirmed the publisher identity stayed stable across restart and the
    subscriber transferred 42 observable bytes with matching fixture response.

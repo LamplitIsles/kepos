@@ -20,8 +20,10 @@ A headless CLI, Nix, or container publisher cannot approve that QR
 interactively. Use the manual key flow instead:
 
 1. On Android setup, copy **This phone's subscriber key**.
-2. Add that public key to the publisher allowlist. If editing TOML for a running
-   headless publisher, restart it so the new policy takes effect.
+2. Add that public key to the publisher's labeled subscriber-device policy (for
+   example, `subscribers = [{ label = "android", public_key = "..." }]`). A
+   running headless publisher reconciles valid TOML policy changes without a
+   restart.
 3. Copy the publisher public key printed by `publisher run`.
 4. On Android, enter it under **Or enter publisher public key** and choose
    **Connect**.

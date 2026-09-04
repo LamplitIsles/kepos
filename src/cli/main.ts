@@ -21,10 +21,10 @@ import {
 } from "../runtime/device.js";
 import {
   getPublisherPublicKey,
-  setPublisherAllowlist,
+  setPublisherSubscribers,
   setPublisherServices,
   setupPublisher,
-  type SetPublisherAllowlistOptions,
+  type SetPublisherSubscribersOptions,
   type SetPublisherServicesOptions,
   type SetupPublisherOptions,
   type SetupPublisherResult,
@@ -42,8 +42,10 @@ import {
   parseGatewayPortOption,
   parseGatewayHostOption,
   parseGatewayDomainOption,
+  parseMetricsListenOption,
   parseOptions,
   parsePublisherService,
+  parseSubscriberDeviceOption,
   parseRouteOption,
   parseSubscriberService,
   repeatedOption,
@@ -100,8 +102,8 @@ export interface CliDependencies {
   setSubscriberPublisher: (
     options: SetSubscriberPublisherOptions,
   ) => Promise<string>;
-  setPublisherAllowlist: (
-    options: SetPublisherAllowlistOptions,
+  setPublisherSubscribers: (
+    options: SetPublisherSubscribersOptions,
   ) => Promise<void>;
   setPublisherServices: (
     options: SetPublisherServicesOptions,
@@ -139,7 +141,7 @@ export function createDefaultCliDependencies(
     setupPublisher,
     setupSubscriber,
     setSubscriberPublisher,
-    setPublisherAllowlist,
+    setPublisherSubscribers,
     setPublisherServices,
     getPublisherPublicKey,
     startPublisher,
@@ -163,7 +165,7 @@ const CLI_USAGE = [
   "Commands:",
   "  setup publisher",
   "  setup subscriber",
-  "  publisher set-allow",
+  "  publisher set-subscribers",
   "  publisher set-services",
   "  publisher key",
   "  publisher run",
@@ -197,8 +199,8 @@ export async function runCli(
     await setSubscriberPublisherCommand(rest, dependencies);
     return;
   }
-  if (group === "publisher" && action === "set-allow") {
-    await setPublisherAllowlistCommand(rest, dependencies);
+  if (group === "publisher" && action === "set-subscribers") {
+    await setPublisherSubscribersCommand(rest, dependencies);
     return;
   }
   if (group === "publisher" && action === "set-services") {
@@ -233,14 +235,14 @@ async function setupPublisherCommand(
   const options = parseOptions(arguments_, [
     "--state",
     "--display-name",
-    "--allow",
+    "--subscriber-device",
     "--service",
     "--config",
   ]);
   const config = await dependencies.loadConfig(configPath(options));
   if (
     config?.publisher &&
-    ["--display-name", "--allow", "--service"].some((name) =>
+    ["--display-name", "--subscriber-device", "--service"].some((name) =>
       options.has(name),
     )
   ) {
@@ -251,16 +253,18 @@ async function setupPublisherCommand(
   const displayName =
     singleOption(options, "--display-name") ?? config?.publisher?.displayName;
   if (!displayName) throw new Error("--display-name is required");
-  const subscriberPublicKeys = options.has("--allow")
-    ? repeatedOption(options, "--allow")
-    : (config?.publisher?.allow ?? []);
+  const subscriberDevices = options.has("--subscriber-device")
+    ? repeatedOption(options, "--subscriber-device").map(
+        parseSubscriberDeviceOption,
+      )
+    : (config?.publisher?.subscribers ?? []);
   const services = options.has("--service")
     ? repeatedOption(options, "--service").map(parsePublisherService)
     : (config?.publisher?.services ?? []);
   const result = await dependencies.setupPublisher({
     stateDir: requiredState(options),
     displayName,
-    subscriberPublicKeys,
+    subscriberDevices,
     services,
   });
   dependencies.stdout(`Publisher key: ${result.publisherKey}`);
@@ -294,21 +298,23 @@ async function setSubscriberPublisherCommand(
   dependencies.stdout("Publisher contact updated");
 }
 
-async function setPublisherAllowlistCommand(
+async function setPublisherSubscribersCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
 ): Promise<void> {
   const options = parseOptions(arguments_, [
     "--state",
-    "--allow",
+    "--subscriber-device",
     "--config",
   ]);
   await rejectTomlPublisherPolicy(options, dependencies);
-  await dependencies.setPublisherAllowlist({
+  await dependencies.setPublisherSubscribers({
     stateDir: requiredState(options),
-    subscriberPublicKeys: repeatedOption(options, "--allow"),
+    subscriberDevices: repeatedOption(options, "--subscriber-device").map(
+      parseSubscriberDeviceOption,
+    ),
   });
-  dependencies.stdout("Publisher allowlist updated");
+  dependencies.stdout("Publisher subscriber devices updated");
 }
 
 async function setPublisherServicesCommand(
@@ -357,6 +363,7 @@ async function runPublisherCommand(
   const options = parseOptions(arguments_, [
     "--state",
     "--observations",
+    "--metrics-listen",
     "--bootstrap",
     "--config",
   ]);
@@ -372,6 +379,7 @@ async function runPublisherCommand(
       bootstrap: resolvedBootstrap(options, config),
       policy: config?.publisher,
       observe: observationWriter(mode, dependencies),
+      metricsListen: parseMetricsListenOption(options),
     });
     if (config?.publisher) {
       let polling = true;
@@ -490,6 +498,7 @@ async function runDeviceCommand(
     "--gateway-domain",
     "--route",
     "--observations",
+    "--metrics-listen",
     "--bootstrap",
     "--config",
   ]);
@@ -513,6 +522,9 @@ async function runDeviceCommand(
     ].some((name) => options.has(name))
   ) {
     throw new Error("subscriber options require --subscriber-state");
+  }
+  if (!publisherState && options.has("--metrics-listen")) {
+    throw new Error("--metrics-listen requires --publisher-state");
   }
   const services = options.has("--subscriber-service")
     ? repeatedOption(options, "--subscriber-service").map(
@@ -539,6 +551,7 @@ async function runDeviceCommand(
               stateDir: publisherState,
               policy: config?.publisher,
               observe,
+              metricsListen: parseMetricsListenOption(options),
             },
           }
         : {}),

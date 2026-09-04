@@ -20,6 +20,11 @@ import {
   type Observe,
 } from "./observability.js";
 import { bridgeHttp1 } from "./http-forwarder.js";
+import type {
+  PublisherMetricsDirection,
+  PublisherMetricsContext,
+  PublisherMetricsHooks,
+} from "../metrics/publisher.js";
 
 const Protomux = ProtomuxModule as ProtomuxConstructor;
 const compact = compactModule as CompactEncoding;
@@ -124,7 +129,10 @@ export interface MuxPublisherOptions {
   outerId?: string;
   schedulePairingRequestDeadline?: ScheduleHeartbeat;
   serviceKind?: (serviceId: string) => "tcp" | "http";
+  /** Public identity used to add the HTTP forwarding header. */
   subscriberPublicKey?: string;
+  metricsContext?: PublisherMetricsContext;
+  metrics?: PublisherMetricsHooks;
   transportSnapshot?: () => unknown;
 }
 
@@ -489,6 +497,7 @@ class MuxTunnel extends Duplex {
       measure: boolean;
       now: () => number;
       outgoingDirection: ObservationDirection;
+      onBytes?: (direction: ObservationDirection, bytes: number) => void;
       transportSnapshot?: () => unknown;
     },
   ) {
@@ -681,6 +690,7 @@ class MuxTunnel extends Duplex {
     const observedAt = this.options.now();
     const metric = this.metrics[direction];
     metric.bytes += chunk.byteLength;
+    this.options.onBytes?.(direction, chunk.byteLength);
     metric.lastByteAt = observedAt;
     if (metric.firstByteAt !== undefined) return;
     metric.firstByteAt = observedAt;
@@ -888,7 +898,7 @@ function pairPublisherServiceProtocol(
       id,
       "publisher",
       emit,
-      options.observe !== undefined,
+      options.observe !== undefined || options.metrics !== undefined,
       now,
       options.transportSnapshot,
       () => undefined,
@@ -899,12 +909,20 @@ function pairPublisherServiceProtocol(
           const target = await options.connect(openedServiceId);
           tunnel.stream.accept();
           tunnel.messages.status.send("");
+          if (options.metrics && options.metricsContext) {
+            options.metrics.serviceChannelOpened(options.metricsContext, openedServiceId);
+            tunnel.stream.once("close", () => {
+              options.metrics?.serviceChannelClosed(options.metricsContext!, openedServiceId);
+            });
+          }
           emit("channel.open-ok", transportFields(options.transportSnapshot));
           if (options.serviceKind?.(openedServiceId) === "http") {
-            if (!options.subscriberPublicKey) {
+            const subscriberPublicKey =
+              options.metricsContext?.subscriberKey ?? options.subscriberPublicKey;
+            if (!subscriberPublicKey) {
               throw new Error("HTTP service is missing subscriber identity");
             }
-            bridgeHttp1(tunnel.stream, target, options.subscriberPublicKey);
+            bridgeHttp1(tunnel.stream, target, subscriberPublicKey);
           } else {
             bridge(tunnel.stream, target);
           }
@@ -919,8 +937,21 @@ function pairPublisherServiceProtocol(
           });
           queueMicrotask(() => tunnel.channel.close());
         }
-      },
-    );
+        },
+        (direction, bytes) => {
+          if (
+            options.metrics &&
+            options.metricsContext
+          ) {
+            options.metrics.serviceBytes(
+              options.metricsContext,
+              serviceId ?? "",
+              metricsDirection(direction),
+              bytes,
+            );
+          }
+        },
+      );
     tunnel.channel.open("");
   });
 }
@@ -1049,6 +1080,7 @@ function createTunnel(
   transportSnapshot: (() => unknown) | undefined,
   onStatus: (status: string) => void,
   onOpen?: (serviceId: string) => void | Promise<void>,
+  onBytes?: (direction: ObservationDirection, bytes: number) => void,
 ): { channel: MuxChannel; messages: TunnelMessages; stream: MuxTunnel } {
   const stream = new MuxTunnel({
     emit,
@@ -1062,6 +1094,7 @@ function createTunnel(
       role === "subscriber"
         ? "subscriber-to-publisher"
         : "publisher-to-subscriber",
+    onBytes,
     transportSnapshot,
   });
   const channel = mux.createChannel({
@@ -1104,6 +1137,14 @@ function createTunnel(
   };
   stream.attach(channel, messages);
   return { channel, messages, stream };
+}
+
+function metricsDirection(
+  direction: ObservationDirection,
+): PublisherMetricsDirection {
+  return direction === "publisher-to-subscriber"
+    ? "publisher_to_subscriber"
+    : "subscriber_to_publisher";
 }
 
 function transportFields(

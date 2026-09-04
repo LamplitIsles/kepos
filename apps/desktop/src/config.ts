@@ -4,6 +4,7 @@ import {
   type KeposConfig,
 } from "../../../src/app-config.js";
 import { defaultKeposConfigPath } from "../../../src/platform/paths.js";
+import type { SubscriberDevice } from "../../../src/config.js";
 import type { DesktopRuntimeConfiguration } from "./runtime.js";
 import {
   parseDesktopOptions,
@@ -48,9 +49,9 @@ export async function applyDesktopConfig(
   return options;
 }
 
-export async function persistDesktopPublisherAllowlist(
+export async function persistDesktopPublisherSubscribers(
   configPath: string,
-  allow: string[],
+  subscribers: SubscriberDevice[],
   dependencies: {
     loadConfig?: typeof loadKeposConfig;
     saveConfig?: typeof saveKeposConfig;
@@ -63,7 +64,7 @@ export async function persistDesktopPublisherAllowlist(
   await (dependencies.saveConfig ?? saveKeposConfig)(
     {
       ...config,
-      publisher: { ...config.publisher, allow },
+      publisher: { ...config.publisher, subscribers },
     },
     configPath,
   );

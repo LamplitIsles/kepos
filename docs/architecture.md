@@ -57,8 +57,9 @@ DHT; it does not authorize a subscriber or act as the service endpoint.
 
 A **publisher** listens under a publisher-owned key, advertises a registry of
 named services, and checks the subscriber public key against its local
-allowlist. A service may inherit that publisher allowlist or narrow it with its
-own allowlist. An empty publisher allowlist denies every subscriber.
+subscriber-device policy. Each trusted device has a publisher-local label and
+public key. A service may inherit that policy or narrow it with its own
+public-key allowlist. An empty subscriber-device list denies every subscriber.
 
 A **subscriber** owns a separate client identity and pins one publisher
 contact. Once its outer connection is authorized, it reads the registry and
@@ -67,7 +68,8 @@ the local hostname gateway; raw services receive explicit loopback listeners.
 
 The registry is not an authorization database. It is returned only after the
 publisher has authenticated and authorized the subscriber. Bootstrap, DHT, and
-transport components cannot add a key to a publisher allowlist.
+transport components cannot add a device to a publisher subscriber-device
+policy.
 
 ## Holepunch stack
 
@@ -122,13 +124,14 @@ is a two-minute QR flow for an Android subscriber. Android connects with its
 existing identity; the publisher sees the candidate fingerprint and must
 approve it before the connection is promoted to the normal registry and service
 protocols. A desktop subscriber currently uses the manual path: copy its public
-key into the desktop publisher's TOML allowlist, restart after that policy edit,
+key and a local label into the desktop publisher's TOML subscriber-device policy;
+the running publisher reconciles that policy without a restart,
 copy the publisher public key, and enter it in **Connect this subscriber**. The
 desktop app does not receive the QR invitation through a deep link.
 
 The packaged first run creates a default config and enabled role identities when
 they are absent. When publisher startup is enabled, it creates missing publisher
-state from the TOML display name, allowlist, and service policy. If publisher
+state from the TOML display name, subscriber-device, and service policy. If publisher
 state already exists, startup validates the state files themselves and reuses
 their seed and public key; mutable TOML policy may change without rewriting
 that identity. CLI `setup publisher` retains its strict idempotency. A config
@@ -184,11 +187,18 @@ A heartbeat replaces a silent outer path in bounded time, and a newer
 control-ready connection replaces an older connection for the same subscriber
 identity.
 
-A headless publisher reads its policy at startup. Changing its TOML allowlist
-or service policy requires a publisher restart. Desktop **Add device** is a
-special live Android pairing path: approval persists the new public key, updates
-the in-memory allowlist, and promotes the final connection without a second NAT
-traversal. A manual desktop policy edit still needs a restart.
+A headless publisher reads its policy at startup and reconciles valid TOML
+changes while it runs. Removing a subscriber device closes its active
+connection; new devices and service authorizations appear immediately. Desktop
+**Add device** is a special live Android pairing path: approval persists the
+new labeled device, updates the in-memory policy, and promotes the final
+connection without a second NAT traversal.
+
+Publisher metrics are an optional `GET /metrics` endpoint. Its stable labels
+are a subscriber-local label, a short public-key fingerprint, service, and
+direction; full keys, addresses, and transport/channel IDs are excluded. The
+Kepos-owned Grafana source and rendered Nix artifact are described in
+[`docs/cli.md`](cli.md#publisher-metrics-and-dashboard).
 
 ## Diagnostics and safety
 

@@ -5,6 +5,8 @@ import {
   parsePublisherManifest,
   serializePublisherConfig,
   serializePublisherManifest,
+  parseSubscriberDevices,
+  type SubscriberDevice,
   type PublisherManifest,
   type PublisherService,
 } from "../config.js";
@@ -31,7 +33,7 @@ export interface PublisherStateService {
 export interface SetupPublisherOptions {
   stateDir: string;
   displayName: string;
-  subscriberPublicKeys: string[];
+  subscriberDevices: SubscriberDevice[];
   services: PublisherStateService[];
 }
 
@@ -40,9 +42,9 @@ export interface SetupPublisherResult {
   publisherKey: string;
 }
 
-export interface SetPublisherAllowlistOptions {
+export interface SetPublisherSubscribersOptions {
   stateDir: string;
-  subscriberPublicKeys: string[];
+  subscriberDevices: SubscriberDevice[];
 }
 
 export interface SetPublisherServicesOptions {
@@ -60,10 +62,10 @@ export async function setupPublisher(
 ): Promise<SetupPublisherResult> {
   const stateDir = path.resolve(options.stateDir);
   const manifest = createManifest(options.displayName, options.services);
-  const allow = parseAllowlist(options.subscriberPublicKeys);
+  const subscribers = parseSubscriberDevices(options.subscriberDevices);
 
   if (await pathExists(stateDir)) {
-    return readPublisherResult(stateDir, manifest, allow, false);
+    return readPublisherResult(stateDir, manifest, subscribers, false);
   }
 
   await writeStateDirectoryAtomically(
@@ -74,12 +76,12 @@ export async function setupPublisher(
         configFileName,
         serializePublisherConfig({
           seed: generatePublisherSeed(),
-          allow,
+          subscribers,
         }),
       ],
     ]),
   );
-  return readPublisherResult(stateDir, manifest, allow, true);
+  return readPublisherResult(stateDir, manifest, subscribers, true);
 }
 
 export async function ensurePublisher(
@@ -97,8 +99,8 @@ export async function ensurePublisher(
   };
 }
 
-export async function setPublisherAllowlist(
-  options: SetPublisherAllowlistOptions,
+export async function setPublisherSubscribers(
+  options: SetPublisherSubscribersOptions,
 ): Promise<void> {
   const stateDir = path.resolve(options.stateDir);
   const { config, manifest } = await loadPublisherState(stateDir);
@@ -107,7 +109,7 @@ export async function setPublisherAllowlist(
     manifest.publisherConfig,
     serializePublisherConfig({
       seed: config.seed,
-      allow: parseAllowlist(options.subscriberPublicKeys),
+      subscribers: parseSubscriberDevices(options.subscriberDevices),
     }),
   );
   await validatePublisherState(stateDir, manifest);
@@ -146,17 +148,10 @@ function createManifest(
   });
 }
 
-function parseAllowlist(subscriberPublicKeys: string[]): string[] {
-  return parsePublisherConfig({
-    seed: "00".repeat(32),
-    allow: subscriberPublicKeys,
-  }).allow;
-}
-
 async function readPublisherResult(
   stateDir: string,
   expectedManifest: PublisherManifest,
-  expectedAllow: readonly string[],
+  expectedSubscribers: readonly SubscriberDevice[],
   created: boolean,
 ): Promise<SetupPublisherResult> {
   const { config, manifest } = await loadPublisherState(stateDir);
@@ -168,12 +163,9 @@ async function readPublisherResult(
       "existing publisher manifest does not match requested topology",
     );
   }
-  if (
-    config.allow.length !== expectedAllow.length ||
-    config.allow.some((key, index) => key !== expectedAllow[index])
-  ) {
+  if (JSON.stringify(config.subscribers) !== JSON.stringify(expectedSubscribers)) {
     throw new Error(
-      "existing publisher allowlist does not match requested subscribers",
+      "existing publisher subscriber devices do not match requested subscribers",
     );
   }
   return {

@@ -15,13 +15,13 @@ npm run kepos -- setup subscriber \
   --state ~/.local/state/kepos-neo/subscriber
 ```
 
-Create publisher state using only the subscriber's public key:
+Create publisher state with a local label for each trusted subscriber device:
 
 ```sh
 npm run kepos -- setup publisher \
   --state ~/.local/state/kepos-neo/publisher \
   --display-name kosmos \
-  --allow '<subscriber-public-key>' \
+  --subscriber-device 'nuc:<subscriber-public-key>' \
   --service ssh:SSH:22 \
   --service navidrome:Navidrome:4533:http
 ```
@@ -65,7 +65,9 @@ bootstrap = [
 [publisher]
 enabled = false
 display_name = "kosmos"
-allow = ["<subscriber-public-key>"]
+subscribers = [
+  { label = "nuc", public_key = "<subscriber-public-key>" },
+]
 
 [[publisher.services]]
 id = "ssh"
@@ -93,7 +95,7 @@ Use `--config <path>` to select another file. A missing default file retains
 state-based publisher policy and runtime defaults; a missing explicit file is
 an error. An empty bootstrap array selects HyperDHT defaults.
 
-When `[publisher]` exists, `display_name`, `allow`, and `services` form the
+When `[publisher]` exists, `display_name`, `subscribers`, and `services` form the
 complete runtime policy. `enabled` controls desktop auto-start only. Identities
 and the subscriber's pinned publisher contact always stay in the state
 directory.
@@ -108,7 +110,7 @@ npm run kepos -- setup publisher \
 
 The headless publisher polls its selected TOML policy every second while it
 runs. Valid changes apply without restarting the process, publisher identity, or
-DHT listener. Removing a subscriber from the global allowlist disconnects only
+DHT listener. Removing a subscriber device from the policy disconnects only
 that subscriber and denies reconnects; service-list, target, and service ACL
 changes affect the next Home-registry request and newly opened service
 channels, while existing service tunnels drain normally. Invalid or incomplete
@@ -116,10 +118,10 @@ TOML keeps the last valid policy and reports a reload failure. Desktop's **Add
 device** approval is different: it updates both TOML and the running desktop
 publisher.
 
-Publisher-wide and service-specific allowlists fail closed:
+Publisher subscriber-device policy and service-specific allowlists fail closed:
 
-- an empty publisher allowlist denies all subscribers;
-- an omitted service allowlist inherits the publisher list;
+- an empty publisher `subscribers` list denies all devices;
+- an omitted service allowlist inherits the publisher subscriber-device policy;
 - an explicit empty service allowlist denies that service to everyone;
 - restricted services are omitted from registries returned to unauthorized
   subscribers.
@@ -127,12 +129,16 @@ Publisher-wide and service-specific allowlists fail closed:
 Do not mix publisher setup flags with a configured `[publisher]` table. Kepos
 rejects that ambiguous operation.
 
-Without a `[publisher]` table, legacy state-owned policy can still be changed
-while the publisher is stopped:
+Without a `[publisher]` table, state-owned subscriber devices and services can
+still be changed while the publisher is stopped:
 
 ```sh
-npm run kepos -- publisher set-allow \
+npm run kepos -- publisher set-subscribers \
   --state ~/.local/state/kepos-neo/publisher
+
+npm run kepos -- publisher set-subscribers \
+  --state ~/.local/state/kepos-neo/publisher \
+  --subscriber-device 'nuc:<subscriber-public-key>'
 
 npm run kepos -- publisher set-services \
   --state ~/.local/state/kepos-neo/publisher \
@@ -141,7 +147,60 @@ npm run kepos -- publisher set-services \
 ```
 
 These commands fail instead of editing inactive state when TOML owns the
-publisher policy. Neither command rotates the publisher key.
+publisher policy. Neither command rotates the publisher key. A device value is
+`label:public-key` (or `label=public-key`); labels are publisher-local device
+metadata, not account or person identities.
+
+## Publisher metrics and dashboard
+
+Publisher-capable commands expose metrics only when explicitly requested:
+
+```sh
+npm run kepos -- publisher run \
+  --state ~/.local/state/kepos-neo/publisher \
+  --metrics-listen 127.0.0.1:9464
+
+npm run kepos -- device run \
+  --publisher-state ~/.local/state/kepos-neo/publisher \
+  --metrics-listen 127.0.0.1:9464
+```
+
+Scrape `GET http://127.0.0.1:9464/metrics`. No endpoint is started when the
+option is omitted; other paths and methods return no metric exposition. The
+listener is part of publisher shutdown and binds only where the deployment's
+network policy permits.
+
+The seven stable metric names are:
+
+- `kepos_publisher_subscriber_connected` — `1` while a configured subscriber
+  device has the current connection, otherwise `0`.
+- `kepos_publisher_subscriber_last_connected_timestamp_seconds` — the most
+  recent successful activation time, or `0` before the first connection.
+- `kepos_publisher_subscriber_connection_bytes` — current-connection payload
+  bytes, reset on replacement or close.
+- `kepos_publisher_subscriber_bytes_total` — monotonic process-lifetime
+  subscriber payload counters.
+- `kepos_publisher_service_authorized` — the configured device/service ACL
+  cross-product, including explicit zeroes.
+- `kepos_publisher_service_active_channels` — live channels per device and
+  published service, including idle zeroes.
+- `kepos_publisher_service_bytes_total` — monotonic service payload counters.
+
+Labels are deliberately bounded to `subscriber_label`, the first 16 lowercase
+hex characters of the public key as `subscriber_id`, `service`, and (where
+applicable) `direction`. Direction values are `publisher_to_subscriber` and
+`subscriber_to_publisher`. Full keys, addresses, outer IDs, and channel IDs
+never appear in the metric labels. Service counters count payload bytes at the
+mux data path; subscriber counters aggregate those same service flows.
+
+The dashboard is dependency-free Jsonnet owned by Kepos in
+`grafana/kepos-publisher-observability.jsonnet` and
+`grafana/traffic-console.libsonnet`. Build the owned artifact with
+`nix build .#grafana-dashboard`; it installs
+`share/kepos/grafana/kepos-publisher-observability.json`. The dashboard uses a
+selectable Prometheus datasource, shows connected devices and every authorized
+service before rolling `rate` charts, and keeps offline devices in a muted final
+table.
 
 ## HTTP service device authentication
 
@@ -210,8 +269,8 @@ them in the opposite order.
 
 `publisher run` and `subscriber run` still create and own independent DHT nodes.
 Use them for single-role hosts, separate supervisors, transport isolation, or
-rollback. Sharing a device node never merges role keys, allowlists, publisher
-pins, or state.
+rollback. Sharing a device node never merges role keys, subscriber-device
+policies, publisher pins, or state.
 
 ## Local services
 

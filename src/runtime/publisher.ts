@@ -28,9 +28,18 @@ import {
 import type { PairingRequest } from "../pairing/protocol.js";
 import {
   loadPublisherState,
-  setPublisherAllowlist,
+  setPublisherSubscribers,
 } from "../state/publisher.js";
-import type { PublisherService } from "../config.js";
+import type { PublisherService, SubscriberDevice } from "../config.js";
+import {
+  createPublisherMetricsRecorder,
+  type PublisherMetricsRecorder,
+} from "../metrics/publisher.js";
+import {
+  startMetricsServer,
+  type MetricsListenAddress,
+  type RunningMetricsServer,
+} from "../metrics/server.js";
 import { cleanupAll } from "./cleanup.js";
 
 const maximumPairingCandidates = 3;
@@ -45,7 +54,7 @@ type SchedulePairingExpiry = (
 
 export interface PublisherRuntimePolicy {
   displayName: string;
-  allow: string[];
+  subscribers: SubscriberDevice[];
   services: PublisherRuntimeService[];
 }
 
@@ -57,7 +66,8 @@ export interface StartPublisherOptions {
   log?: (line: string) => void;
   now?: () => number;
   observe?: Observe;
-  persistAllowlist?: (subscriberPublicKeys: string[]) => Promise<void>;
+  persistSubscribers?: (subscriberDevices: SubscriberDevice[]) => Promise<void>;
+  metricsListen?: MetricsListenAddress;
   schedulePairingExpiry?: SchedulePairingExpiry;
 }
 
@@ -82,6 +92,7 @@ export interface RunningPublisher {
   createPairingInvitation: () => { uri: string; expiresAt: number };
   denyPairing: () => void;
   pairingStatus: () => PublisherPairingSnapshot;
+  metrics?: RunningMetricsServer;
   applyPolicy: (policy: PublisherRuntimePolicy) => Promise<boolean>;
   status: () => PublisherRuntimeStatus;
   stop: () => Promise<void>;
@@ -96,7 +107,7 @@ export async function startPublisher(
   const { config, manifest } = await loadPublisherState(options.stateDir);
   const policy = options.policy ?? {
     displayName: manifest.displayName,
-    allow: config.allow,
+    subscribers: config.subscribers,
     services: manifest.services,
   };
   const keyPair = keyPairFromSeed(config.seed);
@@ -105,8 +116,14 @@ export async function startPublisher(
   let services = new Map(
     policy.services.map((service) => [service.id, service]),
   );
-  let allow = new Set(policy.allow);
+  let subscribers = new Map(
+    policy.subscribers.map((device) => [device.publicKey, device]),
+  );
   let appliedPolicy = clonePolicy(policy);
+  const metrics: PublisherMetricsRecorder = createPublisherMetricsRecorder(
+    policy,
+    options.now ?? Date.now,
+  );
   const home = await startHomeServer({
     publisherKey,
     displayName,
@@ -133,26 +150,30 @@ export async function startPublisher(
     void starting.catch(() => subscriberHomes.delete(subscriberKey));
     return starting;
   };
-  const persistAllowlist =
-    options.persistAllowlist ??
+  const persistSubscribers =
+    options.persistSubscribers ??
     (options.policy
       ? async (): Promise<void> => {
           throw new Error(
-            "Publisher policy persistence is not configured for pairing",
+            "Publisher subscriber-device persistence is not configured for pairing",
           );
         }
-      : async (subscriberPublicKeys: string[]): Promise<void> =>
-          setPublisherAllowlist({
+      : async (subscriberDevices: SubscriberDevice[]): Promise<void> =>
+          setPublisherSubscribers({
             stateDir: options.stateDir,
-            subscriberPublicKeys,
+            subscriberDevices,
           }));
   const pairing = new PublisherPairing({
     publisherKey,
     displayName: policy.displayName,
     now: options.now,
-    persistSubscriber: async (subscriberKey) => {
-      if (allow.has(subscriberKey)) return;
-      await persistAllowlist([...allow, subscriberKey]);
+    persistSubscriber: async (device) => {
+      if (subscribers.has(device.publicKey)) return;
+      const nextSubscribers = [...subscribers.values(), device];
+      await persistSubscribers(nextSubscribers);
+      subscribers.set(device.publicKey, device);
+      appliedPolicy = clonePolicy({ ...appliedPolicy, subscribers: nextSubscribers });
+      metrics.applyPolicy(appliedPolicy);
     },
   });
   const ownsDht = options.dht === undefined;
@@ -181,6 +202,7 @@ export async function startPublisher(
   let cancelPairingExpiry: (() => void) | undefined;
   let accepted = 0;
   let stopped = false;
+  let metricsServer: RunningMetricsServer | undefined;
 
   function closePairingCandidates(): void {
     for (const stream of pairingCandidates) muxes.get(stream)?.close();
@@ -235,7 +257,7 @@ export async function startPublisher(
     {
       firewall: (remotePublicKey) => {
         const subscriberKey = b4a.toString(remotePublicKey, "hex");
-        const known = allow.has(subscriberKey);
+        const known = subscribers.has(subscriberKey);
         const admitCandidate =
           pairing.acceptsCandidates() &&
           pairingCandidates.size + pendingCandidateAdmissions <
@@ -257,11 +279,12 @@ export async function startPublisher(
     },
     (stream) => {
       const subscriberKey = b4a.toString(stream.remotePublicKey, "hex");
-      const initiallyAuthorized = allow.has(subscriberKey);
+      const initiallyAuthorized = subscribers.has(subscriberKey);
       if (!initiallyAuthorized && pendingCandidateAdmissions > 0) {
         pendingCandidateAdmissions--;
       }
       const outerId = createObservationId("outer");
+      const metricsContext = { subscriberKey, connectionId: outerId };
       const observe = createObservationEmitter({
         observe: options.observe,
         role: "publisher",
@@ -292,6 +315,7 @@ export async function startPublisher(
           outerId,
           stream,
         });
+        metrics.connectionActivated(metricsContext);
         if (!current) return;
         current.observe("outer.replaced", {
           remotePublicKey: subscriberKey,
@@ -317,7 +341,10 @@ export async function startPublisher(
                   subscriberKey,
                   request,
                   approve: () => {
-                    allow.add(subscriberKey);
+                    subscribers.set(subscriberKey, {
+                      publicKey: subscriberKey,
+                      label: request.label,
+                    });
                     activate();
                     decision.approve();
                   },
@@ -358,6 +385,8 @@ export async function startPublisher(
         },
         serviceKind: (serviceId) => services.get(serviceId)?.kind ?? "tcp",
         subscriberPublicKey: subscriberKey,
+        metricsContext,
+        metrics,
       });
       muxes.set(stream, mux);
       if (initiallyAuthorized && !activeBySubscriberKey.has(subscriberKey)) {
@@ -370,6 +399,7 @@ export async function startPublisher(
         const current = activeBySubscriberKey.get(subscriberKey);
         if (current?.stream === stream) {
           activeBySubscriberKey.delete(subscriberKey);
+          metrics.connectionClosed(metricsContext);
         }
         observe("outer.closed", {
           trigger: stopped
@@ -384,8 +414,15 @@ export async function startPublisher(
 
   try {
     await server.listen(keyPair);
+    if (options.metricsListen) {
+      metricsServer = await startMetricsServer({
+        listen: options.metricsListen,
+        render: metrics.render,
+      });
+    }
   } catch (error) {
     await cleanupAll([
+      ...(metricsServer ? [() => metricsServer!.close()] : []),
       () => server.close(),
       () => home.close(),
       ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
@@ -402,13 +439,19 @@ export async function startPublisher(
       if (publisherPoliciesEqual(appliedPolicy, next)) return false;
 
       const removedSubscribers = new Set(
-        [...allow].filter((subscriberKey) => !next.allow.includes(subscriberKey)),
+        [...subscribers.keys()].filter(
+          (subscriberKey) =>
+            !next.subscribers.some((device) => device.publicKey === subscriberKey),
+        ),
       );
       displayName = next.displayName;
       services = new Map(
         next.services.map((service) => [service.id, service]),
       );
-      allow = new Set(next.allow);
+      subscribers = new Map(
+        next.subscribers.map((device) => [device.publicKey, device]),
+      );
+      metrics.applyPolicy(next);
       appliedPolicy = next;
       home.updateRegistry({
         displayName,
@@ -495,6 +538,7 @@ export async function startPublisher(
       closePairingCandidates();
     },
     pairingStatus: () => pairing.snapshot(),
+    metrics: metricsServer,
     applyPolicy,
     status: () => ({
       role: "publisher",
@@ -514,6 +558,7 @@ export async function startPublisher(
       await pairing.waitForApproval().catch(() => undefined);
       for (const mux of muxes.values()) mux.close();
       await cleanupAll([
+        ...(metricsServer ? [() => metricsServer!.close()] : []),
         () => server.close(),
         () => home.close(),
         ...[...subscriberHomes.values()].map(
@@ -528,7 +573,10 @@ export async function startPublisher(
 function clonePolicy(policy: PublisherRuntimePolicy): PublisherRuntimePolicy {
   return {
     displayName: policy.displayName,
-    allow: [...policy.allow],
+    subscribers: policy.subscribers.map(({ publicKey, label }) => ({
+      publicKey,
+      label,
+    })),
     services: policy.services.map(({ id, name, kind, targetPort, allow }) => ({
       id,
       name,
@@ -549,7 +597,13 @@ function publisherPoliciesEqual(
 function policyFingerprint(policy: PublisherRuntimePolicy): string {
   return JSON.stringify({
     displayName: policy.displayName,
-    allow: [...new Set(policy.allow)].sort(),
+    subscribers: [...policy.subscribers]
+      .map(({ publicKey, label }) => ({ publicKey, label }))
+      .sort(
+        (left, right) =>
+          left.publicKey.localeCompare(right.publicKey) ||
+          left.label.localeCompare(right.label),
+      ),
     services: policy.services.map(({ id, name, kind, targetPort, allow }) => ({
       id,
       name,

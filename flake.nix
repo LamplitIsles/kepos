@@ -23,6 +23,7 @@
       pkgs = pkgsFor system;
     in rec {
       kepos = pkgs.callPackage ./nix/package.nix {};
+      grafana-dashboard = pkgs.callPackage ./nix/grafana-dashboard.nix {};
       container-image = pkgs.dockerTools.buildImage {
         name = "ghcr.io/lamplitisles/kepos";
         tag = "local";
@@ -77,7 +78,12 @@
               stateDir = "/home/kepos-test/.local/state/kepos-neo/publisher";
               bootstrap = ["bootstrap.example:49737"];
               displayName = "test-publisher";
-              allow = ["1111111111111111111111111111111111111111111111111111111111111111"];
+              subscribers = [
+                {
+                  label = "test-nuc";
+                  publicKey = "1111111111111111111111111111111111111111111111111111111111111111";
+                }
+              ];
               services.ssh = {
                 name = "SSH";
                 targetPort = 22;
@@ -89,6 +95,7 @@
       };
       service = home.config.systemd.user.services.kepos-publisher.Service;
       configFile = home.config.xdg.configFile."kepos/config.toml".source;
+      dashboard = self.packages.${system}.grafana-dashboard;
       moduleCheck = assert service.Restart == "always";
       assert service.KillMode == "mixed";
         pkgs.runCommand "kepos-home-manager-module-check" {
@@ -97,14 +104,24 @@
           grep -F 'display_name = "test-publisher"' ${configFile}
           grep -F 'bootstrap.example:49737' ${configFile}
           grep -F 'target_port = 22' ${configFile}
-          test "$(grep -Fc 'allow = ["1111111111111111111111111111111111111111111111111111111111111111"]' ${configFile})" -eq 2
+          grep -F 'public_key = "1111111111111111111111111111111111111111111111111111111111111111"' ${configFile}
+          test "$(grep -Fc 'allow = ["1111111111111111111111111111111111111111111111111111111111111111"]' ${configFile})" -eq 1
           grep -F -- '--observations ndjson' ${pkgs.writeText "kepos-exec-start" (toString service.ExecStart)}
           ${pkgs.lib.getExe package} --help | grep -F 'publisher run'
+          touch "$out"
+        '';
+      dashboardCheck =
+        pkgs.runCommand "kepos-grafana-dashboard-check" {
+          nativeBuildInputs = [pkgs.jq];
+        } ''
+          test -f ${dashboard}/share/kepos/grafana/kepos-publisher-observability.json
+          jq -e '.title == "Kepos Publisher Observability"' ${dashboard}/share/kepos/grafana/kepos-publisher-observability.json >/dev/null
           touch "$out"
         '';
     in {
       inherit package;
       home-manager-module = moduleCheck;
+      grafana-dashboard = dashboardCheck;
       container-image =
         pkgs.runCommand "kepos-container-image-check" {
           nativeBuildInputs = [pkgs.gawk pkgs.jq pkgs.gnutar];

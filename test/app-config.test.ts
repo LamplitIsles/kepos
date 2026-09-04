@@ -39,7 +39,7 @@ bootstrap = []
 
 [publisher]
 display_name = "kosmos"
-allow = ["${subscriberKey}"]
+subscribers = [{ label = "phone", public_key = "${subscriberKey}" }]
 
 [[publisher.services]]
 id = "navidrome"
@@ -61,7 +61,7 @@ local_port = 2222
       network: {},
       publisher: {
         displayName: "kosmos",
-        allow: [subscriberKey],
+        subscribers: [{ label: "phone", publicKey: subscriberKey }],
         services: [
           {
             id: "navidrome",
@@ -88,7 +88,7 @@ test("shared config keeps desktop role enable flags beside each policy", () => {
 [publisher]
 enabled = false
 display_name = "kosmos"
-allow = []
+subscribers = []
 services = []
 
 [subscriber]
@@ -100,7 +100,7 @@ services = []
       publisher: {
         enabled: false,
         displayName: "kosmos",
-        allow: [],
+        subscribers: [],
         services: [],
       },
       subscriber: {
@@ -117,13 +117,13 @@ test("shared config keeps deny-all and Home-only publisher policy explicit", () 
     parseKeposConfig(`
 [publisher]
 display_name = "kosmos"
-allow = []
+subscribers = []
 services = []
 `),
     {
       publisher: {
         displayName: "kosmos",
-        allow: [],
+        subscribers: [],
         services: [],
       },
     },
@@ -133,12 +133,12 @@ services = []
 test("shared config rejects incomplete or invalid role policy", () => {
   assert.throws(
     () => parseKeposConfig('[publisher]\ndisplay_name = "kosmos"'),
-    /publisher\.allow must be an array/,
+    /publisher\.subscribers must be an array/,
   );
   assert.throws(
     () =>
       parseKeposConfig(
-        '[publisher]\ndisplay_name = "kosmos"\nallow = []\nservices = []\nextra = true',
+        '[publisher]\ndisplay_name = "kosmos"\nsubscribers = []\nservices = []\nextra = true',
       ),
     /unknown field: publisher\.extra/,
   );
@@ -233,7 +233,7 @@ test("shared config atomically persists the validated desktop shape", async () =
     publisher: {
       enabled: false,
       displayName: "Neil",
-      allow: ["11".repeat(32)],
+      subscribers: [{ label: "phone", publicKey: "11".repeat(32) }],
       services: [
         {
           id: "dagger",

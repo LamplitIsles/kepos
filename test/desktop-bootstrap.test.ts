@@ -328,7 +328,7 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
     "kepos-neo",
     "subscriber",
   );
-  const config = `[publisher]\nenabled = true\ndisplay_name = "Home"\nallow = ["${subscriberKey}"]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\ntarget_port = 4533\nallow = ["${subscriberKey}"]\n\n[subscriber]\nenabled = true\nservices = []\n`;
+  const config = `[publisher]\nenabled = true\ndisplay_name = "Home"\nsubscribers = [{ label = "phone", public_key = "${subscriberKey}" }]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\ntarget_port = 4533\nallow = ["${subscriberKey}"]\n\n[subscriber]\nenabled = true\nservices = []\n`;
   try {
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(configPath, config);
@@ -354,7 +354,7 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
       configPath,
       policy: {
         displayName: "Home",
-        allow: [subscriberKey],
+        subscribers: [{ label: "phone", publicKey: subscriberKey }],
         services: [
           {
             id: "navidrome",
@@ -366,13 +366,13 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
       },
     });
     assert.equal(
-      parsePublisherConfig(JSON.parse(publisherConfigBytes.toString())).allow[0],
+      parsePublisherConfig(JSON.parse(publisherConfigBytes.toString())).subscribers[0]?.publicKey,
       subscriberKey,
     );
 
     await writeFile(
       configPath,
-      `[publisher]\nenabled = true\ndisplay_name = "Renamed home"\nallow = ["${"22".repeat(32)}"]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\ntarget_port = 4534\n\n[subscriber]\nenabled = true\nservices = []\n`,
+      `[publisher]\nenabled = true\ndisplay_name = "Renamed home"\nsubscribers = [{ label = "tablet", public_key = "${"22".repeat(32)}" }]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\ntarget_port = 4534\n\n[subscriber]\nenabled = true\nservices = []\n`,
     );
     const second = await loadDesktopOptions([], {
       homeDirectory: root,
@@ -382,7 +382,7 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
 
     assert.deepEqual(second.publisher?.policy, {
       displayName: "Renamed home",
-      allow: ["22".repeat(32)],
+      subscribers: [{ label: "tablet", publicKey: "22".repeat(32) }],
       services: [
         { id: "navidrome", name: "Navidrome", targetPort: 4534 },
       ],
@@ -417,7 +417,7 @@ test("desktop publisher bootstrap preserves an existing identity", async () => {
     const existing = await setupPublisher({
       stateDir: publisherStateDir,
       displayName: "Home",
-      subscriberPublicKeys: [],
+      subscriberDevices: [],
       services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     });
     const publisherConfigPath = path.join(publisherStateDir, "publisher.json");
@@ -425,7 +425,7 @@ test("desktop publisher bootstrap preserves an existing identity", async () => {
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(
       configPath,
-      '[publisher]\nenabled = true\ndisplay_name = "Home"\nallow = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\ntarget_port = 22\n',
+      '[publisher]\nenabled = true\ndisplay_name = "Home"\nsubscribers = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\ntarget_port = 22\n',
     );
 
     const options = await loadDesktopOptions([], {
@@ -443,7 +443,7 @@ test("desktop publisher bootstrap preserves an existing identity", async () => {
       (await setupPublisher({
         stateDir: publisherStateDir,
         displayName: "Home",
-        subscriberPublicKeys: [],
+        subscriberDevices: [],
         services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
       })).publisherKey,
       existing.publisherKey,
@@ -469,7 +469,7 @@ test("subscriber-only desktop startup does not create publisher state", async ()
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(
       configPath,
-      '[publisher]\nenabled = false\ndisplay_name = "Home"\nallow = []\nservices = []\n\n[subscriber]\nenabled = true\nservices = []\n',
+      '[publisher]\nenabled = false\ndisplay_name = "Home"\nsubscribers = []\nservices = []\n\n[subscriber]\nenabled = true\nservices = []\n',
     );
 
     const options = await loadDesktopOptions([], {
@@ -508,7 +508,7 @@ test("desktop publisher bootstrap validates malformed state without changing ide
     await setupPublisher({
       stateDir: publisherStateDir,
       displayName: "Other",
-      subscriberPublicKeys: [],
+      subscriberDevices: [],
       services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     });
     const publisherStateBefore = await readFile(
@@ -523,7 +523,7 @@ test("desktop publisher bootstrap validates malformed state without changing ide
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(
       configPath,
-      '[publisher]\nenabled = true\ndisplay_name = "Home"\nallow = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\ntarget_port = 2222\n\n[subscriber]\nenabled = true\nservices = []\n',
+      '[publisher]\nenabled = true\ndisplay_name = "Home"\nsubscribers = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\ntarget_port = 2222\n\n[subscriber]\nenabled = true\nservices = []\n',
     );
     const configBefore = await readFile(configPath);
 
@@ -534,7 +534,7 @@ test("desktop publisher bootstrap validates malformed state without changing ide
     });
     assert.deepEqual(options.publisher?.policy, {
       displayName: "Home",
-      allow: [],
+      subscribers: [],
       services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
     });
     assert.deepEqual(
@@ -576,14 +576,14 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
   const captured: { stateDir?: string; configPath?: string } = {};
   const ensuredPolicies: Array<{
     displayName: string;
-    allow: string[];
+    subscribers: Array<{ label: string; publicKey: string }>;
     services: NonNullable<KeposConfig["publisher"]>["services"];
   }> = [];
   let config: KeposConfig = {
     publisher: {
       enabled: true,
       displayName: "Windows home",
-      allow: [],
+      subscribers: [],
       services: [],
     },
   };
@@ -595,11 +595,11 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
     },
     platform: "win32",
     loadConfig: async () => config,
-    ensurePublisher: async ({ stateDir, displayName, subscriberPublicKeys, services }) => {
+    ensurePublisher: async ({ stateDir, displayName, subscriberDevices, services }) => {
       captured.stateDir = stateDir;
       ensuredPolicies.push({
         displayName,
-        allow: subscriberPublicKeys,
+        subscribers: subscriberDevices,
         services,
       });
       return {
@@ -616,7 +616,7 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
   assert.deepEqual(options.publisher, {
     stateDir: "C:\\Users\\kepos\\AppData\\Local\\Kepos\\state\\publisher",
     configPath: "C:\\Users\\kepos\\AppData\\Roaming\\Kepos\\config.toml",
-    policy: { displayName: "Windows home", allow: [], services: [] },
+    policy: { displayName: "Windows home", subscribers: [], services: [] },
   });
   assert.equal(
     captured.stateDir,
@@ -628,7 +628,7 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
     publisher: {
       enabled: true,
       displayName: "Renamed Windows home",
-      allow: ["22".repeat(32)],
+      subscribers: [{ label: "tablet", publicKey: "22".repeat(32) }],
       services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
     },
   };
@@ -640,11 +640,11 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
     },
     platform: "win32",
     loadConfig: async () => config,
-    ensurePublisher: async ({ stateDir, displayName, subscriberPublicKeys, services }) => {
+    ensurePublisher: async ({ stateDir, displayName, subscriberDevices, services }) => {
       captured.stateDir = stateDir;
       ensuredPolicies.push({
         displayName,
-        allow: subscriberPublicKeys,
+        subscribers: subscriberDevices,
         services,
       });
       return { created: false, publisherKey: "aa".repeat(32) };
@@ -652,14 +652,14 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
   });
   assert.deepEqual(relaunched.publisher?.policy, {
     displayName: "Renamed Windows home",
-    allow: ["22".repeat(32)],
+    subscribers: [{ label: "tablet", publicKey: "22".repeat(32) }],
     services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
   });
   assert.deepEqual(ensuredPolicies, [
-    { displayName: "Windows home", allow: [], services: [] },
+    { displayName: "Windows home", subscribers: [], services: [] },
     {
       displayName: "Renamed Windows home",
-      allow: ["22".repeat(32)],
+      subscribers: [{ label: "tablet", publicKey: "22".repeat(32) }],
       services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
     },
   ]);
@@ -700,7 +700,7 @@ test("explicit desktop config prepares enabled role identities", async () => {
         publisher: {
           enabled: true,
           displayName: "Explicit home",
-          allow: [],
+          subscribers: [],
           services: [],
         },
         subscriber: {

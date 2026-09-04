@@ -17,7 +17,7 @@ interface Calls {
   setupPublisher: unknown[];
   setupSubscriber: unknown[];
   setSubscriberPublisher: unknown[];
-  setPublisherAllowlist: unknown[];
+  setPublisherSubscribers: unknown[];
   setPublisherServices: unknown[];
   startDevice: unknown[];
   startPublisher: unknown[];
@@ -41,7 +41,7 @@ function fakeCli(): {
     setupPublisher: [],
     setupSubscriber: [],
     setSubscriberPublisher: [],
-    setPublisherAllowlist: [],
+    setPublisherSubscribers: [],
     setPublisherServices: [],
     startDevice: [],
     startPublisher: [],
@@ -81,8 +81,8 @@ function fakeCli(): {
       calls.setSubscriberPublisher.push(options);
       return path.join(options.stateDir, "publisher.contact.json");
     },
-    setPublisherAllowlist: async (options) => {
-      calls.setPublisherAllowlist.push(options);
+    setPublisherSubscribers: async (options) => {
+      calls.setPublisherSubscribers.push(options);
     },
     setPublisherServices: async (options) => {
       calls.setPublisherServices.push(options);
@@ -217,7 +217,7 @@ test("device run selects explicit roles and owns their shared lifecycle", async 
       publisher: {
         enabled: true,
         displayName: "neilmac",
-        allow: ["33".repeat(32)],
+        subscribers: [{ label: "device", publicKey: "33".repeat(32) }],
         services: [],
       },
       subscriber: {
@@ -274,7 +274,7 @@ test("device run selects explicit roles and owns their shared lifecycle", async 
   assert.deepEqual(options.publisher?.policy, {
     enabled: true,
     displayName: "neilmac",
-    allow: ["33".repeat(32)],
+    subscribers: [{ label: "device", publicKey: "33".repeat(32) }],
     services: [],
   });
   assert.deepEqual(
@@ -313,7 +313,7 @@ test("device run does not add roles from enabled config", async () => {
     publisher: {
       enabled: true,
       displayName: "neilmac",
-      allow: [],
+      subscribers: [],
       services: [],
     },
     subscriber: {
@@ -452,7 +452,7 @@ test("setup publisher parses deny-all state and service targets", async () => {
     {
       stateDir: path.resolve("./publisher"),
       displayName: "kosmos",
-      subscriberPublicKeys: [],
+      subscriberDevices: [],
       services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
     },
   ]);
@@ -466,7 +466,7 @@ test("publisher key reports the public key without policy input", async () => {
   const setup = await setupPublisher({
     stateDir,
     displayName: "kosmos",
-    subscriberPublicKeys: [],
+    subscriberDevices: [],
     services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
   });
   const stdout: string[] = [];
@@ -513,10 +513,10 @@ test("setup subscriber and set-publisher expose only public state", async () => 
   assert.equal(cli.stdout[0], `Subscriber key: ${"22".repeat(32)}`);
 });
 
-test("publisher set commands replace allowlist and services", async () => {
+test("publisher set commands replace subscriber devices and services", async () => {
   const cli = fakeCli();
   await runCli(
-    ["publisher", "set-allow", "--state", "./publisher"],
+    ["publisher", "set-subscribers", "--state", "./publisher"],
     cli.dependencies,
   );
   await runCli(
@@ -531,10 +531,10 @@ test("publisher set commands replace allowlist and services", async () => {
     cli.dependencies,
   );
 
-  assert.deepEqual(cli.calls.setPublisherAllowlist, [
+  assert.deepEqual(cli.calls.setPublisherSubscribers, [
     {
       stateDir: path.resolve("./publisher"),
-      subscriberPublicKeys: [],
+      subscriberDevices: [],
     },
   ]);
   assert.deepEqual(cli.calls.setPublisherServices, [
@@ -554,7 +554,7 @@ test("publisher set commands reject TOML-owned policy", async () => {
     return {
       publisher: {
         displayName: "kosmos",
-        allow: [],
+        subscribers: [],
         services: [],
       },
     };
@@ -565,7 +565,7 @@ test("publisher set commands reject TOML-owned policy", async () => {
       runCli(
         [
           "publisher",
-          "set-allow",
+          "set-subscribers",
           "--state",
           "./publisher",
           "--config",
@@ -584,7 +584,7 @@ test("publisher set commands reject TOML-owned policy", async () => {
     /publisher policy is managed by TOML; edit the config file/,
   );
 
-  assert.deepEqual(cli.calls.setPublisherAllowlist, []);
+  assert.deepEqual(cli.calls.setPublisherSubscribers, []);
   assert.deepEqual(cli.calls.setPublisherServices, []);
   assert.deepEqual(cli.calls.configPaths, [
     path.resolve("./kepos.toml"),
@@ -630,6 +630,54 @@ test("publisher run prints human status and awaits signal-safe stop", async () =
   assert.doesNotMatch(cli.stdout.join("\n"), / home=http:/);
   assert.match(cli.stdout.join("\n"), /outer\.connected/);
   assert.match(cli.stdout.join("\n"), /attempt=2/);
+});
+
+test("publisher run forwards metricsListen through dependency injection", async () => {
+  const cli = fakeCli();
+
+  await runCli(
+    [
+      "publisher",
+      "run",
+      "--state",
+      "./publisher",
+      "--metrics-listen",
+      "127.0.0.1:0",
+    ],
+    cli.dependencies,
+  );
+
+  assert.deepEqual(
+    (cli.calls.startPublisher[0] as { metricsListen: unknown }).metricsListen,
+    { host: "127.0.0.1", port: 0 },
+  );
+});
+
+test("publisher-enabled device run forwards metricsListen to its publisher role", async () => {
+  const cli = fakeCli();
+
+  await runCli(
+    [
+      "device",
+      "run",
+      "--publisher-state",
+      "./publisher",
+      "--metrics-listen",
+      "127.0.0.1:0",
+    ],
+    cli.dependencies,
+  );
+
+  assert.deepEqual(
+    (cli.calls.startDevice[0] as {
+      publisher?: { metricsListen?: unknown };
+    }).publisher?.metricsListen,
+    { host: "127.0.0.1", port: 0 },
+  );
+  assert.deepEqual(
+    (cli.calls.startPublisher[0] as { metricsListen: unknown }).metricsListen,
+    { host: "127.0.0.1", port: 0 },
+  );
 });
 
 test("publisher run releases its identity lock when startup fails", async () => {
@@ -709,7 +757,7 @@ test("publisher setup and run use TOML publisher policy", async () => {
     return {
       publisher: {
         displayName: "kosmos",
-        allow: [subscriberKey],
+        subscribers: [{ label: "device", publicKey: subscriberKey }],
         services: [
           { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
         ],
@@ -730,7 +778,7 @@ test("publisher setup and run use TOML publisher policy", async () => {
     {
       stateDir: path.resolve("./publisher"),
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberKey],
+      subscriberDevices: [{ label: "device", publicKey: subscriberKey }],
       services: [
         { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
       ],
@@ -740,7 +788,7 @@ test("publisher setup and run use TOML publisher policy", async () => {
     (cli.calls.startPublisher[0] as { policy: unknown }).policy,
     {
       displayName: "kosmos",
-      allow: [subscriberKey],
+      subscribers: [{ label: "device", publicKey: subscriberKey }],
       services: [
         { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
       ],
@@ -752,17 +800,17 @@ test("publisher run serially reloads valid TOML and recovers from failures", asy
   const cli = fakeCli();
   const first = {
     displayName: "first",
-    allow: [],
+    subscribers: [],
     services: [],
   };
   const second = {
     displayName: "second",
-    allow: [],
+    subscribers: [],
     services: [],
   };
   const recovered = {
     displayName: "recovered",
-    allow: [],
+    subscribers: [],
     services: [],
   };
   let reads = 0;
@@ -792,8 +840,8 @@ test("publisher run serially reloads valid TOML and recovers from failures", asy
 
 test("publisher run drains queued reloads before stopping the publisher", async () => {
   const cli = fakeCli();
-  const initial = { displayName: "initial", allow: [], services: [] };
-  const next = { displayName: "next", allow: [], services: [] };
+  const initial = { displayName: "initial", subscribers: [], services: [] };
+  const next = { displayName: "next", subscribers: [], services: [] };
   let reads = 0;
   let releaseReload: (() => void) | undefined;
   let scheduled: (() => void) | undefined;
@@ -834,7 +882,7 @@ test("publisher setup rejects CLI overrides of TOML policy", async () => {
   cli.dependencies.loadConfig = async () => ({
     publisher: {
       displayName: "kosmos",
-      allow: [],
+      subscribers: [],
       services: [],
     },
   });
@@ -847,8 +895,8 @@ test("publisher setup rejects CLI overrides of TOML policy", async () => {
           "publisher",
           "--state",
           "./publisher",
-          "--allow",
-          "44".repeat(32),
+          "--subscriber-device",
+          `device:44${"44".repeat(31)}`,
         ],
         cli.dependencies,
       ),

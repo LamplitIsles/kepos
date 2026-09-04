@@ -7,8 +7,8 @@
 
 Kepos gives trusted devices access to selected services without exposing a
 public service port or joining every device to a virtual subnet. A publisher
-owns the service and its allowlist; a subscriber receives the allowed service
-as an ordinary local URL or TCP port.
+owns the service and its labeled subscriber-device policy; a subscriber
+receives the allowed service as an ordinary local URL or TCP port.
 
 Kepos has no hosted account or Kepos-operated control plane. Device keys stay
 on the devices that created them. Kepos carries TCP byte streams through an
@@ -35,6 +35,14 @@ Developers and operators can continue with:
 - [Platform and release guides](docs/platforms/)
 - [Nix, container, and Kubernetes deployment](docs/deployment.md)
 - [Network transport and compatibility](docs/network-transport-and-compatibility.md)
+
+Headless publishers can expose an optional read-only Prometheus endpoint with
+`publisher run --metrics-listen 127.0.0.1:9464` (or the same option on a
+publisher-enabled `device run`). It reports bounded subscriber labels and
+short public-key fingerprints, service authorization, active channels, and
+current and cumulative payload bytes. The repository-owned Grafana dashboard
+is available from `packages.<system>.grafana-dashboard` in the Nix flake and
+installs as `share/kepos/grafana/kepos-publisher-observability.json`.
 
 ## Supported surfaces
 

@@ -20,6 +20,7 @@ import type {
   StartSubscriberOptions,
   SubscriberRuntimeStatus,
 } from "../src/runtime/subscriber.js";
+import type { SubscriberDevice } from "../src/config.js";
 
 const remotePublisherKey = "e4".repeat(32);
 const localSubscriberKey = "d1".repeat(32);
@@ -750,11 +751,11 @@ test("desktop runtime applies shared network and role policy", async () => {
   const events: string[] = [];
   let publisherStartOptions: Record<string, unknown> | undefined;
   let subscriberStartOptions: Record<string, unknown> | undefined;
-  const persisted: Array<{ configPath: string; allow: string[] }> = [];
+  const persisted: Array<{ configPath: string; subscribers: SubscriberDevice[] }> = [];
   const bootstrap = [{ host: "bootstrap.example", port: 49_737 }];
   const publisherPolicy = {
     displayName: "Configured publisher",
-    allow: ["22".repeat(32)],
+    subscribers: [{ label: "Pixel", publicKey: "22".repeat(32) }],
     services: [{ id: "web", name: "Web", targetPort: 8_080 }],
   };
   const dht = trackedDht(events, "initial");
@@ -793,8 +794,8 @@ test("desktop runtime applies shared network and role policy", async () => {
           events,
         );
       },
-      persistPublisherAllowlist: async (configPath, allow) => {
-        persisted.push({ configPath, allow });
+      persistPublisherSubscribers: async (configPath, subscribers) => {
+        persisted.push({ configPath, subscribers });
       },
     }),
   );
@@ -805,10 +806,15 @@ test("desktop runtime applies shared network and role policy", async () => {
   assert.equal(publisherStartOptions?.bootstrap, undefined);
   assert.deepEqual(publisherStartOptions?.policy, publisherPolicy);
   await (
-    publisherStartOptions?.persistAllowlist as (allow: string[]) => Promise<void>
-  )(["33".repeat(32)]);
+    publisherStartOptions?.persistSubscribers as (
+      subscribers: SubscriberDevice[],
+    ) => Promise<void>
+  )([{ label: "Phone", publicKey: "33".repeat(32) }]);
   assert.deepEqual(persisted, [
-    { configPath: "/config/kepos.toml", allow: ["33".repeat(32)] },
+    {
+      configPath: "/config/kepos.toml",
+      subscribers: [{ label: "Phone", publicKey: "33".repeat(32) }],
+    },
   ]);
   assert.equal(subscriberStartOptions?.dht, dht);
   assert.equal(subscriberStartOptions?.bootstrap, undefined);
@@ -830,7 +836,7 @@ test("desktop runtime reconfigures only the changed role", async () => {
     stateDir: "/state/publisher",
     policy: {
       displayName: "Before",
-      allow: [],
+      subscribers: [],
       services: [],
     },
   };
@@ -1072,7 +1078,7 @@ test("desktop transport replacement failure shows the target relationship", asyn
         return {
           config: {
             seed: replacement ? replacementPublisherSeed : localPublisherSeed,
-            allow: ["22".repeat(32)],
+            subscribers: [{ label: "Pixel", publicKey: "22".repeat(32) }],
           },
           manifest: {
             displayName: replacement ? "Replacement Mac" : "Mac smoke",
@@ -1443,7 +1449,7 @@ test("desktop reconfiguration rejects when a replacement role cannot start", asy
     stateDir: "/state/publisher",
     policy: {
       displayName: "Before",
-      allow: [],
+      subscribers: [],
       services: [],
     },
   };
@@ -1683,7 +1689,10 @@ function dependencies(
     loadPublisherState: async (stateDir) => {
       events.push(`publisher-state:load:${stateDir}`);
       return {
-        config: { seed: localPublisherSeed, allow: ["22".repeat(32)] },
+        config: {
+          seed: localPublisherSeed,
+          subscribers: [{ label: "Pixel", publicKey: "22".repeat(32) }],
+        },
         manifest: {
           displayName: "Mac smoke",
           publisherConfig: "publisher.json",
@@ -1723,7 +1732,7 @@ function dependencies(
     now: Date.now,
     random: () => 0.5,
     renderPairingQr: async () => "<svg>pairing</svg>",
-    persistPublisherAllowlist: async () => undefined,
+    persistPublisherSubscribers: async () => undefined,
     ...overrides,
   };
 }

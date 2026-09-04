@@ -62,6 +62,15 @@ const require = createRequire(import.meta.url);
 const createHyperDhtTestnet = require("hyperdht/testnet") as CreateHyperDhtTestnet;
 const noLog = (): void => undefined;
 
+function subscriberDevices(
+  keys: readonly string[],
+): Array<{ publicKey: string; label: string }> {
+  return keys.map((publicKey, index) => ({
+    publicKey,
+    label: `subscriber-${index + 1}`,
+  }));
+}
+
 async function listen(server: Server | HttpServer): Promise<number> {
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -347,7 +356,7 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberSetup.publicKey],
+      subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
       services: [
         {
           id: "navidrome",
@@ -545,7 +554,7 @@ test("forwards fragmented persistent HTTP/1.1 requests with per-request identity
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberSetup.publicKey],
+      subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
       services: [
         {
           id: "navidrome",
@@ -718,7 +727,7 @@ test("delivers a target response after an HTTP client half-closes", async () => 
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberSetup.publicKey],
+      subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
       services: [
         {
           id: "half-close",
@@ -823,7 +832,7 @@ test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", a
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberSetup.publicKey],
+      subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
       services: [
         {
           id: "websocket",
@@ -918,7 +927,7 @@ test("subscriber stop closes an active service tunnel before its listener", asyn
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberSetup.publicKey],
+      subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
       services: [{ id: "ssh", name: "SSH", targetPort }],
     });
     await setSubscriberPublisher({
@@ -983,10 +992,10 @@ test("one publisher accepts multiple subscribers with independent connections", 
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [
+      subscriberDevices: subscriberDevices([
         subscriberASetup.publicKey,
         subscriberBSetup.publicKey,
-      ],
+      ]),
       services: [],
     });
     await Promise.all([
@@ -1071,7 +1080,7 @@ test("publisher replaces an older outer for the same subscriber key", async () =
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberSetup.publicKey],
+      subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
       services: [],
     });
     await setSubscriberPublisher({
@@ -1167,7 +1176,7 @@ test("publisher denies a non-current outer using the same subscriber key", async
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberSetup.publicKey],
+      subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
       services: [],
     });
     await setSubscriberPublisher({
@@ -1264,7 +1273,10 @@ test("service allowlists restrict channels and subscriber registries", async () 
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [allowedSetup.publicKey, deniedSetup.publicKey],
+      subscriberDevices: subscriberDevices([
+        allowedSetup.publicKey,
+        deniedSetup.publicKey,
+      ]),
       services: [],
     });
     await Promise.all([
@@ -1287,7 +1299,10 @@ test("service allowlists restrict channels and subscriber registries", async () 
       log: noLog,
       policy: {
         displayName: "kosmos",
-        allow: [allowedSetup.publicKey, deniedSetup.publicKey],
+        subscribers: subscriberDevices([
+          allowedSetup.publicKey,
+          deniedSetup.publicKey,
+        ]),
         services: [
           {
             id: "dagger",
@@ -1386,7 +1401,10 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "original",
-      subscriberPublicKeys: [allowedSetup.publicKey, removedSetup.publicKey],
+      subscriberDevices: subscriberDevices([
+        allowedSetup.publicKey,
+        removedSetup.publicKey,
+      ]),
       services: [],
     });
     await Promise.all([
@@ -1412,7 +1430,10 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
       log: noLog,
       policy: {
         displayName: "original",
-        allow: [allowedSetup.publicKey, removedSetup.publicKey],
+        subscribers: subscriberDevices([
+          allowedSetup.publicKey,
+          removedSetup.publicKey,
+        ]),
         services: [
           {
             id: "echo",
@@ -1428,7 +1449,10 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
     assert.equal(
       await publisher.applyPolicy({
         displayName: "original",
-        allow: [allowedSetup.publicKey, removedSetup.publicKey],
+        subscribers: subscriberDevices([
+          allowedSetup.publicKey,
+          removedSetup.publicKey,
+        ]),
         services: [
           {
             id: "echo",
@@ -1479,7 +1503,10 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
     assert.equal(
       await publisher.applyPolicy({
         displayName: "retargeted",
-        allow: [allowedSetup.publicKey, removedSetup.publicKey],
+        subscribers: subscriberDevices([
+          allowedSetup.publicKey,
+          removedSetup.publicKey,
+        ]),
         services: [
           {
             id: "echo",
@@ -1512,7 +1539,10 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
 
     await publisher.applyPolicy({
       displayName: "retargeted",
-      allow: [allowedSetup.publicKey, removedSetup.publicKey],
+      subscribers: subscriberDevices([
+        allowedSetup.publicKey,
+        removedSetup.publicKey,
+      ]),
       services: [
         {
           id: "echo",
@@ -1530,7 +1560,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
 
     await publisher.applyPolicy({
       displayName: "retargeted",
-      allow: [allowedSetup.publicKey],
+      subscribers: subscriberDevices([allowedSetup.publicKey]),
       services: [
         {
           id: "echo",
@@ -1590,7 +1620,7 @@ test("publisher allowlist rejects an unknown subscriber", async () => {
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [allowedSetup.publicKey],
+      subscriberDevices: subscriberDevices([allowedSetup.publicKey]),
       services: [],
     });
     await setSubscriberPublisher({
@@ -1680,7 +1710,7 @@ test("publisher approves an unknown subscriber on its pairing outer", async () =
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [],
+      subscriberDevices: [],
       services: [],
     });
     await setSubscriberPublisher({
@@ -1731,7 +1761,9 @@ test("publisher approves an unknown subscriber on its pairing outer", async () =
       "approved subscriber did not become active",
     );
     const persisted = await loadPublisherState(publisherState);
-    assert.deepEqual(persisted.config.allow, [subscriberSetup.publicKey]);
+    assert.deepEqual(persisted.config.subscribers, [
+      { publicKey: subscriberSetup.publicKey, label: "Neil's test device" },
+    ]);
     assert.deepEqual(
       pairingEvents
         .filter(({ event }) => event.startsWith("pairing."))
@@ -1785,7 +1817,7 @@ test("publisher closes an idle pairing candidate when its invitation expires", a
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [],
+      subscriberDevices: [],
       services: [],
     });
     await setSubscriberPublisher({
@@ -1888,7 +1920,7 @@ test("publisher closes non-selected candidates when one reserves the invitation"
       setupPublisher({
         stateDir: publisherState,
         displayName: "kosmos",
-        subscriberPublicKeys: [],
+        subscriberDevices: [],
         services: [],
       }),
     ]);
@@ -1999,7 +2031,7 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [],
+      subscriberDevices: [],
       services: [],
     });
     await setSubscriberPublisher({
@@ -2013,7 +2045,7 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
       stateDir: publisherState,
       bootstrap: testnet.bootstrap,
       log: noLog,
-      persistAllowlist: async () => {
+      persistSubscribers: async () => {
         throw new Error("disk full");
       },
     });
@@ -2046,7 +2078,10 @@ test("publisher persistence failure never authorizes the pairing candidate", asy
     assert.equal(publisher.activeSubscribers(), 0);
     assert.equal(publisher.pairingStatus().phase, "pending");
     await assert.rejects(() => subscriberMux!.open("home"), /not approved/i);
-    assert.deepEqual((await loadPublisherState(publisherState)).config.allow, []);
+    assert.deepEqual(
+      (await loadPublisherState(publisherState)).config.subscribers,
+      [],
+    );
 
     publisher.denyPairing();
     await assert.rejects(pairing, /denied|closed/i);
@@ -2089,7 +2124,7 @@ test("subscriber runtime pairs and promotes its pending contact without reconnec
     await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [],
+      subscriberDevices: [],
       services: [],
     });
     testnet = await createHyperDhtTestnet(3);
@@ -2157,7 +2192,7 @@ test("subscriber recovers a pending contact after publisher approval response is
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberSetup.publicKey],
+      subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
       services: [],
     });
     await setSubscriberPendingPublisher({
@@ -2219,7 +2254,7 @@ test("subscriber reconnects in the background without changing local ports", asy
     const publisherSetup = await setupPublisher({
       stateDir: publisherState,
       displayName: "kosmos",
-      subscriberPublicKeys: [subscriberSetup.publicKey],
+      subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
       services: [],
     });
     await setSubscriberPublisher({
