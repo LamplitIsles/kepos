@@ -11,6 +11,7 @@ import {
   TerminalPairingError,
   type PairingDecision,
 } from "../src/mux/transport.js";
+import { TokenBucketRateLimiter } from "../src/mux/rate-limit.js";
 
 const compact = compactModule as { string: unknown };
 
@@ -203,6 +204,15 @@ async function readToEnd(stream: Duplex): Promise<string> {
   });
   await once(stream, "end");
   return body;
+}
+
+async function countBytesToEnd(stream: Duplex): Promise<number> {
+  let bytes = 0;
+  stream.on("data", (chunk: Uint8Array) => {
+    bytes += chunk.byteLength;
+  });
+  await once(stream, "end");
+  return bytes;
 }
 
 async function waitFor(
@@ -787,4 +797,73 @@ test("pauses one service when its subscriber channel applies backpressure", asyn
 
   subscriber.close();
   publisher.close();
+});
+
+test("shares a publisher outbound cap across channels without limiting another service", async () => {
+  const scheduler = new ManualScheduler();
+  const limiter = new TokenBucketRateLimiter({
+    rateBps: 2_000_000,
+    now: () => scheduler.now,
+    schedule: scheduler.schedule,
+  });
+  const [subscriberOuter, publisherOuter] = framedPair();
+  const limitedTargets = [new PacedService(32), new PacedService(32)];
+  const unlimitedTarget = new PacedService(32);
+  let limitedTargetIndex = 0;
+  const publisher = createMuxPublisher(publisherOuter, {
+    connect: async (serviceId) => {
+      if (serviceId === "forgejo") {
+        return limitedTargets[limitedTargetIndex++]!;
+      }
+      return unlimitedTarget;
+    },
+    publisherToSubscriberRateLimiter: (serviceId) =>
+      serviceId === "forgejo" ? limiter : undefined,
+  });
+  const subscriber = createMuxSubscriber(subscriberOuter);
+  const [limitedOne, limitedTwo, unlimited] = await Promise.all([
+    subscriber.open("forgejo"),
+    subscriber.open("forgejo"),
+    subscriber.open("unlimited"),
+  ]);
+  let limitedBytes = 0;
+  limitedOne.on("data", (chunk: Uint8Array) => {
+    limitedBytes += chunk.byteLength;
+  });
+  limitedTwo.on("data", (chunk: Uint8Array) => {
+    limitedBytes += chunk.byteLength;
+  });
+  const limitedOneDone = countBytesToEnd(limitedOne);
+  const limitedTwoDone = countBytesToEnd(limitedTwo);
+  const unlimitedDone = countBytesToEnd(unlimited);
+  try {
+    await waitFor(
+      () => scheduler.pending() > 0,
+      "configured service never became backpressured",
+    );
+    const unlimitedBytes = await unlimitedDone;
+    assert.equal(unlimitedBytes, 32 * 4 * 1024);
+    assert.ok(
+      limitedBytes <= 64 * 1024,
+      `configured service exceeded its bounded initial burst (${limitedBytes})`,
+    );
+
+    let limitedFinished = false;
+    const limitedDone = Promise.all([limitedOneDone, limitedTwoDone]).then(
+      (values) => {
+        limitedFinished = true;
+        return values;
+      },
+    );
+    for (let index = 0; index < 500 && !limitedFinished; index++) {
+      scheduler.advance(100);
+      await flushFrames();
+    }
+    const [limitedOneBytes, limitedTwoBytes] = await limitedDone;
+    assert.equal(limitedOneBytes, 32 * 4 * 1024);
+    assert.equal(limitedTwoBytes, 32 * 4 * 1024);
+  } finally {
+    subscriber.close();
+    publisher.close();
+  }
 });

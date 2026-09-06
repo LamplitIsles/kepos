@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { loadKeposConfig, parseKeposConfig } from "../src/app-config.js";
+import {
+  loadKeposConfig,
+  parseKeposConfig,
+  serializeKeposConfig,
+} from "../src/app-config.js";
 import {
   defaultKeposConfigPath,
   defaultKeposStateRoot,
@@ -143,6 +147,71 @@ target_port = 22
   assert.deepEqual(config.publisher?.services, [
     { id: "ssh", name: "SSH", kind: "tcp", targetPort: 22 },
   ]);
+});
+
+test("shared config parses and serializes a publisher outbound rate limit", () => {
+  const source = `
+[publisher]
+display_name = "kosmos"
+subscribers = []
+
+[[publisher.services]]
+id = "forgejo"
+name = "Forgejo"
+kind = "http"
+target_port = 3000
+max_publisher_to_subscriber_bps = 2000000
+`;
+  const config = parseKeposConfig(source);
+  assert.deepEqual(config.publisher?.services, [
+    {
+      id: "forgejo",
+      name: "Forgejo",
+      kind: "http",
+      targetPort: 3000,
+      maxPublisherToSubscriberBps: 2_000_000,
+    },
+  ]);
+  assert.match(
+    serializeKeposConfig(config),
+    /max_publisher_to_subscriber_bps = 2000000/,
+  );
+  assert.deepEqual(parseKeposConfig(serializeKeposConfig(config)), config);
+});
+
+test("shared config rejects invalid publisher outbound rate limits", () => {
+  for (const value of ["0", "-1", "1.5", "9007199254740992"]) {
+    assert.throws(
+      () =>
+        parseKeposConfig(`
+[publisher]
+display_name = "kosmos"
+subscribers = []
+
+[[publisher.services]]
+id = "forgejo"
+name = "Forgejo"
+target_port = 3000
+max_publisher_to_subscriber_bps = ${value}
+`),
+      /max_publisher_to_subscriber_bps|positive|safe|integer|losslessly/i,
+    );
+  }
+  assert.throws(
+    () =>
+      parseKeposConfig(`
+[publisher]
+display_name = "kosmos"
+subscribers = []
+
+[[publisher.services]]
+id = "forgejo"
+name = "Forgejo"
+target_port = 3000
+max_publisher_to_subscriber_bps = true
+`),
+    /maxPublisherToSubscriberBps|positive|safe|integer/i,
+  );
 });
 
 test("shared config rejects incomplete or invalid role policy", () => {
