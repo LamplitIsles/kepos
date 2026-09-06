@@ -21,6 +21,7 @@ import {
   type PairingDecision,
   type RunningMuxPublisher,
 } from "../mux/transport.js";
+import { TokenBucketRateLimiter } from "../mux/rate-limit.js";
 import {
   PublisherPairing,
   type PublisherPairingSnapshot,
@@ -170,6 +171,24 @@ export async function startPublisher(
   const dht =
     options.dht ?? createDht({ bootstrap: options.bootstrap, keyPair });
   const now = options.now ?? Date.now;
+  const serviceRateLimiters = new Map<
+    string,
+    { rateBps: number; limiter: TokenBucketRateLimiter }
+  >();
+  const publisherToSubscriberRateLimiter = (
+    serviceId: string,
+  ): TokenBucketRateLimiter | undefined => {
+    const rateBps = services.get(serviceId)?.maxPublisherToSubscriberBps;
+    if (rateBps === undefined) {
+      serviceRateLimiters.delete(serviceId);
+      return undefined;
+    }
+    const current = serviceRateLimiters.get(serviceId);
+    if (current?.rateBps === rateBps) return current.limiter;
+    const limiter = new TokenBucketRateLimiter({ rateBps, now });
+    serviceRateLimiters.set(serviceId, { rateBps, limiter });
+    return limiter;
+  };
   const observePairing = createObservationEmitter({
     observe: options.observe,
     role: "publisher",
@@ -375,6 +394,7 @@ export async function startPublisher(
         },
         serviceKind: (serviceId) => services.get(serviceId)?.kind ?? "tcp",
         subscriberPublicKey: subscriberKey,
+        publisherToSubscriberRateLimiter,
         metricsContext,
         metrics,
       });
@@ -438,6 +458,12 @@ export async function startPublisher(
       services = new Map(
         next.services.map((service) => [service.id, service]),
       );
+      for (const [serviceId, current] of serviceRateLimiters) {
+        const nextRateBps = services.get(serviceId)?.maxPublisherToSubscriberBps;
+        if (nextRateBps !== current.rateBps) {
+          serviceRateLimiters.delete(serviceId);
+        }
+      }
       subscribers = new Map(
         next.subscribers.map((device) => [device.publicKey, device]),
       );
@@ -567,13 +593,18 @@ function clonePolicy(policy: PublisherRuntimePolicy): PublisherRuntimePolicy {
       publicKey,
       label,
     })),
-    services: policy.services.map(({ id, name, kind, targetPort, allow }) => ({
-      id,
-      name,
-      ...(kind === undefined ? {} : { kind }),
-      targetPort,
-      ...(allow === undefined ? {} : { allow: [...allow] }),
-    })),
+    services: policy.services.map(
+      ({ id, name, kind, targetPort, allow, maxPublisherToSubscriberBps }) => ({
+        id,
+        name,
+        ...(kind === undefined ? {} : { kind }),
+        targetPort,
+        ...(allow === undefined ? {} : { allow: [...allow] }),
+        ...(maxPublisherToSubscriberBps === undefined
+          ? {}
+          : { maxPublisherToSubscriberBps }),
+      }),
+    ),
   };
 }
 
@@ -594,13 +625,18 @@ function policyFingerprint(policy: PublisherRuntimePolicy): string {
           left.publicKey.localeCompare(right.publicKey) ||
           left.label.localeCompare(right.label),
       ),
-    services: policy.services.map(({ id, name, kind, targetPort, allow }) => ({
-      id,
-      name,
-      kind: kind ?? "tcp",
-      targetPort,
-      ...(allow === undefined ? {} : { allow: [...new Set(allow)].sort() }),
-    })),
+    services: policy.services.map(
+      ({ id, name, kind, targetPort, allow, maxPublisherToSubscriberBps }) => ({
+        id,
+        name,
+        kind: kind ?? "tcp",
+        targetPort,
+        ...(allow === undefined ? {} : { allow: [...new Set(allow)].sort() }),
+        ...(maxPublisherToSubscriberBps === undefined
+          ? {}
+          : { maxPublisherToSubscriberBps }),
+      }),
+    ),
   });
 }
 

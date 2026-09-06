@@ -19,6 +19,10 @@ import {
   type ObservationRole,
   type Observe,
 } from "./observability.js";
+import {
+  publisherToSubscriberBurstBytes,
+  type PublisherToSubscriberRateLimiter,
+} from "./rate-limit.js";
 import { bridgeHttp1 } from "./http-forwarder.js";
 import type {
   PublisherMetricsDirection,
@@ -133,6 +137,9 @@ export interface MuxPublisherOptions {
   subscriberPublicKey?: string;
   metricsContext?: PublisherMetricsContext;
   metrics?: PublisherMetricsHooks;
+  publisherToSubscriberRateLimiter?: (
+    serviceId: string,
+  ) => PublisherToSubscriberRateLimiter | undefined;
   transportSnapshot?: () => unknown;
 }
 
@@ -477,6 +484,8 @@ class MuxTunnel extends Duplex {
   private pendingDrain?: (error?: Error | null) => void;
   private remoteClosing = false;
   private closeTrigger = "local.close";
+  private publisherToSubscriberRateLimiter?: PublisherToSubscriberRateLimiter;
+  private cancelRateLimitWait?: () => void;
   private readonly openedAt: number;
   private readonly metrics: Record<
     ObservationDirection,
@@ -512,6 +521,12 @@ class MuxTunnel extends Duplex {
   attach(channel: MuxChannel, messages: TunnelMessages): void {
     this.channel = channel;
     this.messages = messages;
+  }
+
+  setPublisherToSubscriberRateLimiter(
+    limiter: PublisherToSubscriberRateLimiter | undefined,
+  ): void {
+    this.publisherToSubscriberRateLimiter = limiter;
   }
 
   accept(): void {
@@ -637,6 +652,8 @@ class MuxTunnel extends Duplex {
     error: Error | null,
     callback: (error?: Error | null) => void,
   ): void {
+    this.cancelRateLimitWait?.();
+    this.cancelRateLimitWait = undefined;
     if (this.readyState === "pending") {
       this.readyState = "failed";
       this.readyReject(error ?? new Error("Tunnel closed before it opened"));
@@ -664,6 +681,89 @@ class MuxTunnel extends Duplex {
   }
 
   private sendData(
+    chunk: Uint8Array,
+    callback: (error?: Error | null) => void,
+  ): void {
+    if (
+      this.options.outgoingDirection === "publisher-to-subscriber" &&
+      this.publisherToSubscriberRateLimiter !== undefined
+    ) {
+      this.sendRateLimited(chunk, callback);
+      return;
+    }
+    this.sendChunk(chunk, callback);
+  }
+
+  private sendRateLimited(
+    chunk: Uint8Array,
+    callback: (error?: Error | null) => void,
+  ): void {
+    if (chunk.byteLength === 0) {
+      callback();
+      return;
+    }
+    let offset = 0;
+    let finished = false;
+    const finish = (error?: Error | null): void => {
+      if (finished) return;
+      finished = true;
+      this.cancelRateLimitWait = undefined;
+      callback(error);
+    };
+    const sendNext = (): void => {
+      if (this.destroyed) {
+        finish(new Error("Tunnel closed while rate-limit wait was pending"));
+        return;
+      }
+      if (offset >= chunk.byteLength) {
+        finish();
+        return;
+      }
+      const limiter = this.publisherToSubscriberRateLimiter;
+      if (limiter === undefined) {
+        this.sendChunk(chunk.subarray(offset), (error) => {
+          finish(error);
+        });
+        return;
+      }
+      const segment = chunk.subarray(
+        offset,
+        Math.min(offset + publisherToSubscriberBurstBytes, chunk.byteLength),
+      );
+      let ticket;
+      try {
+        ticket = limiter.wait(segment.byteLength);
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      this.cancelRateLimitWait = ticket.cancel;
+      ticket.promise.then(
+        () => {
+          this.cancelRateLimitWait = undefined;
+          if (this.destroyed) {
+            finish(new Error("Tunnel closed while rate-limit wait was pending"));
+            return;
+          }
+          this.sendChunk(segment, (error) => {
+            if (error) {
+              finish(error);
+              return;
+            }
+            offset += segment.byteLength;
+            sendNext();
+          });
+        },
+        (error: unknown) => {
+          this.cancelRateLimitWait = undefined;
+          finish(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    };
+    sendNext();
+  }
+
+  private sendChunk(
     chunk: Uint8Array,
     callback: (error?: Error | null) => void,
   ): void {
@@ -906,6 +1006,9 @@ function pairPublisherServiceProtocol(
         serviceId = openedServiceId;
         emit("channel.open");
         try {
+          tunnel.stream.setPublisherToSubscriberRateLimiter(
+            options.publisherToSubscriberRateLimiter?.(openedServiceId),
+          );
           const target = await options.connect(openedServiceId);
           tunnel.stream.accept();
           tunnel.messages.status.send("");

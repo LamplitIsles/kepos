@@ -21,6 +21,7 @@ export interface PublisherService {
   kind: "tcp" | "http";
   targetPort: number;
   allow?: string[];
+  maxPublisherToSubscriberBps?: number;
 }
 
 const keyHexPattern = /^[0-9a-f]{64}$/;
@@ -111,6 +112,16 @@ function parseTargetPort(value: unknown, field = "targetPort"): number {
   return value;
 }
 
+function parseMaxPublisherToSubscriberBps(
+  value: unknown,
+  field = "maxPublisherToSubscriberBps",
+): number {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+    throw new Error(`${field} must be a positive safe integer`);
+  }
+  return value as number;
+}
+
 export function parsePublisherIdentity(value: unknown): PublisherIdentity {
   if (!isRecord(value)) {
     throw new Error("publisher identity must be an object");
@@ -170,7 +181,14 @@ export function parsePublisherService(
   }
   rejectUnknownFields(
     value,
-    ["id", "name", "kind", "targetPort", "allow"],
+    [
+      "id",
+      "name",
+      "kind",
+      "targetPort",
+      "allow",
+      "maxPublisherToSubscriberBps",
+    ],
     field,
   );
   if (typeof value.id !== "string" || !serviceIdPattern.test(value.id)) {
@@ -192,6 +210,14 @@ export function parsePublisherService(
     ...(value.allow === undefined
       ? {}
       : { allow: parseServiceAllow(value.allow, `${field}.allow`) }),
+    ...(value.maxPublisherToSubscriberBps === undefined
+      ? {}
+      : {
+          maxPublisherToSubscriberBps: parseMaxPublisherToSubscriberBps(
+            value.maxPublisherToSubscriberBps,
+            `${field}.maxPublisherToSubscriberBps`,
+          ),
+        }),
   };
 }
 

@@ -141,12 +141,22 @@ export function serializeKeposConfig(config: KeposConfig): string {
         ({ label, publicKey }) => ({ label, public_key: publicKey }),
       ),
       services: config.publisher.services.map(
-        ({ id, name, kind, targetPort, allow }) => ({
+        ({
+          id,
+          name,
+          kind,
+          targetPort,
+          allow,
+          maxPublisherToSubscriberBps,
+        }) => ({
           id,
           name,
           ...(kind === undefined ? {} : { kind }),
           target_port: targetPort,
           ...(allow === undefined ? {} : { allow }),
+          ...(maxPublisherToSubscriberBps === undefined
+            ? {}
+            : { max_publisher_to_subscriber_bps: maxPublisherToSubscriberBps }),
         }),
       ),
     };
@@ -240,7 +250,14 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
     rejectUnknownFields(
       service,
       ["publisher", `services[${index}]`],
-      ["id", "name", "kind", "target_port", "allow"],
+      [
+        "id",
+        "name",
+        "kind",
+        "target_port",
+        "allow",
+        "max_publisher_to_subscriber_bps",
+      ],
     );
     return {
       id: service.id,
@@ -248,6 +265,12 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
       ...(service.kind === undefined ? {} : { kind: service.kind }),
       targetPort: service.target_port,
       ...(service.allow === undefined ? {} : { allow: service.allow }),
+      ...(service.max_publisher_to_subscriber_bps === undefined
+        ? {}
+        : {
+            maxPublisherToSubscriberBps:
+              service.max_publisher_to_subscriber_bps,
+          }),
     };
   });
   const services = parsePublisherServices(rawServices, "publisher.services");
@@ -275,13 +298,28 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
       : { enabled: parseBoolean(publisher.enabled, "publisher.enabled") }),
     displayName: publisher.display_name,
     subscribers,
-    services: services.map(({ id, name, kind, targetPort, allow }, index) => ({
-      id,
-      name,
-      ...(rawServices[index]?.kind === undefined ? {} : { kind }),
-      targetPort,
-      ...(allow === undefined ? {} : { allow }),
-    })),
+    services: services.map(
+      (
+        {
+          id,
+          name,
+          kind,
+          targetPort,
+          allow,
+          maxPublisherToSubscriberBps,
+        },
+        index,
+      ) => ({
+        id,
+        name,
+        ...(rawServices[index]?.kind === undefined ? {} : { kind }),
+        targetPort,
+        ...(allow === undefined ? {} : { allow }),
+        ...(maxPublisherToSubscriberBps === undefined
+          ? {}
+          : { maxPublisherToSubscriberBps }),
+      }),
+    ),
   };
 }
 

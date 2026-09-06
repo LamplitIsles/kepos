@@ -48,6 +48,7 @@ test("publisher service parser preserves TCP and HTTP policy", () => {
         kind: "http",
         targetPort: 8080,
         allow: [publicKey],
+        maxPublisherToSubscriberBps: 2_000_000,
       },
     ]),
     [
@@ -58,12 +59,31 @@ test("publisher service parser preserves TCP and HTTP policy", () => {
         kind: "http",
         targetPort: 8080,
         allow: [publicKey],
+        maxPublisherToSubscriberBps: 2_000_000,
       },
     ],
   );
   assert.deepEqual(
     parsePublisherService({ id: "other", name: "Other", targetPort: 1 }),
     { id: "other", name: "Other", kind: "tcp", targetPort: 1 },
+  );
+});
+
+test("publisher service parser rejects invalid outbound rate limits", () => {
+  const base = { id: "ssh", name: "SSH", targetPort: 22 };
+  for (const value of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "2000000"]) {
+    assert.throws(
+      () => parsePublisherService({ ...base, maxPublisherToSubscriberBps: value }),
+      /maxPublisherToSubscriberBps|positive|safe|integer/i,
+    );
+  }
+  assert.throws(
+    () =>
+      parsePublisherService({
+        ...base,
+        max_publisher_to_subscriber_bps: 2_000_000,
+      }),
+    /unknown field/i,
   );
 });
 

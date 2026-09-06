@@ -79,6 +79,13 @@ kind = "http"
 target_port = 4533
 allow = ["<subscriber-public-key>"]
 
+[[publisher.services]]
+id = "forgejo"
+name = "Forgejo"
+kind = "http"
+target_port = 3000
+max_publisher_to_subscriber_bps = 2000000
+
 [subscriber]
 enabled = true
 gateway_port = 17480
@@ -130,6 +137,26 @@ There are no publisher state-policy mutation commands. Edit the TOML
 `display_name`, `subscribers`, `services`, and `allow` values instead. A
 publisher state directory contains identity only; the separate service
 manifest and state policy snapshot are not read or migrated.
+
+Published service payloads can optionally be capped in the
+publisher-to-subscriber direction:
+
+```toml
+[[publisher.services]]
+id = "forgejo"
+name = "Forgejo"
+kind = "http"
+target_port = 3000
+max_publisher_to_subscriber_bps = 2000000
+```
+
+`max_publisher_to_subscriber_bps` is a positive decimal bytes-per-second rate.
+It is aggregate per service and publisher, shared by every channel and
+subscriber using that service; it does not limit subscriber-to-publisher
+traffic or any other service. Omit the field to keep the service unlimited.
+The Forgejo example caps publisher-to-subscriber payload at 2 MB/s
+(2,000,000 bytes per second). Policy reloads apply a changed limit to newly
+opened channels; existing channels keep the limit they had when they opened.
 
 ## Publisher metrics and dashboard
 
