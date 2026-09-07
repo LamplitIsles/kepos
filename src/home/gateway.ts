@@ -90,12 +90,18 @@ function routeSocket(
 
   function onData(chunk: Buffer): void {
     buffered = Buffer.concat([buffered, chunk]);
-    if (buffered.length > maximumHeaderBytes) {
+    const headerEnd = buffered.indexOf(headerTerminator);
+    if (headerEnd === -1) {
+      if (buffered.length > maximumHeaderBytes) {
+        replyAndClose(socket, 431, "Request Header Fields Too Large");
+      }
+      return;
+    }
+    const headerLength = headerEnd + headerTerminator.length;
+    if (headerLength > maximumHeaderBytes) {
       replyAndClose(socket, 431, "Request Header Fields Too Large");
       return;
     }
-    const headerEnd = buffered.indexOf(headerTerminator);
-    if (headerEnd === -1) return;
 
     socket.pause();
     socket.setTimeout(0);
