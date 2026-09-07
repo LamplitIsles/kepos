@@ -304,6 +304,10 @@ Kepos reserves `home` for machine-readable discovery:
 http://home.localhost:17480/.well-known/kepos/services.json
 ```
 
+The gateway bounds only the complete request header section, including its
+terminating `CRLF` pair, to 16 KiB. Request body bytes are forwarded unchanged
+and are not included in that header bound.
+
 The root Home path does not serve a human page. `ssh` remains a raw TCP service
 with an explicit subscriber-side local port.
 
