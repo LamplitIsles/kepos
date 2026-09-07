@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { request } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import { PassThrough } from "node:stream";
@@ -206,13 +207,19 @@ async function assertRejectedHeader(chunks: Buffer | readonly Buffer[]): Promise
 
   try {
     const response = readSocket(client);
+    let responseStarted = false;
+    client.once("data", () => {
+      responseStarted = true;
+    });
+    client.once("end", () => {
+      responseStarted = true;
+    });
     const parts = Buffer.isBuffer(chunks) ? [chunks] : chunks;
     for (const [index, chunk] of parts.entries()) {
-      if (index === parts.length - 1) client.end(chunk);
-      else {
-        client.write(chunk);
-        await nextTurn();
-      }
+      if (index === parts.length - 1) {
+        if (parts.length > 1) assert.equal(responseStarted, false);
+        client.end(chunk);
+      } else await writeChunk(client, chunk);
     }
     assert.match(
       (await response).toString("latin1"),
@@ -306,4 +313,10 @@ function makeUnterminatedHeader(length: number): Buffer {
 
 function nextTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function writeChunk(socket: Socket, chunk: Buffer): Promise<void> {
+  if (!socket.write(chunk)) await once(socket, "drain");
+  // Let the loop deliver this chunk before the caller writes the continuation.
+  for (let turn = 0; turn < 3; turn++) await nextTurn();
 }
