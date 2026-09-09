@@ -22,6 +22,16 @@ _Avoid_: Person name, account name
 **Published Service**:
 A named service that a publisher intentionally makes available through Kepos.
 
+**UDP Service**:
+A published service that exchanges individual datagrams with one fixed
+publisher-side destination, without guaranteeing delivery or ordering.
+_Avoid_: Virtual LAN, reliable UDP tunnel
+
+**UDP Flow**:
+One local application's datagram exchange with a UDP service through a
+subscriber device. Separate local senders have separate flows and replies.
+_Avoid_: Active Service Channel
+
 **Active Service Channel**:
 One live byte stream opened by a subscriber device to a published service.
 Multiple active service channels may use the same published service.
