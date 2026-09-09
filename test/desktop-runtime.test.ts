@@ -239,6 +239,67 @@ test("desktop runtime keeps subscriber service behavior in subscriber-only mode"
   await runtime.stop();
 });
 
+test("desktop marks a UDP service unavailable with its carrier error and recovers", async () => {
+  const snapshots: DesktopSnapshot[] = [];
+  let udpAvailable = false;
+  const udpRegistry: HomeRegistry = {
+    ...registry,
+    services: [
+      ...registry.services,
+      { id: "farm", name: "Farm", kind: "udp" },
+    ],
+  };
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: DEFAULT_GATEWAY_PORT,
+        services: [{ id: "farm", kind: "udp", localPort: 24_642 }],
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies([], {
+      startSubscriber: async () =>
+        runningSubscriber(
+          () => subscriberStatus("connected", 1, [{
+            id: "farm",
+            port: 24_642,
+            kind: "udp",
+            available: udpAvailable,
+            ...(udpAvailable ? {} : { error: "UDP datagram transport is unavailable on this connection" }),
+          }]),
+          [],
+        ),
+      readRegistry: async () => udpRegistry,
+    }),
+  );
+
+  const unavailable = snapshots.at(-1)?.subscriber?.services.find(({ id }) => id === "farm");
+  assert.deepEqual(unavailable, {
+    id: "farm",
+    name: "Farm",
+    access: "udp",
+    action: "copy-endpoint",
+    icon: "port",
+    available: false,
+    error: "UDP datagram transport is unavailable on this connection",
+  });
+
+  udpAvailable = true;
+  await runtime.poll();
+  const recovered = snapshots.at(-1)?.subscriber?.services.find(({ id }) => id === "farm");
+  assert.deepEqual(recovered, {
+    id: "farm",
+    name: "Farm",
+    access: "udp",
+    action: "copy-endpoint",
+    icon: "port",
+    available: true,
+    copyText: "127.0.0.1:24642",
+  });
+  await runtime.stop();
+});
+
 test("desktop exposes the pinned publisher relationship before Home is available", async () => {
   const events: string[] = [];
   const snapshots: DesktopSnapshot[] = [];

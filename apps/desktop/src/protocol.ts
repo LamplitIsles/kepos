@@ -13,8 +13,8 @@ export type DesktopConnection =
 export interface DesktopService {
   id: string;
   name: string;
-  access: "http" | "ssh" | "tcp";
-  action: "open" | "copy-command" | "copy-url";
+  access: "http" | "ssh" | "tcp" | "udp";
+  action: "open" | "copy-command" | "copy-url" | "copy-endpoint";
   icon:
     | "book"
     | "build"
@@ -29,6 +29,7 @@ export interface DesktopService {
     | "terminal"
     | "web";
   available: boolean;
+  error?: string;
   copyText?: string;
   url?: string;
 }
@@ -63,7 +64,12 @@ export interface DesktopPublisherRole {
   activeSubscribers: number;
   activeSubscriberKeys: string[];
   acceptedConnections: number;
-  services: Array<{ id: string; name: string; targetPort: number }>;
+  services: Array<{
+    id: string;
+    name: string;
+    targetPort: number;
+    kind?: "udp";
+  }>;
   pairing?:
     | { phase: "idle" }
     | {

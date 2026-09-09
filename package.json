@@ -13,6 +13,10 @@
       "bare": "bare-crypto",
       "default": "node:crypto"
     },
+    "node:dgram": {
+      "bare": "bare-dgram",
+      "default": "node:dgram"
+    },
     "node:events": {
       "bare": "bare-events",
       "default": "node:events"
@@ -83,7 +87,7 @@
     "check": "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage && npm run web:verify",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:packages && node --import tsx --test \"test/**/*.test.ts\"",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-include=\"packages/*/src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info \"test/**/*.test.ts\"",
+    "test:coverage": "node --import tsx --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-include=\"packages/*/src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info \"test/**/*.test.ts\"",
     "desktop:build": "tsx scripts/build-desktop.ts",
     "desktop:check": "npm run desktop:typecheck && node --import tsx --test \"test/desktop-*.test.ts\"",
     "desktop:install": "npm run desktop:build && tsx scripts/install-desktop.ts",
@@ -102,6 +106,7 @@
   "dependencies": {
     "b4a": "^1.8.1",
     "bare-crypto": "^1.15.3",
+    "bare-dgram": "^1.1.1",
     "bare-events": "^2.9.1",
     "bare-fs": "^4.7.4",
     "bare-http1": "^4.5.7",

@@ -597,6 +597,7 @@ ${smokeAcknowledgementState}
       const icon = (service) => icons[service.icon] || icons.port;
       const primaryLabel = (service) => {
         if (service.action === "copy-command") return "Copy command";
+        if (service.action === "copy-endpoint") return "Copy endpoint";
         if (service.action === "copy-url") return "Copy URL";
         return service.action === "open" ? "Open" : "";
       };
@@ -607,12 +608,13 @@ ${smokeAcknowledgementState}
           (service.available ? '' : ' disabled') + '>' + primaryLabel(service) + '</button>';
         return '<article class="service' + (service.available ? '' : ' unavailable') + '">' +
           '<div class="service-icon">' + icon(service) + '</div>' +
-          '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2></div>' +
+          '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2>' +
+          (service.error ? '<p class="service-hint">' + escapeHtml(service.error) + '</p>' : service.access === "udp" && !service.copyText ? '<p class="service-hint">Configure a local UDP port</p>' : '') + '</div>' +
           '<div class="actions">' + actionButton + '</div></article>';
       };
 
       const renderPublishedService = (service) => {
-        const address = service.id + ' · 127.0.0.1:' + service.targetPort;
+        const address = service.id + (service.kind === "udp" ? ' · UDP' : '') + ' · 127.0.0.1:' + service.targetPort;
         return '<article class="service published"><div class="service-icon">' + icons.port + '</div>' +
           '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2>' +
           '<p class="service-address">' + escapeHtml(address) + '</p></div></article>';

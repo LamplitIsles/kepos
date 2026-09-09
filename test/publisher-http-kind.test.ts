@@ -10,15 +10,15 @@ import { loadPublisherIdentity, setupPublisher } from "../src/state/publisher.js
 
 const subscriberKey = "11".repeat(32);
 
-test("publisher service policy defaults a missing kind to TCP and accepts HTTP", () => {
+test("publisher service policy defaults TCP and accepts HTTP or UDP", () => {
   assert.equal(parsePublisherService({ id: "site", name: "Site", targetPort: 8080 }).kind, "tcp");
   assert.equal(
     parsePublisherService({ id: "site", name: "Site", targetPort: 8080, kind: "http" }).kind,
     "http",
   );
-  assert.throws(
-    () => parsePublisherService({ id: "site", name: "Site", targetPort: 8080, kind: "udp" }),
-    /tcp or http/,
+  assert.equal(
+    parsePublisherService({ id: "site", name: "Site", targetPort: 8080, kind: "udp" }).kind,
+    "udp",
   );
 });
 

@@ -54,6 +54,7 @@ export function createAndroidRegistrySnapshot(
       registry.services,
       gatewayPort,
       localPorts,
+      { supportsUdp: false },
     ),
   };
 }

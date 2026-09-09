@@ -77,6 +77,11 @@ route = "auto"
 [[subscriber.services]]
 id = "ssh"
 local_port = 2222
+
+[[subscriber.services]]
+id = "stardew"
+kind = "udp"
+local_port = 24642
 ```
 
 Use `--config <path>` for an isolated configuration. Publisher startup requires
@@ -98,6 +103,10 @@ for the local publisher.
 - SSH copies a loopback command.
 - Dagger copies an environment variable that points the CLI at the remote
   engine.
+- Fixed-target UDP services copy a loopback `127.0.0.1:port` endpoint; they do
+  not open a browser URL. The current application-datagram cap is 1,200 bytes;
+  carrier fragments are bounded and the Stardew Valley direct-IP path remains
+  awaiting real-game acceptance.
 - **Add device** creates a two-minute QR for an Android subscriber and shows the
   authenticated candidate fingerprint before approval. Desktop subscribers use
   the manual public-key flow in the [public guide](https://kepos.guion.io/docs/).

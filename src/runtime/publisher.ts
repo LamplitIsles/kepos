@@ -124,11 +124,7 @@ export async function startPublisher(
   const home = await startHomeServer({
     publisherKey,
     displayName,
-    services: [...services.values()].map(({ id, name }) => ({
-      id,
-      name,
-      kind: "tcp",
-    })),
+    services: [...services.values()].map(registryService),
   });
   const subscriberHomes = new Map<string, Promise<RunningHomeServer>>();
   const subscriberHome = (
@@ -141,7 +137,7 @@ export async function startPublisher(
       displayName,
       services: [...services.values()]
         .filter((service) => serviceAllows(service, subscriberKey))
-        .map(({ id, name }) => ({ id, name, kind: "tcp" })),
+        .map(registryService),
     });
     subscriberHomes.set(subscriberKey, starting);
     void starting.catch(() => subscriberHomes.delete(subscriberKey));
@@ -392,7 +388,12 @@ export async function startPublisher(
           }
           return connectLoopback(service.targetPort);
         },
+        serviceAuthorized: (serviceId) => {
+          const service = services.get(serviceId);
+          return service !== undefined && serviceAllows(service, subscriberKey);
+        },
         serviceKind: (serviceId) => services.get(serviceId)?.kind ?? "tcp",
+        serviceTargetPort: (serviceId) => services.get(serviceId)?.targetPort,
         subscriberPublicKey: subscriberKey,
         publisherToSubscriberRateLimiter,
         metricsContext,
@@ -471,11 +472,7 @@ export async function startPublisher(
       appliedPolicy = next;
       home.updateRegistry({
         displayName,
-        services: [...services.values()].map(({ id, name }) => ({
-          id,
-          name,
-          kind: "tcp",
-        })),
+        services: [...services.values()].map(registryService),
       });
       await Promise.all(
         [...subscriberHomes.entries()].map(async ([subscriberKey, starting]) => {
@@ -484,11 +481,12 @@ export async function startPublisher(
             displayName,
             services: [...services.values()]
               .filter((service) => serviceAllows(service, subscriberKey))
-              .map(({ id, name }) => ({ id, name, kind: "tcp" })),
+              .map(registryService),
           });
         }),
       );
       for (const [subscriberKey, current] of activeBySubscriberKey) {
+        current.mux.closeUdpFlows?.();
         if (removedSubscribers.has(subscriberKey)) current.mux.close();
       }
       return true;
@@ -645,6 +643,16 @@ function serviceAllows(
   subscriberKey: string,
 ): boolean {
   return service.allow === undefined || service.allow.includes(subscriberKey);
+}
+
+function registryService(
+  service: PublisherRuntimeService,
+): { id: string; name: string; kind: "tcp" | "udp" } {
+  return {
+    id: service.id,
+    name: service.name,
+    kind: service.kind === "udp" ? "udp" : "tcp",
+  };
 }
 
 function schedulePairingExpiry(

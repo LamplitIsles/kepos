@@ -6,19 +6,20 @@ primary guide for installing and using the product.
 
 ## System boundary
 
-Kepos is a service-scoped, split TCP byte-stream proxy. It does not create an
-IP subnet and it does not forward TCP packets end to end.
+Kepos is a service-scoped proxy for split TCP byte streams and bounded UDP
+datagrams. It does not create an IP subnet and it does not forward TCP or UDP
+packets end to end.
 
 ```text
 browser / SSH / native client
           |
-          | local URL or TCP port
+          | local URL, TCP port, or UDP endpoint
           v
  subscriber gateway or listener
           |
-          | OPEN / DATA / FIN / RESET
+          | OPEN / DATA / FIN / RESET, or encrypted unordered datagram
           v
-      Protomux channel
+      Protomux channel or SecretStream message
           |
           v
  Noise-encrypted outer stream
@@ -29,24 +30,30 @@ browser / SSH / native client
           v
         publisher
           |
-          | loopback TCP
+          | loopback TCP or fixed-target UDP
           v
     Navidrome / SSH / another service
 ```
 
 The local TCP connection terminates at the subscriber and a separate local TCP
-connection starts at the publisher. Kepos moves payload bytes, lifecycle
-messages, and backpressure through a Protomux channel. TCP headers and TCP
+connection starts at the publisher. For UDP, the subscriber's loopback
+datagram endpoint is mapped to a publisher-side connected IPv4 socket for the
+configured target. Kepos moves TCP payload bytes, lifecycle messages, and
+backpressure through Protomux; UDP payloads retain datagram boundaries and use
+the encrypted unordered SecretStream message API. TCP/UDP headers and TCP
 acknowledgements do not cross the peer connection.
 
-The transport carries TCP byte streams for every service. The default `tcp`
-kind is byte-transparent. A publisher may instead opt a plaintext HTTP/1.1
-target into `http`: a framing-aware publisher-side adapter replaces every
-target-facing `Authorization` field with the authenticated subscriber device
-key, and supports a `ws://` Upgrade after a valid target `101` response. It does
-not add TLS, HTTP/2, h2c, HTTP/3, CONNECT, or a generic Upgrade tunnel. The
-[CLI HTTP service contract](cli.md#http-service-device-authentication) defines
-the target-facing header and its private-ingress security boundary.
+The default `tcp` kind is byte-transparent. A publisher may instead opt a
+plaintext HTTP/1.1 target into `http`: a framing-aware publisher-side adapter
+replaces every target-facing `Authorization` field with the authenticated
+subscriber device key, and supports a `ws://` Upgrade after a valid target
+`101` response. It does not add TLS, HTTP/2, h2c, HTTP/3, CONNECT, or a generic
+Upgrade tunnel. A `udp` service is named and fixed-target: it accepts only
+IPv4-loopback unicast, has bounded flows and a 1,200-byte application-datagram
+cap, and reassembles at most two 1,000-byte carrier fragments without adding
+retransmission. It does not provide broadcast, multicast, or arbitrary target
+selection. The [CLI HTTP service contract](cli.md#http-service-device-authentication)
+and [UDP service contract](cli.md#udp-services) define those boundaries.
 
 The Internet carrier is a different layer: HyperDHT discovers peers and
 coordinates NAT traversal, UDX provides reliable ordered streams over UDP, and
@@ -81,7 +88,7 @@ a generic VPN abstraction:
 - **UDX** carries the encrypted reliable stream over UDP. It supplies ordering,
   retransmission, congestion control, and flow control for the outer stream.
 - **Noise SecretStream** authenticates the peer keys and encrypts the outer
-  byte stream.
+  byte stream and provides the unordered message path used by UDP services.
 - **Protomux** multiplexes the registry, heartbeat, pairing, and independent
   service channels on the authenticated connection.
 - **Bare** hosts the shared JavaScript runtime inside the Android Worklet and
@@ -109,7 +116,9 @@ not stop that Worklet; an explicit service stop does.
 
 The Android app is subscriber-only. Its identity is created in app-private
 storage and preserved across an in-place update. It never copies a publisher
-seed or another device's secret key.
+seed or another device's secret key. Android currently presents and runs only
+HTTP/TCP service mappings; it deliberately filters UDP services until a
+separate mobile design and validation exists.
 
 ### Desktop
 
@@ -211,10 +220,12 @@ structured observations follow the same boundary; their shape is diagnostic,
 not a stable external API.
 
 Transport failures must not be converted into availability promises. The
-current product has no TCP relay fallback, no generic firewall bypass, no UDP
-service protocol, and no virtual-network routing. A VPN or TUN interface can
-still interfere with the UDP carrier, and operators must diagnose that boundary
-rather than assume a fallback path.
+current product has no TCP relay fallback, no generic firewall bypass, and no
+virtual-network routing. It has a bounded fixed-target UDP service protocol,
+but that protocol still requires the authenticated outer UDP path and does not
+provide arbitrary UDP forwarding. A VPN or TUN interface can still interfere
+with the UDP carrier, and operators must diagnose that boundary rather than
+assume a fallback path.
 
 ## Related decisions
 

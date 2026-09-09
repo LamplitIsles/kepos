@@ -1,12 +1,15 @@
 # 原生 UDP 服务：设计与兼容边界
 
-日期：2026-09-09。状态：设计已收敛，尚未实现或通过应用验收。
+日期：2026-09-09。状态：桌面 UDP forwarding 已实现并通过自动化端到端
+验收；Stardew Valley 真实游戏验收尚未完成。
 本轮用户决定来自 FlickNote #2231；历史依据为 #1384 与 #1511。
 传输语义决定见 [ADR 0011](adr/0011-preserve-datagram-semantics-for-udp-services.md)。
 
 ## 已确定的交付范围
 
 - 实现通用、命名、固定目标的 UDP 服务，复用现有设备身份和服务授权。
+- 在同一条已认证的 SecretStream/UDX 外层连接上，用加密无序消息承载 UDP；
+  不为 UDP flow 创建新的 DHT 连接、Noise 握手或 Protomux data channel。
 - 首个真实验收应用是星露谷的 direct-IP 联机。
 - 先交付桌面端，只桌面端需要验证；不增加 Android 或独立 CLI 验收要求。
 - 沿用当前本机服务投射模型；首轮按 IPv4 loopback 单播设计。
@@ -43,16 +46,26 @@ UDP Flow 与现有表示字节流的 Active Service Channel 是不同概念。
 
 ## 数据报大小和运行边界
 
-旧文档的 1024 字节与旧笔记的约 1200 字节只是建议起点，不是 UDP 协议
-上限，也不是已经验证的星露谷最大负载。必须结合实际应用报文、路径 MTU、
-UDX、SecretStream 加密和 Kepos 信封开销确定可用负载预算。
+本实现对单个应用 datagram 采用 1,200 字节硬上限。每个加密 carrier
+envelope 的 payload 上限是 1,000 bytes；1,001 到 1,200 bytes 的应用报文
+最多拆成两个有界分片并重组，不做可靠重传。这不是 UDP 协议上限，也不是
+已经验证的星露谷最大负载。安装的 libudx 把 1,200 字节作为包含 IP、UDP 和
+UDX header 的完整 packet budget；对一个不分片 envelope，按最坏 IPv6 的
+68 字节网络/UDX 开销、SecretStream 24 字节、Kepos 信封 23 字节和最大 64
+字节 service ID 计算，安全算术上限是 1,021 字节，故 1,000-byte carrier
+policy 留出余量：
 
-如果真实需求超出安全载荷，评估有界分片重组。该机制并不必然引入可靠交付：
-丢失一个分片可以导致整个数据报被丢弃，后续完整数据报不等待它。
-是否需要分片以及精确大小限制由实测决定，不能先承诺任意大小兼容。
-超限和路径不支持需要可诊断，不能静默降级为可靠字节流。
+```text
+1200 - 68 - 24 - 23 - 64 = 1021
+```
 
-实现需要限制 flow 数量、空闲寿命、待发送数据和重组资源（若启用），并处理
+UDX 可能针对具体路径探测到更大的 MTU，但路径、地址族和 direct/relay
+状态会改变有效值。分片没有独立重传：丢失一个分片可以导致整个数据报被
+丢弃，重组超时或资源受限也会丢弃它，后续完整数据报不等待它。超过 1,200
+字节或 carrier 不支持的报文会被丢弃并记录 bounded diagnostic，不会静默
+降级为可靠字节流。
+
+实现需要限制 flow 数量、空闲寿命、待发送数据和重组资源，并处理
 授权撤销、服务停止和外层重连后的清理。拥塞时不能无限排队。
 这些是实现者负责的技术选择，不是待用户确认的配置清单。
 
@@ -109,18 +122,19 @@ TURN 能指定 peer，因此将它接入固定目标服务会增加间接目的�
 
 ## 完成标准与剩余工作
 
-UDP echo 只验证基础载体，不能代替真实验收。桌面端应能配置、发布、发现
-并使用 UDP 服务，星露谷通过本机映射地址实际加入远端农场并进行双向游戏。
-配置和使用过程中不应要求用户了解 carrier 或 UDP Flow 内部标识。
+自动化检查已验证 envelope 边界、无序 carrier adapter、目标/回复隔离、
+ACL、并发 TCP、policy revoke、外层 replacement 和保留本机 UDP listener
+后的重连恢复。配置和使用过程中不要求用户了解 carrier 或 UDP Flow 内部标识。
 
-用最小相关检查验证多发送者回复隔离、授权拒绝和撤销、数据报边界、大小
-策略、空闲清理、重连后恢复以及与 TCP 并发时的行为。所有自动检查使用
-测试拥有的配置、目录和进程，不触碰安装中的真实身份或服务状态。
-实际桌面组合、游戏版本和网络条件要在验收证据中记录，不能外推到未测平台。
+一次 Windows NUC 游戏验收尝试无法开始，因为 wrapper 连接的 `nuc` 主机名
+DNS 解析失败（`ssh: Could not resolve hostname nuc`）。因此本文件不宣称
+Stardew Valley 可以 join 或双向 gameplay；需要可用的 Windows 游戏主机、
+隔离的游戏配置和人工/真实游戏验收。所有自动检查使用测试拥有的配置、
+目录和进程，不触碰安装中的真实身份或服务状态。实际桌面组合、游戏版本
+和网络条件要在验收证据中记录，不能外推到未测平台。
 
-目前没有必须由用户进一步决定的产品问题。先核验依赖和真实应用行为；
-只有证据要求改变已定范围或用户体验时，再发起新的设计问题。
-本次访谈完成的是设计记录，不代表已实现、提交、合并或发布。
+本轮没有必须由用户进一步决定的产品问题；未完成的真实游戏验收是外部环境
+阻塞，不改变已经实现的 bounded UDP service contract。
 
 ## 依据
 
@@ -128,6 +142,8 @@ UDP echo 只验证基础载体，不能代替真实验收。桌面端应能配�
 - FlickNote #1511：Holesail lessons for WebRTC-aware Kepos transport（2026-07-23）；其双 TURN 拓扑不是必要条件。
 - FlickNote #2231：本次用户决定和边界讨论。
 - [现有游戏场景](game-multiplayer-scenarios.md)：星露谷 direct-IP 方案及尚未验证的大小建议。
+- [实现证据](evidence/native-udp-implementation-2026-09-09.md)：自动化结果、
+  UDX/SecretStream payload 算术及 Windows NUC 阻塞。
 - 本地 @hyperswarm/secret-stream README 与 index.js：无序消息接口和发送前置条件。
 - [RFC 8835 §3.4](https://www.rfc-editor.org/rfc/rfc8835.html#section-3.4)：WebRTC 的 ICE、STUN/TURN 支持要求。
 - [RFC 8656 §3](https://www.rfc-editor.org/rfc/rfc8656.html#section-3)：TURN allocation、监听地址、中继地址和 peer 转发。

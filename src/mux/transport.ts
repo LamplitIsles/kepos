@@ -29,6 +29,11 @@ import type {
   PublisherMetricsContext,
   PublisherMetricsHooks,
 } from "../metrics/publisher.js";
+import {
+  createUdpPublisherForwarder,
+  createUdpSubscriberTransport,
+  type SubscriberDatagramConnection,
+} from "./udp.js";
 
 const Protomux = ProtomuxModule as ProtomuxConstructor;
 const compact = compactModule as CompactEncoding;
@@ -57,6 +62,8 @@ interface OuterStream extends NodeJS.ReadWriteStream {
   destroy: (error?: Error) => void;
   destroyed?: boolean;
   userData?: unknown;
+  send?: (message: Uint8Array) => Promise<unknown> | unknown;
+  rawStream?: unknown;
 }
 
 interface MuxMessage<T> {
@@ -132,7 +139,9 @@ export interface MuxPublisherOptions {
   observe?: Observe;
   outerId?: string;
   schedulePairingRequestDeadline?: ScheduleHeartbeat;
-  serviceKind?: (serviceId: string) => "tcp" | "http";
+  serviceAuthorized?: (serviceId: string) => boolean;
+  serviceKind?: (serviceId: string) => "tcp" | "http" | "udp";
+  serviceTargetPort?: (serviceId: string) => number | undefined;
   /** Public identity used to add the HTTP forwarding header. */
   subscriberPublicKey?: string;
   metricsContext?: PublisherMetricsContext;
@@ -162,12 +171,14 @@ export interface MuxSubscriberOptions {
 
 export interface RunningMuxPublisher {
   close: () => void;
+  closeUdpFlows?: (serviceId?: string) => void;
 }
 
 export interface RunningMuxSubscriber {
   close: () => void;
   controlReady?: Promise<ControlNegotiation>;
   open: (serviceId: string) => Promise<Duplex>;
+  udp?: SubscriberDatagramConnection;
   pair: (
     request: PairingRequest,
     options?: { onPending?: () => void },
@@ -834,6 +845,7 @@ export function createMuxSubscriber(
   });
   void controlReady.catch(() => undefined);
   let pairingChannel: MuxChannel | undefined;
+  const udp = createUdpSubscriberTransport(outer, () => authorized);
 
   const startControl = (): void => {
     control = createSubscriberControlChannel(mux, outer, options, now);
@@ -862,6 +874,7 @@ export function createMuxSubscriber(
 
   return {
     controlReady,
+    udp,
     async open(serviceId: string): Promise<Duplex> {
       if (!authorized) {
         throw new Error("Subscriber pairing is not approved");
@@ -968,6 +981,7 @@ export function createMuxSubscriber(
         );
       }
       control?.close();
+      udp.close();
       outer.destroy();
     },
   };
@@ -1009,6 +1023,11 @@ function pairPublisherServiceProtocol(
           tunnel.stream.setPublisherToSubscriberRateLimiter(
             options.publisherToSubscriberRateLimiter?.(openedServiceId),
           );
+          if (options.serviceKind?.(openedServiceId) === "udp") {
+            throw new Error(
+              "UDP service requires a UDP listener, not a TCP service channel",
+            );
+          }
           const target = await options.connect(openedServiceId);
           tunnel.stream.accept();
           tunnel.messages.status.send("");
@@ -1070,6 +1089,14 @@ export function createMuxPublisher(
   let pairingChannel: MuxChannel | undefined;
   let pairingOpened = false;
   const controlChannels = new Set<MuxChannel>();
+  const udp = createUdpPublisherForwarder(outer, {
+    authorized: () => authorized,
+    serviceAuthorized: options.serviceAuthorized,
+    serviceKind: (serviceId) => options.serviceKind?.(serviceId) ?? "tcp",
+    targetPort: (serviceId) => options.serviceTargetPort?.(serviceId),
+    publisherToSubscriberRateLimiter: options.publisherToSubscriberRateLimiter,
+    now,
+  });
 
   const installAuthorizedProtocols = (): void => {
     if (authorized) return;
@@ -1168,8 +1195,10 @@ export function createMuxPublisher(
       pairingChannel?.close();
       for (const channel of controlChannels) channel.close();
       controlChannels.clear();
+      udp.close();
       outer.destroy();
     },
+    closeUdpFlows: (serviceId?: string) => udp.closeFlows(serviceId),
   };
 }
 

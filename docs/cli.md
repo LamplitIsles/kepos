@@ -86,6 +86,12 @@ kind = "http"
 target_port = 3000
 max_publisher_to_subscriber_bps = 2000000
 
+[[publisher.services]]
+id = "stardew"
+name = "Stardew direct IP"
+kind = "udp"
+target_port = 24642
+
 [subscriber]
 enabled = true
 gateway_port = 17480
@@ -94,6 +100,11 @@ route = "auto"
 [[subscriber.services]]
 id = "ssh"
 local_port = 2222
+
+[[subscriber.services]]
+id = "stardew"
+kind = "udp"
+local_port = 24642
 ```
 
 Use `--config <path>` to select another file. A publisher run, or a
@@ -157,6 +168,62 @@ traffic or any other service. Omit the field to keep the service unlimited.
 The Forgejo example caps publisher-to-subscriber payload at 2 MB/s
 (2,000,000 bytes per second). Policy reloads apply a changed limit to newly
 opened channels; existing channels keep the limit they had when they opened.
+
+## UDP services
+
+Publish a UDP service with `kind = "udp"` and a fixed loopback target. The
+publisher never accepts a subscriber-selected host or port:
+
+```toml
+[[publisher.services]]
+id = "stardew"
+name = "Stardew direct IP"
+kind = "udp"
+target_port = 24642
+allow = ["<subscriber-public-key>"]
+```
+
+The subscriber maps that named service to a loopback UDP listener:
+
+```toml
+[[subscriber.services]]
+id = "stardew"
+kind = "udp"
+local_port = 24642
+```
+
+The desktop service card copies `127.0.0.1:24642`; it does not open a browser
+URL. A zero `local_port` selects an available loopback port, which the desktop
+shows and copies after the listener binds. The CLI spelling is
+`--service stardew:udp:24642` (the existing two-part `id:local-port` spelling
+continues to mean TCP).
+
+UDP service traffic is carried as encrypted unordered messages on the same
+authenticated SecretStream/UDX connection as the control and TCP services. It
+does not create a Protomux data channel or a second DHT connection. Each local
+UDP source endpoint gets a bounded flow and an isolated publisher-side
+connected `udp4` socket; replies are accepted only from the configured
+loopback target. Publisher service allowlists, subscriber-device policy,
+reconnect cleanup, idle expiry, flow limits, send limits, and the configured
+publisher-to-subscriber rate policy all apply.
+
+The current implementation cap is 1,200 application payload bytes per datagram.
+An individual encrypted carrier envelope is limited to 1,000 payload bytes;
+application datagrams from 1,001 through 1,200 bytes use at most two bounded
+fragments and are reassembled without retransmission. This is a conservative
+policy derived from the installed UDX baseline and worst-case IPv6/network
+overhead; UDX can negotiate different route MTUs, but the effective path still
+varies. Broadcast, multicast, arbitrary destinations, IPv6 local listeners,
+and seamless game-session preservation across reconnect are outside this
+contract. A denied, unavailable, malformed, oversized, incomplete, or
+over-budget datagram is dropped with a bounded diagnostic; it is never silently
+converted to a reliable byte stream.
+
+The first intended application is Stardew Valley direct-IP on UDP port 24642,
+but the repository has not yet completed a real-game join/play acceptance run.
+The cap and fixed-target model alone do not establish Stardew compatibility;
+see [the game scenario record](game-multiplayer-scenarios.md) and the evidence
+note in `docs/evidence/native-udp-implementation-2026-09-09.md`.
 
 ## Publisher metrics and dashboard
 

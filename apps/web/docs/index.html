@@ -472,7 +472,7 @@ npm run kepos -- subscriber run \
               </li>
               <li>
                 <h3>Change service distribution</h3>
-                <p>Kepos carries selected TCP service byte streams through an authenticated direct peer connection with named channels.</p>
+                <p>Kepos carries selected TCP byte streams and bounded fixed-target UDP datagrams through an authenticated direct peer connection with named services.</p>
               </li>
               <li>
                 <h3>Preserve clients</h3>
@@ -481,9 +481,9 @@ npm run kepos -- subscriber run \
             </ol>
             <aside class="docs-callout docs-warning">
               <p>
-                “P2P” describes Kepos's authenticated access channel, not every application protocol. The current
-                service path is TCP-only. HyperDHT and UDX use UDP as the outer Internet carrier, while local TCP ends
-                at each Kepos peer.
+                “P2P” describes Kepos's authenticated access channel, not every application protocol. Desktop and
+                headless runtimes support TCP services plus bounded fixed-target UDP services. HyperDHT and UDX use UDP
+                as the outer Internet carrier; Android remains TCP/HTTP-only.
               </p>
             </aside>
           </section>
@@ -632,7 +632,7 @@ npm run kepos -- subscriber run \
                   </tr>
                   <tr>
                     <th scope="row">UDP service path</th>
-                    <td><span class="docs-capability docs-capability-no"><i data-lucide="circle-x" aria-hidden="true"></i><span><strong>No.</strong> Kepos services are currently TCP-only.</span></span></td>
+                    <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Bounded yes.</strong> Desktop/headless named fixed-target UDP, with 1,200-byte datagrams and bounded carrier reassembly; Android remains TCP/HTTP-only.</span></span></td>
                     <td><span class="docs-capability docs-capability-yes"><i data-lucide="circle-check" aria-hidden="true"></i><span><strong>Yes.</strong> Official docs include UDP tunnels.</span></span></td>
                   </tr>
                   <tr>
@@ -645,7 +645,8 @@ npm run kepos -- subscriber run \
             </section>
             <p>
               Choose Kepos for long-lived devices and named service policy; choose Holesail for a quick port tunnel or
-              UDP. The indicators describe current documented capabilities, not a quality score. Sources:
+              broader documented UDP modes. Kepos's UDP path is bounded and is not a virtual network or arbitrary UDP
+              proxy. The indicators describe current documented capabilities, not a quality score. Sources:
             </p>
             <ul class="docs-source-list">
               <li><a href="https://github.com/holesail/holesail" target="_blank" rel="noreferrer">Holesail official repository</a> — one-command port sharing and TCP/UDP flags.</li>
@@ -737,7 +738,7 @@ npm run kepos -- subscriber run \
 
     <footer class="docs-footer">
       <a href="/">← Kepos home</a>
-      <span>Public user guide / current TCP service path</span>
+      <span>Public user guide / current TCP and bounded UDP service paths</span>
       <a href="#start">Back to top ↑</a>
     </footer>
   </body>

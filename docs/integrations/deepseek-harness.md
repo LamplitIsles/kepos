@@ -86,4 +86,7 @@ TOML configuration is required.
   also work, with their own authentication and host-management tradeoffs.
 
 Kepos is currently a developer preview. Android installation is sideload-only,
-macOS ships an ad-hoc-signed local build, and Kepos does not transport UDP.
+macOS ships an ad-hoc-signed local build, and the dsh recipe above uses the
+TCP service path. Kepos also supports bounded fixed-target UDP services on
+desktop/headless runtimes; Android deliberately remains TCP/HTTP-only and the
+UDP path does not provide a browser or arbitrary-destination transport.
