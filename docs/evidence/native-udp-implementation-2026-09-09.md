@@ -39,6 +39,39 @@ env -u XDG_STATE_HOME npm run test:coverage
 The web verification also passes its production build, 19 web tests, and
 Biome check. The focused native-UDP command above passes 9/9 tests.
 
+## Native Windows Bare verification
+
+Owner verification ran the reviewed implementation commit
+`c4ca3eb1365e6ba219c1dc14c206f1e68085e8bf` on native Windows
+`DESKTOP-93HLACG` using standalone Bare 1.32.0 from
+`bare-runtime-win32-x64@1.32.0`. The probe compiled the actual desktop runtime,
+used a test-owned HyperDHT loopback testnet, called the real publisher and
+subscriber setup/start paths, and used test-owned Bare UDP/TCP echo endpoints.
+Fresh temporary state was removed in `finally`; no installed application,
+credentials, live configuration, or game save was accessed.
+
+Harness and captured output:
+
+- Harness: `.scratch/native-udp/native-verification/compiled/probe.js`
+- Log: `.scratch/native-udp/native-verification/windows-bare-pass.log`
+- Windows artifact: `C:\kb\native-udp-verify-20260909-c4ca3eb`
+- Packaging used `bare-pack --host win32-x64 --offload-addons`
+
+The bounded command sequence was:
+
+```sh
+node_modules/.bin/tsc -p tsconfig.desktop.json --outDir .scratch/native-udp/native-verification/compiled
+node_modules/.bin/bare-pack --host win32-x64 --offload-addons --out /mnt/c/kb/native-udp-verify-20260909-c4ca3eb/probe.bundle .scratch/native-udp/native-verification/compiled/probe.js
+/mnt/c/Users/white/AppData/Local/Microsoft/WindowsApps/pwsh.exe -NoProfile -NonInteractive -File C:\kb\native-udp-verify-20260909-c4ca3eb\run.ps1
+```
+
+The native log records `UDP_ROUNDTRIP_OK` for application payload sizes
+`0, 32, 989, 1000, 1198, 1200`, `TCP_COEXISTENCE_OK outerCount=1`, and
+`NATIVE_BARE_WINDOWS_PASS`. This verifies native Bare socket semantics,
+bidirectional byte preservation, the bounded fragment path at the source-derived
+1198/1200-byte sizes, and UDP/TCP coexistence on one authenticated outer
+connection.
+
 ## Payload boundary
 
 Installed SecretStream unordered messages add 24 bytes: an 8-byte transmitted
@@ -78,19 +111,15 @@ Primary references:
 - [Stardew decompiled networking](https://github.com/Dannode36/StardewValleyDecompiled)
 - [Lidgren MTU configuration](https://github.com/lidgren/lidgren-network-gen3/blob/master/Lidgren.Network/NetPeerConfiguration.cs)
 
-## Uncompleted game/native gates
+## Explicitly deferred game acceptance
 
-The repository's required Windows ad-hoc probe was attempted through
-`scripts/windows/nuc-powershell.sh` with a temporary PowerShell operation. It
-could not reach the NUC because SSH DNS lookup failed:
+The native probe does not prove Stardew handshake or serialization compatibility,
+real join, world synchronization, or bidirectional gameplay. The user explicitly
+deferred real Stardew join/play for this round, so those checks are not merge
+gates and no game assets or saves were needed. It also does not establish UI
+behavior, WAN or hole-punch behavior, macOS execution, or a shipped GUI build.
 
-```text
-ssh: Could not resolve hostname nuc
-```
-
-Consequently, no real Stardew join, world synchronization, or bidirectional
-gameplay result is recorded. No installed application, live game save, or user
-configuration was changed. A future acceptance run needs a reachable Windows
-desktop with the relevant Stardew build, isolated game state, publisher and
-subscriber disposable identities, and a captured direct-IP session alongside
-the exact network path and observed datagram sizes.
+A future game acceptance run needs a reachable Windows desktop with the relevant
+Stardew build, isolated game state, publisher and subscriber disposable
+identities, and a captured direct-IP session alongside the exact network path
+and observed datagram sizes.

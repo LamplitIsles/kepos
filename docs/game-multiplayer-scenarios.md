@@ -13,7 +13,7 @@ Kepos Neo 不应承诺“让任意游戏联机”。游戏能否适配取决于�
 | --- | --- | --- | --- |
 | RetroArch netplay | TCP `55435` | 可以 | 很适合验证 person-first 游戏 session |
 | Terraria desktop | TCP `7777` | 可以 | 很适合验证 headless dedicated server |
-| Stardew Valley PC | UDP `24642` | 有界 UDP service | 已实现 forwarding；真实 join/play 验收待完成 |
+| Stardew Valley PC | UDP `24642` | 有界 UDP service | forwarding 和 Windows Bare transport 已验证；真实 join/play 明确延期 |
 
 平台好友大厅、Steam/GOG relay、反作弊和专有 P2P 不是简单端口代理能够替代的。Kepos 应优先支持游戏自己的 Join via IP 或 host/client 模式。
 
@@ -216,8 +216,8 @@ Kepos 应验证另一条路径：
 
 1. 用 Terraria 验证最简单的 headless TCP server。
 2. 用 RetroArch 验证 person、invite、session metadata 和临时 TCP tunnel。
-3. 使用可用的 Windows 游戏主机，以隔离配置验证 Stardew join、world sync
-   和双向 gameplay；记录真实报文大小和网络路径。
+3. 真实 Stardew join、world sync 和双向 gameplay 本轮由用户明确延期；未来
+   使用隔离配置和可用 Windows 游戏主机时，再记录真实报文大小和网络路径。
 4. 不因为一个游戏扩展到虚拟 LAN、任意 UDP 或平台协议代理。
 
 ## 8. 主要来源

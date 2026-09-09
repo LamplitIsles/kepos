@@ -105,8 +105,9 @@ for the local publisher.
   engine.
 - Fixed-target UDP services copy a loopback `127.0.0.1:port` endpoint; they do
   not open a browser URL. The current application-datagram cap is 1,200 bytes;
-  carrier fragments are bounded and the Stardew Valley direct-IP path remains
-  awaiting real-game acceptance.
+  carrier fragments are bounded. Windows Bare transport is verified, while the
+  Stardew Valley direct-IP path's real-game acceptance is explicitly deferred
+  and the native Windows result does not claim macOS execution.
 - **Add device** creates a two-minute QR for an Android subscriber and shows the
   authenticated candidate fingerprint before approval. Desktop subscribers use
   the manual public-key flow in the [public guide](https://kepos.guion.io/docs/).

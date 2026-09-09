@@ -7,6 +7,7 @@ import {
   decodeUdpEnvelope,
   encodeUdpDataEnvelopes,
   decodeUdpFragment,
+  boundedError,
   DatagramBudget,
   UDP_FLOW_IDLE_TIMEOUT_MS,
   UDP_FLOW_ID_BYTES,
@@ -15,6 +16,7 @@ import {
   UDP_MAX_PAYLOAD_BYTES,
   UDP_MAX_PENDING_SENDS,
   UDP_MAX_BYTES_PER_SECOND,
+  nextMessageId,
   UdpDatagramReassembler,
   type SubscriberDatagramConnection,
   type UdpEnvelope,
@@ -351,14 +353,4 @@ function defaultSchedule(delayMs: number, callback: () => void): () => void {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function boundedError(error: string): string {
-  return error.length <= 256 ? error : `${error.slice(0, 253)}...`;
-}
-
-function nextMessageId(flow: { nextMessageId: number }): number {
-  const messageId = flow.nextMessageId;
-  flow.nextMessageId = (messageId + 1) >>> 0;
-  return messageId;
 }

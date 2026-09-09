@@ -35,8 +35,9 @@ import {
   TerminalPairingError,
   type RunningMuxSubscriber,
 } from "../mux/transport.js";
-import type {
-  SubscriberDatagramConnection,
+import {
+  boundedError,
+  type SubscriberDatagramConnection,
 } from "../mux/udp.js";
 import { parsePairingInvitation } from "../pairing/invitation.js";
 import type { PairingRequest } from "../pairing/protocol.js";
@@ -981,8 +982,4 @@ async function closeServer(server: Server): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
-}
-
-function boundedError(error: string): string {
-  return error.length <= 256 ? error : `${error.slice(0, 253)}...`;
 }

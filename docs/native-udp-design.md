@@ -1,7 +1,7 @@
 # 原生 UDP 服务：设计与兼容边界
 
 日期：2026-09-09。状态：桌面 UDP forwarding 已实现并通过自动化端到端
-验收；Stardew Valley 真实游戏验收尚未完成。
+验收；Stardew Valley 真实游戏验收按用户决定明确延期。
 本轮用户决定来自 FlickNote #2231；历史依据为 #1384 与 #1511。
 传输语义决定见 [ADR 0011](adr/0011-preserve-datagram-semantics-for-udp-services.md)。
 
@@ -126,15 +126,23 @@ TURN 能指定 peer，因此将它接入固定目标服务会增加间接目的�
 ACL、并发 TCP、policy revoke、外层 replacement 和保留本机 UDP listener
 后的重连恢复。配置和使用过程中不要求用户了解 carrier 或 UDP Flow 内部标识。
 
-一次 Windows NUC 游戏验收尝试无法开始，因为 wrapper 连接的 `nuc` 主机名
-DNS 解析失败（`ssh: Could not resolve hostname nuc`）。因此本文件不宣称
-Stardew Valley 可以 join 或双向 gameplay；需要可用的 Windows 游戏主机、
-隔离的游戏配置和人工/真实游戏验收。所有自动检查使用测试拥有的配置、
-目录和进程，不触碰安装中的真实身份或服务状态。实际桌面组合、游戏版本
-和网络条件要在验收证据中记录，不能外推到未测平台。
+Owner verification also ran the actual desktop runtime on native Windows with
+standalone Bare 1.32.0. The test-owned HyperDHT loopback testnet and Bare UDP/TCP
+echo endpoints passed bidirectional payloads of 0, 32, 989, 1000, 1198 and 1200
+bytes, with TCP coexistence on one authenticated outer connection. The harness,
+command and captured log are recorded in
+[the implementation evidence](evidence/native-udp-implementation-2026-09-09.md).
+All state was test-owned and removed after the run; no installed application,
+credentials, live configuration or game save was touched.
 
-本轮没有必须由用户进一步决定的产品问题；未完成的真实游戏验收是外部环境
-阻塞，不改变已经实现的 bounded UDP service contract。
+This native transport result does not claim Stardew Valley handshake,
+serialization, join, world synchronization or gameplay compatibility. The user
+explicitly deferred real Stardew join/play for this round, so it is not a merge
+gate. The result also does not establish UI behavior, WAN/hole-punch behavior,
+macOS execution or a shipped GUI build; those require separate evidence.
+
+本轮没有必须由用户进一步决定的产品问题；真实游戏验收按用户决定明确延期，
+不改变已经实现的 bounded UDP service contract。
 
 ## 依据
 
@@ -143,7 +151,7 @@ Stardew Valley 可以 join 或双向 gameplay；需要可用的 Windows 游戏�
 - FlickNote #2231：本次用户决定和边界讨论。
 - [现有游戏场景](game-multiplayer-scenarios.md)：星露谷 direct-IP 方案及尚未验证的大小建议。
 - [实现证据](evidence/native-udp-implementation-2026-09-09.md)：自动化结果、
-  UDX/SecretStream payload 算术及 Windows NUC 阻塞。
+  Windows Bare 原生验证、UDX/SecretStream payload 算术及明确的真实游戏延期边界。
 - 本地 @hyperswarm/secret-stream README 与 index.js：无序消息接口和发送前置条件。
 - [RFC 8835 §3.4](https://www.rfc-editor.org/rfc/rfc8835.html#section-3.4)：WebRTC 的 ICE、STUN/TURN 支持要求。
 - [RFC 8656 §3](https://www.rfc-editor.org/rfc/rfc8656.html#section-3)：TURN allocation、监听地址、中继地址和 peer 转发。

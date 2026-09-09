@@ -59,8 +59,9 @@ machines. Windows Defender Firewall may ask to allow Kepos to use the network;
 allow the app on the networks where the logged-in session needs DHT
 connectivity, or it will remain offline. Kepos does not open a public TCP or
 UDP service port. Configured UDP services use the same loopback listener and
-fixed-target, bounded contract as macOS; the Windows game acceptance gate is
-still pending.
+fixed-target, bounded contract as macOS. Native Windows Bare transport is
+verified; real Stardew game acceptance is explicitly deferred and is not
+implied by that transport result.
 
 ## Extract and run a download
 

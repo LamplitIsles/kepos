@@ -219,11 +219,12 @@ contract. A denied, unavailable, malformed, oversized, incomplete, or
 over-budget datagram is dropped with a bounded diagnostic; it is never silently
 converted to a reliable byte stream.
 
-The first intended application is Stardew Valley direct-IP on UDP port 24642,
-but the repository has not yet completed a real-game join/play acceptance run.
-The cap and fixed-target model alone do not establish Stardew compatibility;
-see [the game scenario record](game-multiplayer-scenarios.md) and the evidence
-note in `docs/evidence/native-udp-implementation-2026-09-09.md`.
+The first intended application is Stardew Valley direct-IP on UDP port 24642.
+Real Stardew join/play acceptance is explicitly deferred for this round; the
+native transport probe does not establish game compatibility. The cap and
+fixed-target model alone are not a game acceptance claim; see [the game
+scenario record](game-multiplayer-scenarios.md) and the evidence note in
+`docs/evidence/native-udp-implementation-2026-09-09.md`.
 
 ## Publisher metrics and dashboard
 

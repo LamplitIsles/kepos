@@ -1012,7 +1012,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function nextMessageId(flow: { nextMessageId: number }): number {
+export function nextMessageId(flow: { nextMessageId: number }): number {
   const messageId = flow.nextMessageId;
   flow.nextMessageId = (messageId + 1) >>> 0;
   return messageId;
@@ -1034,6 +1034,6 @@ function carrierUsabilityError(outer: UnorderedDatagramOuter): string | undefine
   return undefined;
 }
 
-function boundedError(error: string): string {
+export function boundedError(error: string): string {
   return error.length <= 256 ? error : `${error.slice(0, 253)}...`;
 }
