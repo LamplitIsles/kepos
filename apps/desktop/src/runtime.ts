@@ -308,10 +308,11 @@ export async function startDesktopRuntime(
         activeSubscribers: 0,
         activeSubscriberKeys: [],
         acceptedConnections: 0,
-        services: policy.services.map(({ id, name, targetPort }) => ({
+        services: policy.services.map(({ id, name, kind, targetPort }) => ({
           id,
           name,
           targetPort,
+          ...(kind === "udp" ? { kind } : {}),
         })),
       };
       return policy;
@@ -1114,13 +1115,29 @@ function createServices(
   connected: boolean,
 ): DesktopService[] {
   const localPorts = new Map(
-    status.services.map(({ id, port }) => [id, port] as const),
+    status.services
+      .filter((service) => service.available !== false)
+      .map(({ id, kind, port }) => [
+        id,
+        { port, kind: kind === "udp" ? "udp" : "tcp" },
+      ] as const),
   );
   return createServicePresentations(
     registry.services,
     gatewayPort,
     localPorts,
-  ).map((service) => ({ ...service, available: connected }));
+  ).map((service) => {
+    const local = status.services.find(({ id }) => id === service.id);
+    const error = local?.error;
+    return {
+      ...service,
+      available:
+        connected &&
+        local?.available !== false &&
+        (service.access !== "udp" || service.copyText !== undefined),
+      ...(error ? { error } : {}),
+    };
+  });
 }
 
 function registryRetryDelay(attempt: number): number {

@@ -19,6 +19,7 @@ export interface RateLimitTicket {
 }
 
 export interface PublisherToSubscriberRateLimiter {
+  tryConsume: (bytes: number) => boolean;
   wait: (bytes: number) => RateLimitTicket;
 }
 
@@ -58,15 +59,7 @@ export class TokenBucketRateLimiter
   }
 
   wait(bytes: number): RateLimitTicket {
-    if (
-      !Number.isSafeInteger(bytes) ||
-      bytes <= 0 ||
-      bytes > publisherToSubscriberBurstBytes
-    ) {
-      throw new Error(
-        `bytes must be an integer from 1 through ${publisherToSubscriberBurstBytes}`,
-      );
-    }
+    validateBytes(bytes);
 
     let settled = false;
     let resolvePromise!: () => void;
@@ -103,6 +96,16 @@ export class TokenBucketRateLimiter
     };
   }
 
+  tryConsume(bytes: number): boolean {
+    validateBytes(bytes);
+    this.refill();
+    // A queued stream write owns the next available tokens. UDP must not
+    // jump ahead of that FIFO or turn a shared service budget unfair.
+    if (this.waiters.length > 0 || this.tokens < bytes) return false;
+    this.tokens -= bytes;
+    return true;
+  }
+
   private pump(): void {
     this.cancelPump?.();
     this.cancelPump = undefined;
@@ -137,4 +140,16 @@ interface Waiter {
   bytes: number;
   reject: (error: Error) => void;
   resolve: () => void;
+}
+
+function validateBytes(bytes: number): void {
+  if (
+    !Number.isSafeInteger(bytes) ||
+    bytes <= 0 ||
+    bytes > publisherToSubscriberBurstBytes
+  ) {
+    throw new Error(
+      `bytes must be an integer from 1 through ${publisherToSubscriberBurstBytes}`,
+    );
+  }
 }

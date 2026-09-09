@@ -1,7 +1,7 @@
 export interface HomeRegistryService {
   id: string;
   name: string;
-  kind: "tcp";
+  kind: "tcp" | "udp";
 }
 
 export const HOME_REGISTRY_PATH = "/.well-known/kepos/services.json";
@@ -57,8 +57,8 @@ export function createHomeRegistry(
       ) {
         throw new Error(`service ${index} name must be a non-empty string`);
       }
-      if (service.kind !== "tcp") {
-        throw new Error(`service ${index} kind must be tcp`);
+      if (service.kind !== "tcp" && service.kind !== "udp") {
+        throw new Error(`service ${index} kind must be tcp or udp`);
       }
       return service;
     },

@@ -88,16 +88,32 @@ export function parseMetricsListenOption(
 }
 
 export function parseSubscriberService(value: string): SubscriberService {
-  const [id, port, ...extra] = value.split(":");
-  if (!id || !port || extra.length > 0) {
-    throw new Error("--service must use id:local-port");
+  const parts = value.split(":");
+  const id = parts[0];
+  let kind: "tcp" | "udp" | undefined;
+  let port: string | undefined;
+  if (parts.length === 2) {
+    port = parts[1];
+  } else if (parts.length === 3) {
+    if (parts[1] === "tcp" || parts[1] === "udp") {
+      kind = parts[1];
+      port = parts[2];
+    }
+  }
+  if (!id || !port || (parts.length === 3 && kind === undefined) || parts.length > 3) {
+    throw new Error("--service must use id:local-port or id:udp:local-port");
   }
   if (!/^[a-z][a-z0-9-]*$/.test(id) || id === "home") {
     throw new Error("--service id must be a non-reserved lowercase identifier");
   }
   return {
     id,
-    localPort: parseTcpPort(port, "--service local port", true),
+    ...(kind === "udp" ? { kind } : {}),
+    localPort: parseTcpPort(
+      port,
+      kind === "udp" ? "--service UDP local port" : "--service local port",
+      true,
+    ),
   };
 }
 

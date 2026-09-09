@@ -13,7 +13,7 @@ Kepos Neo 不应承诺“让任意游戏联机”。游戏能否适配取决于�
 | --- | --- | --- | --- |
 | RetroArch netplay | TCP `55435` | 可以 | 很适合验证 person-first 游戏 session |
 | Terraria desktop | TCP `7777` | 可以 | 很适合验证 headless dedicated server |
-| Stardew Valley PC | UDP `24642` | 不可以 | 适合以后验证最小 UDP service proxy |
+| Stardew Valley PC | UDP `24642` | 有界 UDP service | forwarding 和 Windows Bare transport 已验证；真实 join/play 明确延期 |
 
 平台好友大厅、Steam/GOG relay、反作弊和专有 P2P 不是简单端口代理能够替代的。Kepos 应优先支持游戏自己的 Join via IP 或 host/client 模式。
 
@@ -40,7 +40,10 @@ Kepos 只需为每个玩家建立独立 TCP tunnel。
 - 只允许固定 service target；
 - 不补 ACK、重传或可靠排序。
 
-Holepunch SecretStream 在 UDX path 上支持加密 unordered message，可以承载这个最小模型。
+Kepos 的 SecretStream/UDX path 使用加密 unordered message 承载这个最小模型。
+当前实现只接受固定目标、IPv4 loopback unicast，单个应用 datagram 上限为
+1200 bytes；每个 carrier fragment 最多 1000 bytes，最多两个分片重组，但不
+提供可靠重传、广播、组播或任意目的地。
 
 ### C. LAN 广播、组播或动态端口
 
@@ -155,9 +158,8 @@ Steam lobby 是另一条平台路径，不应被简单 TCP proxy 混用。MLP �
 
 Stardew Valley PC `1.6.15` 的 direct-IP 路径使用 UDP `24642`。它是 host-authoritative：房主保存 world，房主不在线时 farmhand 无法进入。官方没有独立 headless server。
 
-TCP-only MLP 无法承载 direct-IP gameplay。
-
-后续最小 UDP proxy 可以：
+现有 bounded UDP service 可以承载这条形状的 forwarding，但这不等于已经
+证明 Stardew gameplay 兼容。最小路径是：
 
 ```text
 game UDP datagram
@@ -175,11 +177,13 @@ game UDP datagram
 - IPv4 loopback unicast；
 - 固定 UDP target；
 - 每个 guest/session 独立 owner UDP socket；
-- 单包建议不超过 1024 bytes；
+- 单个应用 datagram 不超过 1200 bytes；每个 carrier fragment 不超过 1000
+  bytes，这是 Kepos 的保守实现上限，不是 Stardew 最大报文证据；
 - 60 秒默认 idle timeout；
 - session、pps 和带宽硬限制；
-- 不做广播、组播、分片、任意目标和可靠重传；
-- 只支持 UDX direct 和 blind-relay path。
+- 不做广播、组播、任意目标和可靠重传；有界分片重组不提供丢片恢复；
+- 需要已建立的 Kepos 外层路径；本轮未完成真实 Stardew join/play，不能
+  将 echo 或自动化 UDP 交换当作游戏验收。
 
 Steam 和 GOG 路径使用平台 lobby/P2P API。Kepos 的 UDP `24642` proxy 只对应 Join via IP，不能取代平台好友路径。
 
@@ -212,7 +216,8 @@ Kepos 应验证另一条路径：
 
 1. 用 Terraria 验证最简单的 headless TCP server。
 2. 用 RetroArch 验证 person、invite、session metadata 和临时 TCP tunnel。
-3. 只有前两项成立后，再用 Stardew 验证最小 UDP service proxy。
+3. 真实 Stardew join、world sync 和双向 gameplay 本轮由用户明确延期；未来
+   使用隔离配置和可用 Windows 游戏主机时，再记录真实报文大小和网络路径。
 4. 不因为一个游戏扩展到虚拟 LAN、任意 UDP 或平台协议代理。
 
 ## 8. 主要来源

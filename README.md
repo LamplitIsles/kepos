@@ -10,14 +10,20 @@ public service port or joining every device to a virtual subnet. A publisher
 keeps only its seed-derived identity in durable state; its display name,
 labeled subscriber-device policy, published services, and service allowlists
 live in the shared TOML configuration. A subscriber receives the allowed
-service as an ordinary local URL or TCP port.
+service as an ordinary local URL, TCP port, or bounded UDP endpoint.
 
 Kepos has no hosted account or Kepos-operated control plane. Device keys stay
-on the devices that created them. Kepos carries TCP byte streams through an
-authenticated peer connection whose Internet transport uses UDP. Services are
-raw `tcp` by default; a publisher can opt a plaintext HTTP/1.1 target, including
-a `ws://` upgrade endpoint, into `kind = "http"` so the target receives the
-authenticated subscriber device identity. See [the HTTP service contract](docs/cli.md#http-service-device-authentication).
+on the devices that created them. Kepos carries TCP byte streams and named,
+fixed-target UDP datagrams through an authenticated peer connection whose
+Internet transport uses UDP. Services are raw `tcp` by default; a publisher
+can opt a plaintext HTTP/1.1 target, including a `ws://` upgrade endpoint, into
+`kind = "http"` so the target receives the authenticated subscriber device
+identity. A `kind = "udp"` service is an IPv4-loopback, unicast mapping with a
+1,200-byte application-datagram cap. Carrier fragments are bounded to 1,000
+bytes and reassembled without retransmission; the service does not provide
+arbitrary destinations, broadcast, multicast, or reliable delivery. See the
+[HTTP service contract](docs/cli.md#http-service-device-authentication) and
+[UDP service contract](docs/cli.md#udp-services).
 
 > Kepos is a developer preview. Android APKs, Apple Silicon macOS ZIPs, and
 > Windows x64 portable ZIPs are available for direct download. Android is
@@ -54,10 +60,10 @@ installs as `share/kepos/grafana/kepos-publisher-observability.json`.
 
 | Surface | Roles | Current boundary |
 | --- | --- | --- |
-| Android | Subscriber | Android 12+, `arm64-v8a`, sideload-only; persistent app-private subscriber identity |
-| macOS | Publisher, subscriber, or both | Apple Silicon; native desktop app; ad-hoc-signed direct-download ZIP |
-| Windows | Publisher, subscriber, or both | Windows 10 x64 build 19045 (22H2)+ and Windows 11 x64; portable ZIP with optional per-user install |
-| Headless CLI | Publisher, subscriber, or both | Node.js 24; local HTTP gateway and explicit raw TCP listeners |
+| Android | Subscriber | Android 12+, `arm64-v8a`, sideload-only; persistent app-private subscriber identity; TCP/HTTP services only |
+| macOS | Publisher, subscriber, or both | Apple Silicon; native desktop app; ad-hoc-signed direct-download ZIP; TCP/HTTP and bounded UDP services |
+| Windows | Publisher, subscriber, or both | Windows 10 x64 build 19045 (22H2)+ and Windows 11 x64; portable ZIP with optional per-user install; TCP/HTTP and bounded UDP services |
+| Headless CLI | Publisher, subscriber, or both | Node.js 24; local HTTP gateway and explicit raw TCP or UDP listeners |
 | Nix / Home Manager | Publisher and CLI | Declarative publisher policy; private keys stay out of the Nix store |
 | Container | Publisher and subscriber | Non-root `linux/amd64` image; deployment owns state, networking, and supervision |
 

@@ -1,6 +1,10 @@
 import type { HomeRegistryService } from "../home/registry.js";
 
-export type ServiceAction = "open" | "copy-command" | "copy-url";
+export type ServiceAction =
+  | "open"
+  | "copy-command"
+  | "copy-url"
+  | "copy-endpoint";
 export type ServiceIcon =
   | "book"
   | "build"
@@ -18,7 +22,7 @@ export type ServiceIcon =
 export interface ServicePresentation {
   id: string;
   name: string;
-  access: "http" | "ssh" | "tcp";
+  access: "http" | "ssh" | "tcp" | "udp";
   action: ServiceAction;
   icon: ServiceIcon;
   url?: string;
@@ -123,17 +127,20 @@ const DEFAULT_HTTP_SERVICE_HANDLER = Object.freeze({
 export function createServicePresentations(
   services: readonly HomeRegistryService[],
   gatewayPort: number,
-  localPorts: ReadonlyMap<string, number> = new Map(),
+  localPorts: ReadonlyMap<string, number | LocalServiceMapping> = new Map(),
+  options: { supportsUdp?: boolean } = {},
 ): ServicePresentation[] {
+  const supportsUdp = options.supportsUdp ?? true;
   return services
     .filter(({ id }) => id !== "home")
     .flatMap((service, registryIndex) => {
+      if (service.kind === "udp" && !supportsUdp) return [];
       const handler = handlerFor(service.id);
       const presentation = createPresentation(
         service,
         handler,
         gatewayPort,
-        localPorts.get(service.id),
+        localMapping(localPorts.get(service.id)),
       );
       if (presentation === undefined) return [];
       return [{
@@ -163,8 +170,21 @@ function createPresentation(
   service: HomeRegistryService,
   handler: BuiltInServiceHandler,
   gatewayPort: number,
-  localPort?: number,
+  mapping?: LocalServiceMapping,
 ): ServicePresentation | undefined {
+  if (service.kind === "udp") {
+    return {
+      id: service.id,
+      name: service.name,
+      access: "udp",
+      action: "copy-endpoint",
+      icon: "port",
+      ...(mapping?.kind === "udp"
+        ? { copyText: `127.0.0.1:${mapping.port}` }
+        : {}),
+    };
+  }
+  if (mapping?.kind === "udp") return;
   if (handler.httpUrl !== undefined) {
     const url = serviceUrl(
       service.id,
@@ -181,7 +201,7 @@ function createPresentation(
       ...(handler.action === "copy-url" ? { copyText: url } : {}),
     };
   }
-  if (handler.localCommand === undefined || localPort === undefined) return;
+  if (handler.localCommand === undefined || mapping === undefined) return;
   return {
     id: service.id,
     name: service.name,
@@ -189,9 +209,21 @@ function createPresentation(
     action: handler.action,
     icon: handler.icon,
     ...(handler.action === "open"
-      ? { url: handler.localCommand.format(localPort) }
-      : { copyText: handler.localCommand.format(localPort) }),
+      ? { url: handler.localCommand.format(mapping.port) }
+      : { copyText: handler.localCommand.format(mapping.port) }),
   };
+}
+
+interface LocalServiceMapping {
+  port: number;
+  kind: "tcp" | "udp";
+}
+
+function localMapping(
+  value: number | LocalServiceMapping | undefined,
+): LocalServiceMapping | undefined {
+  if (typeof value === "number") return { port: value, kind: "tcp" };
+  return value;
 }
 
 function serviceUrl(

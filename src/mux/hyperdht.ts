@@ -39,6 +39,8 @@ export interface DhtKeyPair {
 export interface DhtStream extends Duplex {
   connected?: boolean;
   rawStream?: unknown;
+  send?: (message: Uint8Array) => Promise<unknown> | unknown;
+  trySend?: (message: Uint8Array) => void;
   remotePublicKey: Buffer;
   setKeepAlive?: (intervalMs: number) => void;
   toJSON?: () => unknown;

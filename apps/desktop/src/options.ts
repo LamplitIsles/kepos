@@ -15,6 +15,7 @@ import type { DhtAddress } from "../../../src/mux/hyperdht.js";
 import type { Route } from "../../../src/mux/route.js";
 import type { PublisherRuntimePolicy } from "../../../src/runtime/publisher.js";
 import type { SubscriberService } from "../../../src/runtime/subscriber.js";
+import { parseSubscriberService } from "../../../src/cli/options.js";
 import { ensurePublisher } from "../../../src/state/publisher.js";
 import { setupSubscriber } from "../../../src/state/subscriber.js";
 
@@ -228,16 +229,16 @@ function optionsFromConfig(context: DesktopConfigContext): DesktopOptions {
 }
 
 function parseService(value: string): SubscriberService {
-  const separator = value.lastIndexOf(":");
-  const id = value.slice(0, separator);
-  const localPort = Number(value.slice(separator + 1));
-  if (!/^[a-z][a-z0-9-]*$/.test(id)) {
-    throw new Error("desktop subscriber service id is invalid");
-  }
-  if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65_535) {
+  try {
+    const service = parseSubscriberService(value);
+    if (service.localPort < 1) {
+      throw new Error("desktop subscriber service port must be an integer from 1 through 65535");
+    }
+    return service;
+  } catch (error) {
     throw new Error(
-      "desktop subscriber service port must be an integer from 1 through 65535",
+      error instanceof Error ? error.message.replace(/^--service/u, "desktop subscriber service") : String(error),
+      { cause: error },
     );
   }
-  return { id, localPort };
 }

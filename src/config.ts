@@ -18,7 +18,7 @@ export interface SubscriberContact {
 export interface PublisherService {
   id: string;
   name: string;
-  kind: "tcp" | "http";
+  kind: "tcp" | "http" | "udp";
   targetPort: number;
   allow?: string[];
   maxPublisherToSubscriberBps?: number;
@@ -198,8 +198,8 @@ export function parsePublisherService(
     throw new Error(`${field}.id uses reserved service id home`);
   }
   const kind = value.kind === undefined ? "tcp" : value.kind;
-  if (kind !== "tcp" && kind !== "http") {
-    throw new Error(`${field}.kind must be tcp or http`);
+  if (kind !== "tcp" && kind !== "http" && kind !== "udp") {
+    throw new Error(`${field}.kind must be tcp or http or udp`);
   }
 
   return {

@@ -2,7 +2,7 @@
 
 Status: discussion draft
 Date: 2026-07-10
-Scope: desktop and headless devices, family trust, and TCP service proxying
+Scope: desktop and headless devices, family trust, and TCP/UDP service proxying
 
 The accepted staged MLP scope is recorded in
 [mlp-decisions.md](./mlp-decisions.md). This document keeps the broader
@@ -10,14 +10,16 @@ research, including the deferred TCP/TLS relay option.
 
 ## 1. What this document decides
 
-Kepos Neo should proxy local TCP services between trusted devices. That does
-not mean the Internet transport is TCP.
+Kepos Neo proxies selected local TCP services and bounded fixed-target UDP
+services between trusted devices. That does not mean the Internet transport is
+TCP or that a UDP service is a virtual network.
 
 The main Holepunch path uses:
 
-- local TCP on each end;
+- local TCP or IPv4-loopback UDP on each end;
 - Noise SecretStream for peer encryption and identity;
-- Protomux for control and tunnel messages;
+- Protomux for control and TCP tunnel messages, plus SecretStream unordered
+  messages for UDP datagrams;
 - UDX reliable streams over UDP for Internet transport;
 - HyperDHT and Hyperswarm for discovery, connection setup, and NAT punching.
 
@@ -41,8 +43,8 @@ compatibility claim.
 
 | Layer | Kepos Neo use | Normal protocol |
 | --- | --- | --- |
-| Local service | The app being exposed, such as SSH, HTTP, or a database | TCP |
-| Tunnel protocol | Open, data, half-close, reset, and flow control | Protomux messages |
+| Local service | The app being exposed, such as SSH, HTTP, a database, or a fixed-target game endpoint | TCP or bounded UDP |
+| Tunnel protocol | Open, data, half-close, reset, and flow control; or bounded datagrams | Protomux or SecretStream messages |
 | Peer security | Device authentication and encrypted byte stream | Noise SecretStream |
 | Internet carrier | Discovery, NAT punching, and peer data | HyperDHT + UDX over UDP |
 
@@ -51,7 +53,7 @@ Normal direct path:
 ```text
 client app
   |
-  | loopback TCP
+  | loopback TCP or UDP
   v
 Neo local listener                 first TCP connection ends here
   |
@@ -77,14 +79,53 @@ Neo service connector              second TCP connection starts here
 local service
 ```
 
-Kepos Neo does not carry TCP headers or TCP acknowledgements through the
-tunnel. Each agent receives payload bytes from its local TCP stack and moves
-those bytes through a different reliable stream. The exact term is a
-**split TCP byte-stream proxy over UDX**, not an IP-level TCP-over-UDP tunnel.
+Kepos Neo does not carry TCP/UDP headers or TCP acknowledgements through the
+tunnel. Each TCP agent receives payload bytes from its local TCP stack and
+moves those bytes through a different reliable stream. A UDP agent retains
+datagram boundaries and sends an encrypted unordered message on the same outer
+connection. The TCP term is a **split TCP byte-stream proxy over UDX**, not an
+IP-level TCP-over-UDP tunnel; the UDP service is likewise a fixed-target
+application proxy, not a host-to-host UDP bridge.
 
 UDX being UDP-based does not mean application bytes are unreliable. UDX adds
 ordering, retransmission, congestion control, and flow control. UDP is the
 carrier that lets Holepunch control NAT mappings and change peer paths.
+
+### 2.1 Named UDP service path
+
+The UDP service path is intentionally narrower than the outer carrier:
+
+```text
+native UDP client
+  |
+  | 127.0.0.1 datagram
+  v
+subscriber UDP listener
+  |
+  | service ID + flow ID + bounded payload
+  v
+encrypted unordered SecretStream message
+  |
+  v
+publisher connected UDP/IPv4 socket
+  |
+  | fixed 127.0.0.1 target port
+  v
+publisher application
+```
+
+The subscriber selects a flow from its local source endpoint. The publisher
+creates a target socket only after outer and service authorization succeeds,
+and accepts replies only from that configured target. The flow is bounded by
+count, idle expiry, pending sends, and datagram/byte budgets. The current
+application datagram cap is 1,200 bytes. UDX's 1,200-byte baseline is a
+complete packet budget; after network, UDX, SecretStream, envelope, and
+worst-case service-ID overhead, 1,021 bytes is the IPv6 ceiling for one
+unfragmented envelope, so each carrier fragment is limited to 1,000 bytes.
+Datagrams through 1,200 bytes use at most two fragments and are reassembled
+without retransmission. Broadcast, multicast, arbitrary destinations, IPv6
+local listeners, and seamless session preservation across reconnect are outside
+the contract.
 
 ## 3. How a direct connection is made
 

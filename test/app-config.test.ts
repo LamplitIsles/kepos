@@ -149,6 +149,40 @@ target_port = 22
   ]);
 });
 
+test("shared config round-trips a fixed-target UDP service and mapping", () => {
+  const source = `
+[publisher]
+display_name = "kosmos"
+subscribers = []
+
+[[publisher.services]]
+id = "stardew"
+name = "Stardew direct IP"
+kind = "udp"
+target_port = 24642
+
+[subscriber]
+
+[[subscriber.services]]
+id = "stardew"
+kind = "udp"
+local_port = 24642
+`;
+  const config = parseKeposConfig(source);
+  assert.deepEqual(config.publisher?.services, [
+    {
+      id: "stardew",
+      name: "Stardew direct IP",
+      kind: "udp",
+      targetPort: 24_642,
+    },
+  ]);
+  assert.deepEqual(config.subscriber?.services, [
+    { id: "stardew", kind: "udp", localPort: 24_642 },
+  ]);
+  assert.deepEqual(parseKeposConfig(serializeKeposConfig(config)), config);
+});
+
 test("shared config parses and serializes a publisher outbound rate limit", () => {
   const source = `
 [publisher]

@@ -88,6 +88,24 @@ class ManualScheduler {
   }
 }
 
+test("publisher rate limiter can consume without queueing behind TCP waiters", async () => {
+  const scheduler = new ManualScheduler();
+  const limiter = new TokenBucketRateLimiter({
+    rateBps: 1_000,
+    now: () => scheduler.now,
+    schedule: scheduler.schedule,
+  });
+
+  assert.equal(limiter.tryConsume(64 * 1024), true);
+  const ticket = limiter.wait(1_000);
+  assert.equal(limiter.tryConsume(1), false);
+  const cancelled = assert.rejects(ticket.promise, /cancelled/);
+  ticket.cancel();
+  await cancelled;
+  scheduler.advance(1_000);
+  assert.equal(limiter.tryConsume(1), true);
+});
+
 class PacedService extends Duplex {
   readonly totalChunks: number;
   chunksSent = 0;

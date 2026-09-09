@@ -35,6 +35,10 @@ import {
   TerminalPairingError,
   type RunningMuxSubscriber,
 } from "../mux/transport.js";
+import {
+  boundedError,
+  type SubscriberDatagramConnection,
+} from "../mux/udp.js";
 import { parsePairingInvitation } from "../pairing/invitation.js";
 import type { PairingRequest } from "../pairing/protocol.js";
 import {
@@ -43,15 +47,22 @@ import {
   setSubscriberPendingPublisher,
 } from "../state/subscriber.js";
 import { cleanupAll } from "./cleanup.js";
+import {
+  listenSubscriberUdpService,
+} from "./udp.js";
 
 export interface SubscriberService {
   id: string;
+  kind?: "tcp" | "udp";
   localPort: number;
 }
 
 export interface RunningSubscriberService {
   id: string;
   port: number;
+  kind?: "tcp" | "udp";
+  available?: boolean;
+  error?: string;
 }
 
 export interface StartSubscriberOptions {
@@ -110,6 +121,7 @@ export interface RunningSubscriber {
 
 interface ServiceOpener {
   open: (serviceId: string, signal?: CancellationSignal) => Promise<Duplex>;
+  udp?: SubscriberDatagramConnection;
 }
 
 type ScheduleConnectTimeout = (
@@ -212,7 +224,7 @@ export async function startSubscriber(
     route,
     sleep: options.sleep ?? delay,
   });
-  const servers: Server[] = [];
+  const closeServers: Array<() => Promise<void>> = [];
   let stopped = false;
 
   try {
@@ -227,17 +239,48 @@ export async function startSubscriber(
       acquisitionTimeoutMs: options.serviceAcquisitionTimeoutMs,
       open: connection.open,
     });
-    servers.push(gateway.server);
+    closeServers.push(() => closeServer(gateway.server));
+    const udpErrors = new Map<string, string>();
+    const udpServiceIds = options.services
+      .filter((service) => service.kind === "udp")
+      .map((service) => service.id);
+    const setUdpError = (serviceId: string, error: string): void => {
+      udpErrors.set(serviceId, boundedError(error));
+    };
+    const unsubscribeUdpError = connection.udp?.onError((error) => {
+      for (const serviceId of udpServiceIds) setUdpError(serviceId, error);
+    });
+    if (unsubscribeUdpError) {
+      closeServers.push(async () => unsubscribeUdpError());
+    }
     const services: RunningSubscriberService[] = [];
     for (const service of options.services) {
-      const listener = await listenSubscriberService(
-        service.id,
-        service.localPort,
-        connection,
-        options.serviceAcquisitionTimeoutMs ?? 10_000,
-      );
-      servers.push(listener.server);
-      services.push({ id: service.id, port: listener.port });
+      if (service.kind === "udp") {
+        const listener = await listenSubscriberUdpService(
+          service.id,
+          service.localPort,
+          connection.udp,
+          {
+            onError: (error) => setUdpError(service.id, error),
+          },
+        );
+        closeServers.push(listener.close);
+        services.push({
+          id: service.id,
+          port: listener.port,
+          kind: "udp",
+          available: connection.udp?.available() ?? false,
+        });
+      } else {
+        const listener = await listenSubscriberService(
+          service.id,
+          service.localPort,
+          connection,
+          options.serviceAcquisitionTimeoutMs ?? 10_000,
+        );
+        closeServers.push(() => closeServer(listener.server));
+        services.push({ id: service.id, port: listener.port });
+      }
     }
     if (options.waitForPublisher === false) {
       connection.startInBackground();
@@ -245,7 +288,9 @@ export async function startSubscriber(
 
     options.log?.(`Local HTTP gateway ready @${gateway.url}`);
     for (const service of services) {
-      options.log?.(`Local ${service.id} ready @127.0.0.1:${service.port}`);
+      options.log?.(
+        `Local ${service.kind === "udp" ? "UDP " : ""}${service.id} ready @127.0.0.1:${service.port}`,
+      );
     }
 
     return {
@@ -265,14 +310,24 @@ export async function startSubscriber(
         publisherLabel: contact.label,
         subscriberKey: identity.publicKey,
         homeUrl: gateway.url,
-        services: services.map((service) => ({ ...service })),
+        services: services.map((service) => {
+          if (service.kind !== "udp") return { ...service };
+          const available = connection.udp?.available() ?? false;
+          if (available) {
+            delete service.error;
+          } else if (udpErrors.has(service.id)) {
+            service.error = udpErrors.get(service.id);
+          }
+          service.available = available;
+          return { ...service };
+        }),
       }),
       async stop(): Promise<void> {
         if (stopped) return;
         stopped = true;
         await cleanupAll([
           () => connection.stop(),
-          ...servers.map((server) => () => closeServer(server)),
+          ...closeServers,
           ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
         ]);
       },
@@ -280,7 +335,7 @@ export async function startSubscriber(
   } catch (error) {
     await cleanupAll([
       () => connection.stop(),
-      ...servers.map((server) => () => closeServer(server)),
+      ...closeServers,
       ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
     ]).catch(() => undefined);
     throw error;
@@ -396,6 +451,52 @@ export function createPublisherConnection(options: {
   let connectionAttempt = 0;
   let connectionGeneration = 0;
   const unhealthyOuters = new WeakSet<DhtStream>();
+  const udpMessageListeners = new Set<(message: Uint8Array) => void>();
+  const udpErrorListeners = new Set<(error: string) => void>();
+  const udpResetListeners = new Set<() => void>();
+  let currentUdpUnsubscribe: (() => void) | undefined;
+  let currentUdpErrorUnsubscribe: (() => void) | undefined;
+  let currentUdpError: string | undefined;
+
+  const resetUdp = (): void => {
+    currentUdpUnsubscribe?.();
+    currentUdpUnsubscribe = undefined;
+    currentUdpErrorUnsubscribe?.();
+    currentUdpErrorUnsubscribe = undefined;
+    currentUdpError = undefined;
+    for (const listener of udpResetListeners) {
+      try {
+        listener();
+      } catch {
+        // UDP flow cleanup is best effort during outer replacement.
+      }
+    }
+  };
+
+  const installUdp = (mux: RunningMuxSubscriber): void => {
+    currentUdpUnsubscribe?.();
+    currentUdpUnsubscribe = mux.udp?.onMessage((message) => {
+      for (const listener of udpMessageListeners) {
+        try {
+          listener(message);
+        } catch {
+          // Local UDP listeners report their own delivery failures.
+        }
+      }
+    });
+    currentUdpErrorUnsubscribe?.();
+    currentUdpError = undefined;
+    currentUdpErrorUnsubscribe = mux.udp?.onError((error) => {
+      currentUdpError = error;
+      for (const listener of udpErrorListeners) {
+        try {
+          listener(error);
+        } catch {
+          // UDP status observers cannot affect connection recovery.
+        }
+      }
+    });
+  };
 
   const markOuterUnhealthy = (
     outer: DhtStream,
@@ -423,12 +524,14 @@ export function createPublisherConnection(options: {
       observe,
       outer,
     };
+    installUdp(mux);
     let streamError: string | undefined;
     outer.once("error", (error) => {
       streamError = error.message;
     });
     outer.once("close", () => {
       if (current?.outer !== outer) return;
+      resetUdp();
       current = undefined;
       observe("outer.closed", {
         trigger: stopped
@@ -648,6 +751,36 @@ export function createPublisherConnection(options: {
   };
 
   return {
+    udp: {
+      available(): boolean {
+        return current !== undefined &&
+          !current.invalidated &&
+          (current.mux.udp?.available() ?? false);
+      },
+      send(message: Uint8Array): Promise<{ ok: boolean; error?: string }> {
+        const transport = current?.invalidated ? undefined : current?.mux.udp;
+        if (!transport) {
+          return Promise.resolve({
+            ok: false,
+            error: "Publisher connection is not ready for UDP",
+          });
+        }
+        return transport.send(message);
+      },
+      onMessage(listener: (message: Uint8Array) => void): () => void {
+        udpMessageListeners.add(listener);
+        return () => udpMessageListeners.delete(listener);
+      },
+      onError(listener: (error: string) => void): () => void {
+        udpErrorListeners.add(listener);
+        if (currentUdpError !== undefined) listener(currentUdpError);
+        return () => udpErrorListeners.delete(listener);
+      },
+      onReset(listener: () => void): () => void {
+        udpResetListeners.add(listener);
+        return () => udpResetListeners.delete(listener);
+      },
+    },
     async start(): Promise<void> {
       await connectOnce();
     },
@@ -715,6 +848,7 @@ export function createPublisherConnection(options: {
       connectingOuter?.destroy();
       current?.mux.close();
       current = undefined;
+      resetUdp();
       await reconnecting?.catch(() => undefined);
     },
   };

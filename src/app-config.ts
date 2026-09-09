@@ -181,8 +181,9 @@ export function serializeKeposConfig(config: KeposConfig): string {
       ...(config.subscriber.services === undefined
         ? {}
         : {
-            services: config.subscriber.services.map(({ id, localPort }) => ({
+            services: config.subscriber.services.map(({ id, kind, localPort }) => ({
               id,
+              ...(kind === undefined ? {} : { kind }),
               local_port: localPort,
             })),
           }),
@@ -382,7 +383,7 @@ function parseSubscriber(
       rejectUnknownFields(
         service,
         ["subscriber", `services[${index}]`],
-        ["id", "local_port"],
+        ["id", "kind", "local_port"],
       );
       if (typeof service.id !== "string") {
         throw new Error(`subscriber.services[${index}].id must be a string`);
@@ -392,7 +393,13 @@ function parseSubscriber(
         `subscriber.services[${index}].local_port`,
         true,
       );
-      return parseSubscriberService(`${service.id}:${localPort}`);
+      const kind = service.kind === undefined ? "tcp" : service.kind;
+      if (kind !== "tcp" && kind !== "udp") {
+        throw new Error(
+          `subscriber.services[${index}].kind must be tcp or udp`,
+        );
+      }
+      return parseSubscriberService(`${service.id}:${kind}:${localPort}`);
     });
     if (
       new Set(config.services.map(({ id }) => id)).size !==

@@ -8,6 +8,9 @@ the same HyperDHT and Protomux subscriber core as the CLI.
 
 The app does not install a VPN, TUN interface, or system DNS service. It binds
 local gateway ports inside the app process.
+Android remains a TCP/HTTP subscriber surface: UDP services are filtered from
+the Android service directory and are not bound by the Worklet. Desktop and
+headless runtimes have the separate bounded UDP service path.
 
 ## User flow
 
