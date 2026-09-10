@@ -82,8 +82,6 @@ export interface StartSubscriberOptions {
   observationRole?: ObservationRole;
   onConnected?: (generation: number) => void;
   onDisconnected?: (generation: number, reason: string) => void;
-  onUdpError?: (error: string) => void;
-  onUdpReset?: () => void;
   pairing?: {
     invitation: string;
     deviceLabel: string;
@@ -208,8 +206,6 @@ export async function startSubscriber(
     observationRole: options.observationRole,
     onConnected: options.onConnected,
     onDisconnected: options.onDisconnected,
-    onUdpError: options.onUdpError,
-    onUdpReset: options.onUdpReset,
     onTerminalConnectionError: options.onTerminalConnectionError,
     ...(pairingRequest && pairingExpiresAt !== undefined
       ? {
@@ -426,8 +422,6 @@ export function createPublisherConnection(options: {
   observationRole?: ObservationRole;
   onConnected?: (generation: number) => void;
   onDisconnected?: (generation: number, reason: string) => void;
-  onUdpError?: (error: string) => void;
-  onUdpReset?: () => void;
   onTerminalConnectionError?: (error: Error) => void;
   pairing?: {
     request: PairingRequest;
@@ -480,7 +474,6 @@ export function createPublisherConnection(options: {
     currentUdpErrorUnsubscribe?.();
     currentUdpErrorUnsubscribe = undefined;
     currentUdpError = undefined;
-    options.onUdpReset?.();
     for (const listener of udpResetListeners) {
       try {
         listener();
@@ -505,7 +498,6 @@ export function createPublisherConnection(options: {
     currentUdpError = undefined;
     currentUdpErrorUnsubscribe = mux.udp?.onError((error) => {
       currentUdpError = error;
-      options.onUdpError?.(error);
       for (const listener of udpErrorListeners) {
         try {
           listener(error);

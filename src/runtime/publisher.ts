@@ -110,7 +110,7 @@ export interface RunningPublisher {
   pairingStatus: () => PublisherPairingSnapshot;
   metrics?: RunningMetricsServer;
   applyPolicy: (policy: PublisherRuntimePolicy) => Promise<boolean>;
-  serviceStatus?: () => PublisherRuntimeServiceStatus[];
+  serviceStatus: () => PublisherRuntimeServiceStatus[];
   status: () => PublisherRuntimeStatus;
   stop: () => Promise<void>;
 }

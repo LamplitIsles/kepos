@@ -271,8 +271,7 @@ export function createUpstreamConnectionManager(
     if (!entry || entry.closed) return unavailable(upstreamUnavailable);
     if (entry.connection.status() !== "connected" || !entry.catalog) {
       return unavailable(
-        entry.connectionError ??
-          (entry.catalog ? upstreamUnavailable : upstreamUnavailable),
+        entry.connectionError ?? upstreamUnavailable,
       );
     }
     const service = entry.catalog.services.find(({ id }) => id === source.serviceId);
@@ -356,14 +355,6 @@ export function createUpstreamConnectionManager(
       onDisconnected: (_generation, reason) => {
         entry.catalog = undefined;
         entry.connectionError = upstreamUnavailable;
-        clearMappings(entry);
-        notify();
-      },
-      onUdpError: (error) => {
-        entry.udpError = boundedError(error);
-        notify();
-      },
-      onUdpReset: () => {
         clearMappings(entry);
         notify();
       },

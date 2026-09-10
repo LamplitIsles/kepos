@@ -475,14 +475,7 @@ export async function startDesktopRuntime(
       activeSubscribers: status.activeSubscribers,
       activeSubscriberKeys: [...status.activeSubscriberKeys],
       acceptedConnections: status.acceptedConnections,
-      services: (runningPublisher.serviceStatus?.() ?? current.services.map((service) => ({
-        id: service.id,
-        name: service.name,
-        source: service.source,
-        available: service.available,
-        ...(service.error ? { error: service.error } : {}),
-        ...(service.kind === "udp" ? { kind: service.kind } : {}),
-      }))).map((service) => ({
+      services: runningPublisher.serviceStatus().map((service) => ({
         id: service.id,
         name: service.name,
         source: { ...service.source },

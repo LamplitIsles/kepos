@@ -899,7 +899,11 @@ test("desktop runtime applies shared network and role policy", async () => {
       },
       startPublisher: async (options) => {
         publisherStartOptions = options as unknown as Record<string, unknown>;
-        return runningPublisher(() => publisherStatus(0, 0), events);
+        return runningPublisher(
+          () => publisherStatus(0, 0),
+          events,
+          options.policy.services,
+        );
       },
       startSubscriber: async (options) => {
         subscriberStartOptions = options as unknown as Record<string, unknown>;
@@ -1576,7 +1580,7 @@ test("desktop reconfiguration rejects when a replacement role cannot start", asy
       startPublisher: async () => {
         starts++;
         if (starts === 2) throw new Error("replacement unavailable");
-        return runningPublisher(() => publisherStatus(0, 0), events);
+        return runningPublisher(() => publisherStatus(0, 0), events, []);
       },
     }),
   );
@@ -1821,7 +1825,11 @@ function dependencies(
     },
     startPublisher: async (options) => {
       events.push(`publisher:start:${options.stateDir}`);
-      return runningPublisher(() => publisherStatus(1, 2), events);
+      return runningPublisher(
+        () => publisherStatus(1, 2),
+        events,
+        options.policy.services,
+      );
     },
     startSubscriber: async (options) => {
       events.push(`subscriber:start:${options.stateDir}`);
@@ -1904,6 +1912,7 @@ function publisherStatus(
 function runningPublisher(
   status: () => PublisherRuntimeStatus,
   events: string[],
+  services: PublisherRuntimePolicy["services"] = localPublisherPolicy.services,
 ): RunningPublisher {
   return {
     publisherKey: localPublisherKey,
@@ -1922,6 +1931,14 @@ function runningPublisher(
     denyPairing: () => undefined,
     pairingStatus: () => ({ phase: "idle" }),
     applyPolicy: async () => false,
+    serviceStatus: () =>
+      services.map(({ id, name, kind, source }) => ({
+        id,
+        name,
+        source,
+        available: true,
+        ...(kind === undefined ? {} : { kind }),
+      })),
     status,
     stop: async () => {
       events.push("publisher:stop");
