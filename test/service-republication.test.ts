@@ -597,13 +597,11 @@ test("republished services retain endpoints across source denial, recovery, and 
     };
     assert.equal(await republisher.applyPolicy(sourceRemovedPolicy), true);
     assert.equal(republisher.serviceStatus().find(({ id }) => id === "delayed"), undefined);
-    await sendUdpPacket(
-      delayedUdp,
-      removalRemote.port,
-      Buffer.from("late-after-removal"),
-      removalRemote.address,
-    );
-    await assertNoUdpMessage(delayedClient);
+    const noLateRemovalReply = assertNoUdpMessage(delayedClient);
+    await Promise.all([
+      noLateRemovalReply,
+      sendUdpPacket(delayedUdp, removalRemote.port, Buffer.from("late-after-removal"), removalRemote.address),
+    ]);
 
     assert.equal(await republisher.applyPolicy(replacementPolicy), true);
     await waitFor(() => republisher?.serviceStatus().find(({ id }) => id === "delayed")?.available === true);
@@ -636,13 +634,11 @@ test("republished services retain endpoints across source denial, recovery, and 
     await republisher.stop();
     assert.equal(republisher.status().state, "stopped");
     assert.equal(republisher.activeSubscribers(), 0);
-    await sendUdpPacket(
-      delayedUdp,
-      shutdownRemote.port,
-      Buffer.from("late-after-shutdown"),
-      shutdownRemote.address,
-    );
-    await assertNoUdpMessage(delayedClient);
+    const noLateShutdownReply = assertNoUdpMessage(delayedClient);
+    await Promise.all([
+      noLateShutdownReply,
+      sendUdpPacket(delayedUdp, shutdownRemote.port, Buffer.from("late-after-shutdown"), shutdownRemote.address),
+    ]);
   } finally {
     await subscriber?.stop();
     await republisher?.stop();
