@@ -12,6 +12,14 @@ labeled subscriber-device policy, published services, and service allowlists
 live in the shared TOML configuration. A subscriber receives the allowed
 service as an ordinary local URL, TCP port, or bounded UDP endpoint.
 
+Each published service has one explicit source: either a publisher-local
+loopback port or a named service on an authorized upstream publisher. The
+republishing publisher gives that source its own service ID, name, and
+downstream allowlist. Upstream authorization is granted to the republisher's
+publisher key; it is separate from the republisher's subscriber-device policy.
+This is service republication, not a blind relay: the republisher processes
+plaintext at its hop, and operators keep source relationships acyclic.
+
 Kepos has no hosted account or Kepos-operated control plane. Device keys stay
 on the devices that created them. Kepos carries TCP byte streams and named,
 fixed-target UDP datagrams through an authenticated peer connection whose
@@ -48,6 +56,12 @@ Publisher setup creates or reuses only the strict seed-only `publisher.json`;
 the old publisher manifest and state-policy mutation commands are removed.
 Headless publisher and publisher-enabled device runs require a complete
 `[publisher]` TOML table, while subscriber-only commands remain independent.
+For example, a local service uses `source = { local_port = 4533 }`; an
+upstream-backed service uses
+`source = { publisher_key = "<upstream-public-key>", service_id = "navidrome" }`.
+Upstream-backed entries remain in the catalog while unavailable and recover
+new traffic after the upstream connection and named service return. Existing
+streams are not promised continuity across recovery or source changes.
 Headless publishers can expose an optional read-only Prometheus endpoint with
 `publisher run --metrics-listen 127.0.0.1:9464` (or the same option on a
 publisher-enabled `device run`). It reports bounded subscriber labels and

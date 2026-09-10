@@ -61,6 +61,22 @@ Kepos 的 SecretStream/UDX path 使用加密 unordered message 承载这个最�
 
 Steam Networking、Steam Datagram Relay、GOG Galaxy 和其他平台协议通常由游戏 SDK 控制。Kepos 不能通过转发一个本地端口接管它们。
 
+### E. 跨 publisher republication
+
+游戏服务也可以通过一个明确配置的上游 source republication，但这不会
+改变游戏协议边界。republishing publisher 为下游玩家发布自己的 service
+ID，并用自己的 subscriber-device / `allow` policy 控制玩家；原 publisher
+则必须把 republishing publisher 的 publisher public key 加入其
+subscriber policy。两层授权互相独立，republisher 会在每一跳看到明文，
+也不会把最终玩家身份委托给上游。
+
+最终玩家仍然使用 republisher 的本地 TCP listener 或 Home gateway，或者
+其本地 UDP listener。上游断线、服务缺失、transport kind 不兼容和 UDP
+carrier 不可用会保留配置项但标记 unavailable；恢复后只保证新的连接和
+datagram 能建立，旧的 gameplay session 不保证连续。第一版只验收一个
+republishing hop，运营者负责避免 source relationship 形成 cycle；系统不
+做自动发现、fallback、hop-count 或 cycle detection。
+
 正确做法是：
 
 - 游戏提供 Join via IP 时使用该入口；
@@ -166,7 +182,7 @@ game UDP datagram
   -> local Kepos UDP listener
   -> serviceId + sessionId + payload
   -> encrypted unordered UDX message
-  -> owner-side connected UDP socket
+  -> owner-side connected UDP socket (or the selected upstream publisher hop)
   -> Stardew host UDP 24642
 ```
 

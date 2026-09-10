@@ -86,7 +86,7 @@
               ];
               services.ssh = {
                 name = "SSH";
-                targetPort = 22;
+                source.localPort = 22;
                 allow = ["1111111111111111111111111111111111111111111111111111111111111111"];
               };
             };
@@ -103,7 +103,7 @@
         } ''
           grep -F 'display_name = "test-publisher"' ${configFile}
           grep -F 'bootstrap.example:49737' ${configFile}
-          grep -F 'target_port = 22' ${configFile}
+          grep -F 'local_port = 22' ${configFile}
           grep -F 'public_key = "1111111111111111111111111111111111111111111111111111111111111111"' ${configFile}
           test "$(grep -Fc 'allow = ["1111111111111111111111111111111111111111111111111111111111111111"]' ${configFile})" -eq 1
           grep -F -- '--observations ndjson' ${pkgs.writeText "kepos-exec-start" (toString service.ExecStart)}

@@ -51,8 +51,8 @@ test("formats healthy role combinations", () => {
         activeSubscriberKeys: ["01".repeat(32), "02".repeat(32)],
         acceptedConnections: 2,
         services: [
-          { id: "ssh", name: "SSH", targetPort: 22 },
-          { id: "git", name: "Git", targetPort: 3000 },
+          { id: "ssh", name: "SSH", source: { localPort: 22 }, available: true },
+          { id: "git", name: "Git", source: { localPort: 3000 }, available: true },
         ],
       },
     }),

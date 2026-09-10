@@ -2,6 +2,8 @@ export interface HomeRegistryService {
   id: string;
   name: string;
   kind: "tcp" | "udp";
+  available?: boolean;
+  error?: string;
 }
 
 export const HOME_REGISTRY_PATH = "/.well-known/kepos/services.json";
@@ -60,7 +62,26 @@ export function createHomeRegistry(
       if (service.kind !== "tcp" && service.kind !== "udp") {
         throw new Error(`service ${index} kind must be tcp or udp`);
       }
-      return service;
+      if (service.available !== undefined && typeof service.available !== "boolean") {
+        throw new Error(`service ${index} availability must be true or false`);
+      }
+      if (service.error !== undefined) {
+        if (
+          service.available !== false ||
+          typeof service.error !== "string" ||
+          service.error.trim().length === 0 ||
+          service.error.length > 256
+        ) {
+          throw new Error(`service ${index} error is invalid`);
+        }
+      }
+      return {
+        id: service.id,
+        name: service.name,
+        kind: service.kind,
+        ...(service.available === false ? { available: false } : {}),
+        ...(service.error === undefined ? {} : { error: service.error }),
+      };
     },
   );
 

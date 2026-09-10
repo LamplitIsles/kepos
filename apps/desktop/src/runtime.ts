@@ -30,7 +30,7 @@ import {
 } from "../../../src/runtime/subscriber.js";
 import { loadPublisherIdentity } from "../../../src/state/publisher.js";
 import { loadSubscriberConnectionState } from "../../../src/state/subscriber.js";
-import type { SubscriberDevice } from "../../../src/config.js";
+import type { PublisherServiceSource, SubscriberDevice } from "../../../src/config.js";
 import type { Observation } from "../../../src/mux/observability.js";
 import {
   createDesktopConfigObservation,
@@ -308,10 +308,11 @@ export async function startDesktopRuntime(
         activeSubscribers: 0,
         activeSubscriberKeys: [],
         acceptedConnections: 0,
-        services: policy.services.map(({ id, name, kind, targetPort }) => ({
+        services: policy.services.map(({ id, name, kind, source }) => ({
           id,
           name,
-          targetPort,
+          source: { ...source },
+          available: true,
           ...(kind === "udp" ? { kind } : {}),
         })),
       };
@@ -474,6 +475,21 @@ export async function startDesktopRuntime(
       activeSubscribers: status.activeSubscribers,
       activeSubscriberKeys: [...status.activeSubscriberKeys],
       acceptedConnections: status.acceptedConnections,
+      services: (runningPublisher.serviceStatus?.() ?? current.services.map((service) => ({
+        id: service.id,
+        name: service.name,
+        source: service.source,
+        available: service.available,
+        ...(service.error ? { error: service.error } : {}),
+        ...(service.kind === "udp" ? { kind: service.kind } : {}),
+      }))).map((service) => ({
+        id: service.id,
+        name: service.name,
+        source: { ...service.source },
+        available: service.available,
+        ...(service.error ? { error: service.error } : {}),
+        ...(service.kind === "udp" ? { kind: service.kind } : {}),
+      })),
       ...(pairingStatus.phase === "idle" ? {} : { pairing: pairingStatus }),
     };
     if (status.pairing.phase !== "inviting") pairingInvitation = undefined;
@@ -1128,11 +1144,13 @@ function createServices(
     localPorts,
   ).map((service) => {
     const local = status.services.find(({ id }) => id === service.id);
-    const error = local?.error;
+    const advertised = registry.services.find(({ id }) => id === service.id);
+    const error = local?.error ?? advertised?.error;
     return {
       ...service,
       available:
         connected &&
+        advertised?.available !== false &&
         local?.available !== false &&
         (service.access !== "udp" || service.copyText !== undefined),
       ...(error ? { error } : {}),
@@ -1160,7 +1178,10 @@ function clonePublisherRole(role: DesktopPublisherRole): DesktopPublisherRole {
   return {
     ...role,
     activeSubscriberKeys: [...role.activeSubscriberKeys],
-    services: role.services.map((service) => ({ ...service })),
+    services: role.services.map((service) => ({
+      ...service,
+      source: { ...service.source },
+    })),
   };
 }
 

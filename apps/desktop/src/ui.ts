@@ -614,10 +614,15 @@ ${smokeAcknowledgementState}
       };
 
       const renderPublishedService = (service) => {
-        const address = service.id + (service.kind === "udp" ? ' · UDP' : '') + ' · 127.0.0.1:' + service.targetPort;
+        const source = service.source && 'localPort' in service.source
+          ? '127.0.0.1:' + service.source.localPort
+          : service.source
+            ? 'upstream ' + fingerprint(service.source.publisherKey) + ' · ' + service.source.serviceId
+            : 'source unavailable';
+        const address = service.id + (service.kind === "udp" ? ' · UDP' : '') + ' · ' + source;
         return '<article class="service published"><div class="service-icon">' + icons.port + '</div>' +
           '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2>' +
-          '<p class="service-address">' + escapeHtml(address) + '</p></div></article>';
+          '<p class="service-address">' + escapeHtml(address) + (service.error ? '<br>' + escapeHtml(service.error) : '') + '</p></div></article>';
       };
 
       const renderConnectedSubscriber = (key, index) => {

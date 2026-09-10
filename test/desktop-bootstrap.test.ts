@@ -328,7 +328,7 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
     "kepos-neo",
     "subscriber",
   );
-  const config = `[publisher]\nenabled = true\ndisplay_name = "Home"\nsubscribers = [{ label = "phone", public_key = "${subscriberKey}" }]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\ntarget_port = 4533\nallow = ["${subscriberKey}"]\n\n[subscriber]\nenabled = true\nservices = []\n`;
+  const config = `[publisher]\nenabled = true\ndisplay_name = "Home"\nsubscribers = [{ label = "phone", public_key = "${subscriberKey}" }]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\nsource = { local_port = 4533 }\nallow = ["${subscriberKey}"]\n\n[subscriber]\nenabled = true\nservices = []\n`;
   try {
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(configPath, config);
@@ -357,7 +357,7 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
           {
             id: "navidrome",
             name: "Navidrome",
-            targetPort: 4533,
+            source: { localPort: 4533 },
             allow: [subscriberKey],
           },
         ],
@@ -372,7 +372,7 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
 
     await writeFile(
       configPath,
-      `[publisher]\nenabled = true\ndisplay_name = "Renamed home"\nsubscribers = [{ label = "tablet", public_key = "${"22".repeat(32)}" }]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\ntarget_port = 4534\n\n[subscriber]\nenabled = true\nservices = []\n`,
+      `[publisher]\nenabled = true\ndisplay_name = "Renamed home"\nsubscribers = [{ label = "tablet", public_key = "${"22".repeat(32)}" }]\n\n[[publisher.services]]\nid = "navidrome"\nname = "Navidrome"\nsource = { local_port = 4534 }\n\n[subscriber]\nenabled = true\nservices = []\n`,
     );
     const second = await loadDesktopOptions([], {
       homeDirectory: root,
@@ -384,7 +384,7 @@ test("desktop publisher bootstrap creates state from packaged TOML and preserves
       displayName: "Renamed home",
       subscribers: [{ label: "tablet", publicKey: "22".repeat(32) }],
       services: [
-        { id: "navidrome", name: "Navidrome", targetPort: 4534 },
+        { id: "navidrome", name: "Navidrome", source: { localPort: 4534 } },
       ],
     });
     assert.deepEqual(
@@ -424,7 +424,7 @@ test("desktop publisher bootstrap preserves an existing identity", async () => {
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(
       configPath,
-      '[publisher]\nenabled = true\ndisplay_name = "Home"\nsubscribers = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\ntarget_port = 22\n',
+      '[publisher]\nenabled = true\ndisplay_name = "Home"\nsubscribers = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\nsource = { local_port = 22 }\n',
     );
 
     const options = await loadDesktopOptions([], {
@@ -521,7 +521,7 @@ test("desktop publisher bootstrap validates malformed state without changing ide
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(
       configPath,
-      '[publisher]\nenabled = true\ndisplay_name = "Home"\nsubscribers = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\ntarget_port = 2222\n\n[subscriber]\nenabled = true\nservices = []\n',
+      '[publisher]\nenabled = true\ndisplay_name = "Home"\nsubscribers = []\n\n[[publisher.services]]\nid = "ssh"\nname = "SSH"\nsource = { local_port = 2222 }\n\n[subscriber]\nenabled = true\nservices = []\n',
     );
     const configBefore = await readFile(configPath);
 
@@ -533,7 +533,7 @@ test("desktop publisher bootstrap validates malformed state without changing ide
     assert.deepEqual(options.publisher?.policy, {
       displayName: "Home",
       subscribers: [],
-      services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
+      services: [{ id: "ssh", name: "SSH", source: { localPort: 2222 } }],
     });
     assert.deepEqual(
       await readFile(path.join(publisherStateDir, "publisher.json")),
@@ -620,7 +620,7 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
       enabled: true,
       displayName: "Renamed Windows home",
       subscribers: [{ label: "tablet", publicKey: "22".repeat(32) }],
-      services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
+      services: [{ id: "ssh", name: "SSH", source: { localPort: 2222 } }],
     },
   };
   const relaunched = await loadDesktopOptions([], {
@@ -640,7 +640,7 @@ test("desktop publisher bootstrap selects the Windows packaged state path", asyn
   assert.deepEqual(relaunched.publisher?.policy, {
     displayName: "Renamed Windows home",
     subscribers: [{ label: "tablet", publicKey: "22".repeat(32) }],
-    services: [{ id: "ssh", name: "SSH", targetPort: 2222 }],
+    services: [{ id: "ssh", name: "SSH", source: { localPort: 2222 } }],
   });
   assert.deepEqual(ensuredStates, [
     "C:\\Users\\kepos\\AppData\\Local\\Kepos\\state\\publisher",

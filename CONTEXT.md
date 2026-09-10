@@ -25,7 +25,8 @@ A named service that a publisher intentionally makes available through Kepos.
 
 **Service Source**:
 The local service or upstream published service that supplies a published
-service.
+service. It is exactly one of a fixed local loopback port, or a pair of an
+upstream publisher public key and its named service ID.
 
 **Upstream Publisher**:
 A publisher whose service another publisher consumes as a service source.
@@ -35,6 +36,12 @@ Upstream and downstream describe a service relationship between devices.
 A publisher's intentional publication of an authorized upstream service under
 its own service name and downstream access policy.
 _Avoid_: Blind relay, automatic service discovery
+
+**Service Availability**:
+The advisory, current ability of a configured service source to accept new
+traffic. An unavailable upstream-backed service remains configured and may
+recover; availability does not replace authorization or promise continuity for
+existing streams and datagram flows.
 
 **UDP Service**:
 A published service that exchanges individual datagrams with one fixed

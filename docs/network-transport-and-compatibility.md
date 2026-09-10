@@ -11,8 +11,10 @@ research, including the deferred TCP/TLS relay option.
 ## 1. What this document decides
 
 Kepos Neo proxies selected local TCP services and bounded fixed-target UDP
-services between trusted devices. That does not mean the Internet transport is
-TCP or that a UDP service is a virtual network.
+services between trusted devices. A publisher may also explicitly select a
+named service from an authorized upstream publisher and publish it under a
+local service ID. That does not mean the Internet transport is TCP or that a
+UDP service is a virtual network.
 
 The main Holepunch path uses:
 
@@ -71,12 +73,12 @@ UDX reliable stream
   v
 remote UDX -> Noise -> Protomux
   |
-  | new loopback TCP connection
+  | new local TCP connection, or an authenticated upstream service open
   v
-Neo service connector              second TCP connection starts here
+Neo service connector              immediate source connection starts here
   |
   v
-local service
+local service or upstream publisher
 ```
 
 Kepos Neo does not carry TCP/UDP headers or TCP acknowledgements through the
@@ -127,6 +129,37 @@ without retransmission. Broadcast, multicast, arbitrary destinations, IPv6
 local listeners, and seamless session preservation across reconnect are outside
 the contract.
 
+### 2.2 Explicit republication path
+
+Republication composes the service proxy at a trusted publisher boundary:
+
+```text
+final subscriber
+  | local listener / Home gateway
+  v
+republishing publisher (its own publisher key and downstream ACL)
+  | one shared authenticated outer per configured upstream
+  v
+upstream publisher (authorizes the republisher as a subscriber)
+  |
+  v
+selected local service
+```
+
+The republisher configures one exact `(publisher_key, service_id)` source for
+each service. It does not import the upstream catalog or choose a fallback.
+TCP and HTTP opens use the upstream service's TCP wire kind; UDP requires an
+upstream UDP service and reuses the shared unordered carrier with a fresh flow
+mapping. Different downstream devices and aliases receive isolated flow/reply
+ownership even when they reference one upstream service.
+
+Each hop authenticates and authorizes its immediate peer independently. The
+republisher can inspect plaintext at its hop; the protocol does not delegate
+the final subscriber identity upstream or provide end-to-end encryption
+through the republisher. One republishing hop is the validated acceptance
+topology. There is no cycle, self-reference, provenance, or hop-count check,
+so operators must keep source relationships acyclic.
+
 ## 3. How a direct connection is made
 
 ### 3.1 Discovery
@@ -165,8 +198,10 @@ check before exposing Home or another service.
 
 MLP has no owner-signed membership record, synchronized Family roster, or
 dynamic revoke protocol. Removing a client key takes effect after the
-publisher reloads its allowlist. Bootstrap and relay nodes cannot add a key to
-that allowlist or grant access to a published service.
+publisher reloads its allowlist. At a republication boundary, the upstream
+allowlist controls the republisher key and the downstream allowlist controls
+final subscribers; either denial blocks forwarding. Bootstrap and relay nodes
+cannot add a key to an allowlist or grant access to a published service.
 
 ## 4. Three different meanings of relay
 

@@ -570,7 +570,11 @@ export interface UdpPublisherForwarderOptions {
   authorized: () => boolean;
   serviceAuthorized?: (serviceId: string) => boolean;
   serviceKind: (serviceId: string) => "tcp" | "http" | "udp";
-  targetPort: (serviceId: string) => number | undefined;
+  localTargetPort?: (serviceId: string) => number | undefined;
+  remoteForService?: (
+    serviceId: string,
+    onReply: (flowId: Uint8Array, payload: Uint8Array) => void,
+  ) => UdpPublisherRemote | undefined;
   publisherToSubscriberRateLimiter?: (
     serviceId: string,
   ) => PublisherToSubscriberRateLimiter | undefined;
@@ -592,18 +596,35 @@ export interface UdpPublisherForwarderOptions {
   onDrop?: (reason: string, fields?: Record<string, unknown>) => void;
 }
 
+export interface UdpPublisherRemote {
+  available: () => boolean;
+  send: (
+    flowId: Uint8Array,
+    payload: Uint8Array,
+    messageId: number,
+  ) => Promise<UdpSendResult>;
+  closeFlow: (flowId: Uint8Array) => void;
+  close: () => void;
+}
+
 export interface RunningUdpPublisherForwarder {
   close: () => void;
   closeFlows: (serviceId?: string) => void;
   available: () => boolean;
+  receiveReply: (
+    serviceId: string,
+    flowId: Uint8Array,
+    payload: Uint8Array,
+  ) => void;
 }
 
 interface PublisherUdpFlow {
   key: string;
   serviceId: string;
   flowId: Uint8Array;
-  targetPort: number;
-  socket: Socket;
+  targetPort?: number;
+  socket?: Socket;
+  remote?: UdpPublisherRemote;
   connected: boolean;
   closed: boolean;
   lastActivity: number;
@@ -639,6 +660,7 @@ export function createUdpPublisherForwarder(
     options.onError,
   );
   const flows = new Map<string, PublisherUdpFlow>();
+  const remotes = new Map<string, UdpPublisherRemote>();
   let pendingSends = 0;
   let closed = false;
 
@@ -647,6 +669,11 @@ export function createUdpPublisherForwarder(
       if (serviceId === undefined || flow.serviceId === serviceId) {
         removeFlow(flow);
       }
+    }
+    for (const [id, remote] of remotes) {
+      if (serviceId !== undefined && id !== serviceId) continue;
+      remotes.delete(id);
+      remote.close();
     }
   };
 
@@ -666,6 +693,7 @@ export function createUdpPublisherForwarder(
     },
     closeFlows,
     available: carrier.available,
+    receiveReply,
   };
 
   async function receive(message: Uint8Array): Promise<void> {
@@ -696,19 +724,42 @@ export function createUdpPublisherForwarder(
       await sendError(envelope, "UDP service is not authorized");
       return;
     }
-    const targetPort = options.targetPort(envelope.serviceId);
+    const key = flowKey(envelope.serviceId, envelope.flowId);
+    const targetPort = options.localTargetPort?.(envelope.serviceId);
+    let remote: UdpPublisherRemote | undefined;
     if (targetPort === undefined) {
-      drop("unmapped-service", { serviceId: envelope.serviceId });
-      await sendError(envelope, "UDP service target is unavailable");
-      return;
-    }
-    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65_535) {
+      remote = remotes.get(envelope.serviceId);
+      if (!remote && options.remoteForService) {
+        try {
+          remote = options.remoteForService(
+            envelope.serviceId,
+            (flowId, payload) => {
+              receiveReply(envelope.serviceId, flowId, payload);
+            },
+          );
+        } catch (error) {
+          reportError(`UDP upstream allocation failed: ${errorMessage(error)}`);
+        }
+        if (remote) remotes.set(envelope.serviceId, remote);
+      }
+      if (!remote) {
+        drop("unmapped-service", { serviceId: envelope.serviceId });
+        await sendError(envelope, "UDP service target is unavailable");
+        return;
+      }
+      if (!remote.available()) {
+        const staleFlow = flows.get(key);
+        if (staleFlow) removeFlow(staleFlow);
+        drop("unavailable-service", { serviceId: envelope.serviceId });
+        await sendError(envelope, "UDP service source is unavailable");
+        return;
+      }
+    } else if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65_535) {
       drop("invalid-target", { serviceId: envelope.serviceId });
       await sendError(envelope, "UDP service target is invalid");
       return;
     }
 
-    const key = flowKey(envelope.serviceId, envelope.flowId);
     let flow = flows.get(key);
     if (!flow) {
       if (flows.size >= maxFlows) {
@@ -716,10 +767,13 @@ export function createUdpPublisherForwarder(
         await sendError(envelope, "UDP flow limit reached");
         return;
       }
-      flow = createFlow(envelope, targetPort, key);
+      flow = createFlow(envelope, targetPort, remote, key);
       if (!flow) return;
       flows.set(key, flow);
-    } else if (flow.targetPort !== targetPort) {
+    } else if (
+      flow.targetPort !== targetPort ||
+      flow.remote !== remote
+    ) {
       removeFlow(flow);
       drop("stale-target", { serviceId: envelope.serviceId });
       return;
@@ -728,15 +782,19 @@ export function createUdpPublisherForwarder(
     let payload = envelope.payload;
     if (envelope.type === "fragment") {
       try {
-        payload = flow.reassembler.push(decodeUdpFragment(envelope)) ??
-          new Uint8Array();
+        const reassembled = flow.reassembler.push(decodeUdpFragment(envelope));
+        if (reassembled === undefined) return;
+        payload = reassembled;
       } catch (error) {
         drop("malformed-fragment", { serviceId: envelope.serviceId, error: errorMessage(error) });
         return;
       }
-      if (payload.byteLength === 0) return;
     }
     options.onBytes?.("subscriber-to-publisher", payload.byteLength);
+    if (flow.remote) {
+      sendToRemote(flow, payload);
+      return;
+    }
     if (!flow.connected) {
       if (flow.pendingPayload !== undefined) {
         drop("flow-send-limit", { serviceId: envelope.serviceId });
@@ -748,11 +806,41 @@ export function createUdpPublisherForwarder(
     sendToTarget(flow, payload);
   }
 
+  function receiveReply(
+    serviceId: string,
+    flowId: Uint8Array,
+    payload: Uint8Array,
+  ): void {
+    if (closed) return;
+    const flow = flows.get(flowKey(serviceId, flowId));
+    if (!flow || flow.closed || !flow.remote) return;
+    touch(flow);
+    void sendReply(flow, payload);
+  }
+
   function createFlow(
     envelope: UdpEnvelope,
-    targetPort: number,
+    targetPort: number | undefined,
+    remote: UdpPublisherRemote | undefined,
     key: string,
   ): PublisherUdpFlow | undefined {
+    if (remote) {
+      return {
+        key,
+        serviceId: envelope.serviceId,
+        flowId: b4a.from(envelope.flowId),
+        targetPort: undefined,
+        remote,
+        connected: true,
+        closed: false,
+        lastActivity: now(),
+        pendingPayload: undefined,
+        pendingSends: 0,
+        nextMessageId: 0,
+        reassembler: createReassembler(envelope.serviceId),
+      };
+    }
+    if (targetPort === undefined) return undefined;
     let socket: Socket;
     try {
       socket = createSocket("udp4");
@@ -772,14 +860,7 @@ export function createUdpPublisherForwarder(
       pendingPayload: undefined,
       pendingSends: 0,
       nextMessageId: 0,
-      reassembler: new UdpDatagramReassembler({
-        now,
-        schedule,
-        timeoutMs: options.reassemblyTimeoutMs,
-        maxMessages: options.maxReassemblyMessages,
-        maxBytes: options.maxReassemblyBytes,
-        onDrop: (reason) => drop(reason, { serviceId: envelope.serviceId }),
-      }),
+      reassembler: createReassembler(envelope.serviceId),
     };
     const onError = (error: Error): void => {
       if (flow.closed) return;
@@ -799,8 +880,14 @@ export function createUdpPublisherForwarder(
       touch(flow);
       void sendReply(flow, message);
     });
+    const connectedTargetPort = flow.targetPort;
+    if (connectedTargetPort === undefined) {
+      flow.closed = true;
+      void closeDgramSocket(socket);
+      return undefined;
+    }
     try {
-      socket.connect(flow.targetPort, "127.0.0.1", () => {
+      socket.connect(connectedTargetPort, "127.0.0.1", () => {
         if (flow.closed) return;
         flow.connected = true;
         const pending = flow.pendingPayload;
@@ -818,7 +905,7 @@ export function createUdpPublisherForwarder(
   }
 
   function sendToTarget(flow: PublisherUdpFlow, payload: Uint8Array): void {
-    if (flow.closed) return;
+    if (flow.closed || !flow.socket) return;
     if (flow.pendingSends >= maxPendingSends) {
       drop("target-send-limit", { serviceId: flow.serviceId });
       return;
@@ -837,6 +924,32 @@ export function createUdpPublisherForwarder(
       reportError(`UDP target send failed: ${errorMessage(error)}`);
       removeFlow(flow);
     }
+  }
+
+  function sendToRemote(flow: PublisherUdpFlow, payload: Uint8Array): void {
+    if (flow.closed || !flow.remote) return;
+    if (flow.pendingSends >= maxPendingSends) {
+      drop("remote-send-limit", { serviceId: flow.serviceId });
+      return;
+    }
+    flow.pendingSends++;
+    const remote = flow.remote;
+    void remote.send(flow.flowId, payload, nextMessageId(flow)).then(
+      (result) => {
+        if (!result.ok && !flow.closed) {
+          reportError(result.error ?? "UDP upstream send failed");
+          removeFlow(flow);
+        }
+      },
+      (error) => {
+        if (!flow.closed) {
+          reportError(`UDP upstream send failed: ${errorMessage(error)}`);
+          removeFlow(flow);
+        }
+      },
+    ).finally(() => {
+      flow.pendingSends--;
+    });
   }
 
   async function sendReply(flow: PublisherUdpFlow, payload: Uint8Array): Promise<void> {
@@ -936,7 +1049,19 @@ export function createUdpPublisherForwarder(
     flow.cancelExpiry = undefined;
     flow.reassembler.clear();
     flows.delete(flow.key);
-    void closeDgramSocket(flow.socket);
+    flow.remote?.closeFlow(flow.flowId);
+    if (flow.socket) void closeDgramSocket(flow.socket);
+  }
+
+  function createReassembler(serviceId: string): UdpDatagramReassembler {
+    return new UdpDatagramReassembler({
+      now,
+      schedule,
+      timeoutMs: options.reassemblyTimeoutMs,
+      maxMessages: options.maxReassemblyMessages,
+      maxBytes: options.maxReassemblyBytes,
+      onDrop: (reason) => drop(reason, { serviceId }),
+    });
   }
 
   function drop(reason: string, fields: Record<string, unknown> = {}): void {

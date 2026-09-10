@@ -2,6 +2,7 @@ import {
   isDesktopDiagnosticErrorCategory,
   type DesktopDiagnosticErrorCategory,
 } from "./diagnostics-contract.js";
+import type { PublisherServiceSource } from "../../../src/config.js";
 
 export type DesktopConnection =
   | "unconfigured"
@@ -67,7 +68,9 @@ export interface DesktopPublisherRole {
   services: Array<{
     id: string;
     name: string;
-    targetPort: number;
+    source: PublisherServiceSource;
+    available: boolean;
+    error?: string;
     kind?: "udp";
   }>;
   pairing?:

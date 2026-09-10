@@ -15,11 +15,24 @@ export interface SubscriberContact {
   requestedLocalPort: number;
 }
 
+export interface LocalPublisherServiceSource {
+  localPort: number;
+}
+
+export interface UpstreamPublisherServiceSource {
+  publisherKey: string;
+  serviceId: string;
+}
+
+export type PublisherServiceSource =
+  | LocalPublisherServiceSource
+  | UpstreamPublisherServiceSource;
+
 export interface PublisherService {
   id: string;
   name: string;
   kind: "tcp" | "http" | "udp";
-  targetPort: number;
+  source: PublisherServiceSource;
   allow?: string[];
   maxPublisherToSubscriberBps?: number;
 }
@@ -105,11 +118,48 @@ export function parseSubscriberDevices(
   return devices;
 }
 
-function parseTargetPort(value: unknown, field = "targetPort"): number {
+function parseLocalPort(value: unknown, field = "localPort"): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65_535) {
     throw new Error(`${field} must be an integer from 1 through 65535`);
   }
   return value;
+}
+
+function parseUpstreamServiceId(value: unknown, field: string): string {
+  if (typeof value !== "string" || !serviceIdPattern.test(value)) {
+    throw new Error(`${field} must be a lowercase service identifier`);
+  }
+  return value;
+}
+
+function parsePublisherServiceSource(
+  value: unknown,
+  field: string,
+): PublisherServiceSource {
+  if (!isRecord(value)) {
+    throw new Error(`${field} must be an object`);
+  }
+  const hasLocalPort = Object.prototype.hasOwnProperty.call(value, "localPort");
+  const hasPublisherKey = Object.prototype.hasOwnProperty.call(value, "publisherKey");
+  const hasServiceId = Object.prototype.hasOwnProperty.call(value, "serviceId");
+  if (hasLocalPort && (hasPublisherKey || hasServiceId)) {
+    throw new Error(`${field} must describe either a local or upstream source`);
+  }
+  if (!hasLocalPort && !hasPublisherKey && !hasServiceId) {
+    throw new Error(`${field} must describe a local or upstream source`);
+  }
+  if (hasLocalPort) {
+    rejectUnknownFields(value, ["localPort"], field);
+    return { localPort: parseLocalPort(value.localPort, `${field}.localPort`) };
+  }
+  rejectUnknownFields(value, ["publisherKey", "serviceId"], field);
+  if (!hasPublisherKey || !hasServiceId) {
+    throw new Error(`${field} upstream source requires publisherKey and serviceId`);
+  }
+  return {
+    publisherKey: parseKeyHex(value.publisherKey, `${field}.publisherKey`),
+    serviceId: parseUpstreamServiceId(value.serviceId, `${field}.serviceId`),
+  };
 }
 
 function parseMaxPublisherToSubscriberBps(
@@ -185,7 +235,7 @@ export function parsePublisherService(
       "id",
       "name",
       "kind",
-      "targetPort",
+      "source",
       "allow",
       "maxPublisherToSubscriberBps",
     ],
@@ -206,7 +256,7 @@ export function parsePublisherService(
     id: value.id,
     name: parseNonEmptyString(value.name, `${field}.name`),
     kind,
-    targetPort: parseTargetPort(value.targetPort, `${field}.targetPort`),
+    source: parsePublisherServiceSource(value.source, `${field}.source`),
     ...(value.allow === undefined
       ? {}
       : { allow: parseServiceAllow(value.allow, `${field}.allow`) }),

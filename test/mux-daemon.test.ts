@@ -380,9 +380,9 @@ test("one persistent subscriber connection carries Home, Navidrome, and SSH", as
           id: "navidrome",
           name: "Navidrome",
           kind: "http",
-          targetPort: navidromePort,
+          source: { localPort: navidromePort },
         },
-        { id: "ssh", name: "SSH", targetPort: sshPort },
+        { id: "ssh", name: "SSH", source: { localPort: sshPort } },
       ],
     });
     await setSubscriberPublisher({
@@ -579,7 +579,7 @@ test("forwards fragmented persistent HTTP/1.1 requests with per-request identity
           id: "navidrome",
           name: "Navidrome",
           kind: "http",
-          targetPort,
+          source: { localPort: targetPort },
         },
       ],
     });
@@ -753,7 +753,7 @@ test("delivers a target response after an HTTP client half-closes", async () => 
           id: "half-close",
           name: "Half close",
           kind: "http",
-          targetPort,
+          source: { localPort: targetPort },
         },
       ],
     });
@@ -859,7 +859,7 @@ test("authenticates a split WebSocket Upgrade and then forwards opaque bytes", a
           id: "websocket",
           name: "WebSocket",
           kind: "http",
-          targetPort,
+          source: { localPort: targetPort },
         },
       ],
     });
@@ -950,7 +950,7 @@ test("subscriber stop closes an active service tunnel before its listener", asyn
       stateDir: publisherState,
       displayName: "kosmos",
       subscriberDevices: subscriberDevices([subscriberSetup.publicKey]),
-      services: [{ id: "ssh", name: "SSH", targetPort }],
+      services: [{ id: "ssh", name: "SSH", source: { localPort: targetPort } }],
     });
     await setSubscriberPublisher({
       stateDir: subscriberState,
@@ -1333,7 +1333,7 @@ test("service allowlists restrict channels and subscriber registries", async () 
           {
             id: "dagger",
             name: "Dagger",
-            targetPort,
+            source: { localPort: targetPort },
             allow: [allowedSetup.publicKey],
           },
         ],
@@ -1400,7 +1400,7 @@ test("service allowlists restrict channels and subscriber registries", async () 
   }
 });
 
-test("publisher policy reload preserves unaffected subscribers and drains services", async () => {
+test("publisher policy reload preserves unaffected subscribers and closes changed services", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-policy-reload-"));
   const publisherState = path.join(root, "publisher");
   const allowedState = path.join(root, "allowed");
@@ -1464,7 +1464,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
           {
             id: "echo",
             name: "Echo",
-            targetPort: targetAPort,
+            source: { localPort: targetAPort },
             allow: [allowedSetup.publicKey, removedSetup.publicKey],
           },
         ],
@@ -1483,7 +1483,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
           {
             id: "echo",
             name: "Echo",
-            targetPort: targetAPort,
+            source: { localPort: targetAPort },
             allow: [allowedSetup.publicKey, removedSetup.publicKey],
           },
         ],
@@ -1537,7 +1537,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
           {
             id: "echo",
             name: "Echo B",
-            targetPort: targetBPort,
+            source: { localPort: targetBPort },
             allow: [allowedSetup.publicKey, removedSetup.publicKey],
           },
         ],
@@ -1559,9 +1559,8 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
       [["home", "Home"], ["echo", "Echo B"]],
     );
     assert.equal(await exchangeTcp(allowedEcho.port, "new"), "target-b:new");
-    existing.write("after");
-    const [after] = await once(existing, "data");
-    assert.equal(after.toString(), "target-a:after");
+    if (!existing.destroyed) await once(existing, "close");
+    assert.equal(existing.destroyed, true);
 
     await publisher.applyPolicy({
       displayName: "retargeted",
@@ -1573,7 +1572,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
         {
           id: "echo",
           name: "Echo B",
-          targetPort: targetBPort,
+          source: { localPort: targetBPort },
           allow: [removedSetup.publicKey],
         },
       ],
@@ -1591,7 +1590,7 @@ test("publisher policy reload preserves unaffected subscribers and drains servic
         {
           id: "echo",
           name: "Echo B",
-          targetPort: targetBPort,
+          source: { localPort: targetBPort },
           allow: [allowedSetup.publicKey],
         },
       ],

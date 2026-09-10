@@ -242,13 +242,13 @@ export async function listenSubscriberUdpService(
     let payload = envelope.payload;
     if (envelope.type === "fragment") {
       try {
-        payload = flow.reassembler.push(decodeUdpFragment(envelope)) ??
-          new Uint8Array();
+        const reassembled = flow.reassembler.push(decodeUdpFragment(envelope));
+        if (reassembled === undefined) return;
+        payload = reassembled;
       } catch (error) {
         drop("malformed-fragment", { error: errorMessage(error) });
         return;
       }
-      if (payload.byteLength === 0) return;
     }
     if (pendingSends >= maxPendingSends) {
       drop("local-reply-limit");

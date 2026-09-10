@@ -25,6 +25,7 @@ import {
   createObservationId,
   type EmitObservation,
   type Observe,
+  type ObservationRole,
 } from "../mux/observability.js";
 import {
   connectionOptionsForRoute,
@@ -78,6 +79,11 @@ export interface StartSubscriberOptions {
   now?: () => number;
   observe?: Observe;
   onTerminalConnectionError?: (error: Error) => void;
+  observationRole?: ObservationRole;
+  onConnected?: (generation: number) => void;
+  onDisconnected?: (generation: number, reason: string) => void;
+  onUdpError?: (error: string) => void;
+  onUdpReset?: () => void;
   pairing?: {
     invitation: string;
     deviceLabel: string;
@@ -199,6 +205,11 @@ export async function startSubscriber(
     log: options.log,
     now,
     observe: options.observe,
+    observationRole: options.observationRole,
+    onConnected: options.onConnected,
+    onDisconnected: options.onDisconnected,
+    onUdpError: options.onUdpError,
+    onUdpReset: options.onUdpReset,
     onTerminalConnectionError: options.onTerminalConnectionError,
     ...(pairingRequest && pairingExpiresAt !== undefined
       ? {
@@ -412,6 +423,11 @@ export function createPublisherConnection(options: {
   log?: (line: string) => void;
   now: () => number;
   observe?: Observe;
+  observationRole?: ObservationRole;
+  onConnected?: (generation: number) => void;
+  onDisconnected?: (generation: number, reason: string) => void;
+  onUdpError?: (error: string) => void;
+  onUdpReset?: () => void;
   onTerminalConnectionError?: (error: Error) => void;
   pairing?: {
     request: PairingRequest;
@@ -464,6 +480,7 @@ export function createPublisherConnection(options: {
     currentUdpErrorUnsubscribe?.();
     currentUdpErrorUnsubscribe = undefined;
     currentUdpError = undefined;
+    options.onUdpReset?.();
     for (const listener of udpResetListeners) {
       try {
         listener();
@@ -488,6 +505,7 @@ export function createPublisherConnection(options: {
     currentUdpError = undefined;
     currentUdpErrorUnsubscribe = mux.udp?.onError((error) => {
       currentUdpError = error;
+      options.onUdpError?.(error);
       for (const listener of udpErrorListeners) {
         try {
           listener(error);
@@ -525,6 +543,7 @@ export function createPublisherConnection(options: {
       outer,
     };
     installUdp(mux);
+    options.onConnected?.(connectionGeneration);
     let streamError: string | undefined;
     outer.once("error", (error) => {
       streamError = error.message;
@@ -533,6 +552,10 @@ export function createPublisherConnection(options: {
       if (current?.outer !== outer) return;
       resetUdp();
       current = undefined;
+      options.onDisconnected?.(
+        connectionGeneration,
+        streamError ?? (stopped ? "local.stop" : "stream.close"),
+      );
       observe("outer.closed", {
         trigger: stopped
           ? "local.stop"
@@ -568,7 +591,7 @@ export function createPublisherConnection(options: {
     const outerId = createObservationId("outer");
     const observe = createObservationEmitter({
       observe: options.observe,
-      role: "subscriber",
+      role: options.observationRole ?? "subscriber",
       outerId,
       now: options.now,
       route: options.route,
@@ -622,6 +645,7 @@ export function createPublisherConnection(options: {
         outerId,
         now: options.now,
         observe: options.observe,
+        observationRole: options.observationRole,
         onControlEstablishmentTimeout: () => {
           markOuterUnhealthy(
             outer,

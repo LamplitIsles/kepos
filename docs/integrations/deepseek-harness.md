@@ -37,7 +37,7 @@ subscribers = [{ label = "dev-phone", public_key = "<subscriber-public-key>" }]
 [[publisher.services]]
 id = "dsh"
 name = "DeepSeek Harness"
-target_port = 3080
+source = { local_port = 3080 }
 ```
 
 This recipe deliberately omits `kind`, so dsh remains a byte-transparent `tcp`

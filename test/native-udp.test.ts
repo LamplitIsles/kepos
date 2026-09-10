@@ -404,7 +404,7 @@ test("unordered UDP transport forwards fixed-target replies and applies ACL befo
     authorized: () => true,
     serviceAuthorized: () => allowed,
     serviceKind: () => "udp",
-    targetPort: () => target.port,
+    localTargetPort: () => target.port,
     onDrop: (reason) => drops.push(reason),
   });
   const subscriber = createUdpSubscriberTransport(subscriberOuter);
@@ -443,7 +443,7 @@ test("UDP publisher replies drop when the shared outbound budget is unavailable"
   const publisher = createUdpPublisherForwarder(publisherOuter, {
     authorized: () => true,
     serviceKind: () => "udp",
-    targetPort: () => target.port,
+    localTargetPort: () => target.port,
     publisherToSubscriberRateLimiter: () => limiter,
     onDrop: (reason) => drops.push(reason),
   });
@@ -492,9 +492,9 @@ test("real desktop runtime exchanges UDP and TCP over one authenticated outer", 
       displayName: "publisher",
       subscribers: [{ publicKey: subscriberIdentity.publicKey, label: "subscriber" }],
       services: [
-        { id: "farm-a", name: "Farm A", kind: "udp", targetPort: targetA.port },
-        { id: "farm-b", name: "Farm B", kind: "udp", targetPort: targetB.port },
-        { id: "echo", name: "Echo", targetPort: tcpTarget.port },
+        { id: "farm-a", name: "Farm A", kind: "udp", source: { localPort: targetA.port } },
+        { id: "farm-b", name: "Farm B", kind: "udp", source: { localPort: targetB.port } },
+        { id: "echo", name: "Echo", source: { localPort: tcpTarget.port } },
       ],
     };
     publisher = await startPublisher({
@@ -572,7 +572,7 @@ test("UDP policy revocation, outer replacement, and retained listener recovery a
         id: "farm",
         name: "Farm",
         kind: "udp",
-        targetPort: target.port,
+        source: { localPort: target.port },
         allow: [],
       }],
     };

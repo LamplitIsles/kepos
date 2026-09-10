@@ -383,7 +383,7 @@ test("desktop diagnostic sinks remove roles absent from the current snapshot", a
       activeSubscribers: 1,
       activeSubscriberKeys: [],
       acceptedConnections: 1,
-      services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
+      services: [{ id: "ssh", name: "SSH", source: { localPort: 22 }, available: true }],
     },
     subscriber: {
       phase: "running" as const,

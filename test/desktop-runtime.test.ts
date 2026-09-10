@@ -36,7 +36,7 @@ const replacementPublisherKey = derivePublisherHomeKey(
 const localPublisherPolicy: PublisherRuntimePolicy = {
   displayName: "Mac smoke",
   subscribers: [{ label: "Pixel", publicKey: "22".repeat(32) }],
-  services: [{ id: "smoke", name: "Smoke", targetPort: 18_080 }],
+  services: [{ id: "smoke", name: "Smoke", source: { localPort: 18_080 } }],
 };
 const registry: HomeRegistry = {
   schemaVersion: 2,
@@ -97,7 +97,7 @@ test("desktop runtime starts and stops a publisher-only role", async () => {
           activeSubscribers: 0,
           activeSubscriberKeys: [],
           acceptedConnections: 0,
-        services: [],
+          services: [],
       },
     },
     {
@@ -112,7 +112,7 @@ test("desktop runtime starts and stops a publisher-only role", async () => {
         activeSubscriberKeys: ["01".repeat(32)],
         acceptedConnections: 2,
         services: [
-          { id: "smoke", name: "Smoke", targetPort: 18_080 },
+          { id: "smoke", name: "Smoke", source: { localPort: 18_080 }, available: true },
         ],
       },
     },
@@ -297,6 +297,53 @@ test("desktop marks a UDP service unavailable with its carrier error and recover
     available: true,
     copyText: "127.0.0.1:24642",
   });
+  await runtime.stop();
+});
+
+test("desktop preserves an advertised upstream outage in the service card", async () => {
+  const snapshots: DesktopSnapshot[] = [];
+  const unavailableRegistry: HomeRegistry = {
+    ...registry,
+    services: registry.services.map((service) =>
+      service.id === "navidrome"
+        ? {
+            ...service,
+            available: false,
+            error: "Upstream service is missing or unauthorized",
+          }
+        : service,
+    ),
+  };
+  const runtime = await startDesktopRuntime(
+    {
+      subscriber: {
+        stateDir: "/state/subscriber",
+        gatewayPort: DEFAULT_GATEWAY_PORT,
+        services: [],
+      },
+      onSnapshot: (snapshot) => snapshots.push(snapshot),
+    },
+    dependencies([], {
+      startSubscriber: async () =>
+        runningSubscriber(() => subscriberStatus("connected", 1), []),
+      readRegistry: async () => unavailableRegistry,
+    }),
+  );
+
+  assert.deepEqual(
+    snapshots.at(-1)?.subscriber?.services.find(({ id }) => id === "navidrome"),
+    {
+      id: "navidrome",
+      name: "Navidrome",
+      access: "http",
+      action: "copy-url",
+      icon: "music",
+      available: false,
+      error: "Upstream service is missing or unauthorized",
+      url: "http://navidrome.localhost:17480",
+      copyText: "http://navidrome.localhost:17480",
+    },
+  );
   await runtime.stop();
 });
 
@@ -823,7 +870,7 @@ test("desktop runtime applies shared network and role policy", async () => {
   const publisherPolicy = {
     displayName: "Configured publisher",
     subscribers: [{ label: "Pixel", publicKey: "22".repeat(32) }],
-    services: [{ id: "web", name: "Web", targetPort: 8_080 }],
+    services: [{ id: "web", name: "Web", source: { localPort: 8_080 } }],
   };
   const dht = trackedDht(events, "initial");
   let dhtCreates = 0;
@@ -1416,7 +1463,7 @@ test("desktop runtime isolates publisher startup failure from subscriber", async
     activeSubscribers: 0,
     activeSubscriberKeys: [],
     acceptedConnections: 0,
-    services: [{ id: "smoke", name: "Smoke", targetPort: 18_080 }],
+    services: [{ id: "smoke", name: "Smoke", source: { localPort: 18_080 }, available: true }],
     error: "publisher unavailable",
   });
   assert.equal(snapshots.at(-1)?.subscriber?.phase, "running");

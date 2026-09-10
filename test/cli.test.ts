@@ -693,7 +693,7 @@ test("publisher setup and run use TOML publisher policy", async () => {
         displayName: "kosmos",
         subscribers: [{ label: "device", publicKey: subscriberKey }],
         services: [
-          { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
+          { id: "navidrome", name: "Navidrome", source: { localPort: 4_533 } },
         ],
       },
     };
@@ -719,7 +719,7 @@ test("publisher setup and run use TOML publisher policy", async () => {
       displayName: "kosmos",
       subscribers: [{ label: "device", publicKey: subscriberKey }],
       services: [
-        { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
+        { id: "navidrome", name: "Navidrome", source: { localPort: 4_533 } },
       ],
     },
   );

@@ -310,10 +310,13 @@ subscribers = []
 [[publisher.services]]
 id = "navidrome"
 name = "Navidrome"
-target_port = 4533</code></pre>
+source = { local_port = 4533 }</code></pre>
             <p>
-              List loopback TCP targets that already run on the publisher device. An empty <code>subscribers</code> list
-              starts in deny-all mode; approving a device later adds its labeled public key to the running policy.
+              A service source is either a loopback port on this publisher or a named service on an upstream publisher
+              that has authorized this publisher's public key. For example, use
+              <code>source = { publisher_key = "&lt;upstream-public-key&gt;", service_id = "navidrome" }</code> for
+              an upstream service. The republisher keeps its own service name and downstream allowlist; the two hops
+              authorize independently. An empty <code>subscribers</code> list starts in deny-all mode.
             </p>
 
             <h3 id="publisher-desktop-identity">Let startup create the identity</h3>
@@ -369,7 +372,7 @@ subscribers = [{ label = "android", public_key = "&lt;subscriber-public-key&gt;"
 [[publisher.services]]
 id = "navidrome"
 name = "Navidrome"
-target_port = 4533</code></pre>
+source = { local_port = 4533 }</code></pre>
             <pre class="docs-code"><code>npm run kepos -- setup publisher \
   --state &lt;publisher-state-directory&gt;</code></pre>
             <p>
@@ -408,6 +411,13 @@ npm run kepos -- subscriber run \
               use the repository's Nix, container, Windows, and NUC deployment guides for process supervision and
               platform-specific lifecycle details.
             </p>
+            <p>
+              Each published service has one explicit <code>source</code>: <code>local_port</code> for a local loopback
+              target, or <code>publisher_key</code> plus <code>service_id</code> for an authorized upstream service.
+              Upstream-backed entries remain visible while unavailable and regain new traffic after recovery; existing
+              streams are not promised continuity across a source edit or outage. The republisher is a trusted
+              plaintext hop, and operators must keep source relationships acyclic.
+            </p>
 
             <p id="architecture" class="docs-related">
               For role commands, Nix and container deployment, Windows packaging, and the transport model, read the
@@ -435,6 +445,10 @@ npm run kepos -- subscriber run \
               <div>
                 <dt>Local approval</dt>
                 <dd>The publisher's labeled subscriber-device policy and optional per-service allowlist decide what an approved subscriber may open.</dd>
+              </div>
+              <div>
+                <dt>Two-hop authorization</dt>
+                <dd>For republication, the upstream allowlists the republisher's publisher key and the republisher independently allowlists its subscribers.</dd>
               </div>
               <div>
                 <dt>No secret copies</dt>

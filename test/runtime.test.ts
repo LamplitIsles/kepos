@@ -561,7 +561,7 @@ test("publisher runtime uses the explicit policy with identity-only state", asyn
         displayName: "kosmos",
         subscribers: [],
         services: [
-          { id: "navidrome", name: "Navidrome", targetPort: 4_533 },
+          { id: "navidrome", name: "Navidrome", source: { localPort: 4_533 } },
         ],
       },
     });

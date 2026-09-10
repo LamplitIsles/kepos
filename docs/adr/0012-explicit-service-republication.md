@@ -1,6 +1,6 @@
 # ADR 0012: Explicit service republication
 
-Status: Accepted design; not implemented
+Status: Accepted and implemented
 
 A publisher may publish local services and explicitly selected services from
 authorized upstream publishers. The republishing publisher owns this selection,
@@ -32,10 +32,13 @@ This design adds no cycle or self-reference detection. Normal forwarding
 resource limits remain applicable; they do not establish that a configuration
 is cycle-free.
 
-The existing dual-role model in ADR 0006 supports the role composition. Service
-source configuration and support for multiple upstream publishers require a
-separate implementation design; this decision does not claim those capabilities
-already exist.
+The existing dual-role model in ADR 0006 supports the role composition. The
+publisher runtime owns one shared outbound connection per configured upstream,
+using the publisher identity and the existing connection recovery and UDP
+carrier machinery. Local and upstream sources share the same downstream
+service protocol and status surfaces. The implementation does not add a second
+subscriber gateway, a per-flow outer connection, or a durable upstream state
+directory.
 
 Upstream connections belong to the publisher runtime and use its existing
 publisher identity. They do not read or alter the separately enabled subscriber
