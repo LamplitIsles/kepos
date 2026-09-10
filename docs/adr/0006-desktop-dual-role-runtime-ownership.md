@@ -103,5 +103,4 @@ controls or filesystem watching.
 - Tray Quit and WebView Quit share one idempotent shutdown that detaches native
   callbacks before stopping the runtimes.
 
-ADR 0006 extends ADR 0004; it does not replace ADR 0004's locking algorithm or
-desktop-singleton rules.
+ADR 0006 extends ADR 0004's lock scopes and desktop-singleton rules.

@@ -4,6 +4,8 @@ Status: Accepted
 
 Date: 2026-07-24
 
+Updated: 2026-09-10
+
 ## Context
 
 Kepos can run a subscriber through either the headless CLI or a desktop app.
@@ -46,16 +48,19 @@ If the state lock cannot be acquired, desktop releases the singleton and exits
 without opening a window. The CLI acquires only the per-state lock, so separate
 CLI subscriber states may run independently.
 
-Every lock stores the local PID and a random owner token. Installation writes a
-private candidate file and atomically hard-links it to the canonical lock path.
-This avoids relying on `open("wx")`: the current Darwin `bare-fs` implementation
-does not preserve the required exclusive-create behavior.
+Each lock path is a persistent, owner-only file opened in writable `a+` mode.
+Kepos asks Holepunch's `fs-native-extensions` for a nonblocking exclusive
+kernel lock on the open descriptor. The descriptor remains reachable for the
+whole runtime lifetime. A second descriptor, including one opened by another
+Kepos runtime in the same process, receives the existing scope-specific
+conflict. The lock file's bytes are not ownership metadata and are ignored.
 
-On release, the process checks both PID and owner token before deleting the
-lock. It cannot delete a replacement owner's lock. If a recorded PID is dead,
-a claimant hard-links the stale inode, verifies that the claim and canonical
-path still name the same two-link inode, and only then replaces it. Malformed
-lock state fails closed because ownership cannot be proved.
+Normal release unlocks and then closes the descriptor. Release is idempotent,
+including concurrent shutdown calls, and all callers observe the same cleanup
+completion. The kernel releases the lock when the owning process dies, so a
+replacement can reuse the unchanged path after a crash even when the old and
+new processes both have PID 1. The lock file itself remains in place; an
+operator must not delete it while a runtime may still be active.
 
 The desktop shutdown order is:
 
@@ -69,8 +74,8 @@ The desktop shutdown order is:
 
 - CLI and desktop cannot concurrently use the same state directory.
 - Only one desktop process can run, even when several `.app` copies exist.
-- A crash may leave lock files, but the next process can reclaim locks whose
-  local PID is no longer alive.
+- A crash may leave lock files, but the kernel releases the descriptor-owned
+  lock and the next process can acquire the unchanged path.
 - The lock is local process coordination, not authentication or a distributed
   lease. It is not intended for shared network filesystems.
 - The per-state path identifies a directory, not the cryptographic key inside
