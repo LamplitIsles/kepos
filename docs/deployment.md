@@ -183,6 +183,15 @@ A cluster deployment must:
 - keep the gateway off public interfaces;
 - give every subscriber deployment its own persistent identity and state lock.
 
+The state lock file is persistent by design. Its presence does not mean that a
+process still owns the identity: ownership is the advisory kernel lock on the
+runtime's open descriptor, and the kernel releases it after a crash. Keep the
+state directory and its sibling lock file on the same local filesystem, and do
+not delete or replace the lock file while the subscriber may still be running.
+After a forced container restart, start Kepos with the unchanged state path;
+the new process can acquire the released kernel lock, including when both
+containers ran as PID 1.
+
 This path has been exercised in a private Kubernetes deployment, including
 pulling the container across regions. That is evidence for feasibility, not a
 promise of supplied manifests, managed DNS, or production support.

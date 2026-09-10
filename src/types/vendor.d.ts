@@ -35,6 +35,16 @@ declare module "which-runtime" {
   export const isWindows: boolean;
 }
 
+declare module "fs-native-extensions" {
+  export function tryLock(
+    fd: number,
+    offset?: number,
+    length?: number,
+    options?: { shared?: boolean },
+  ): boolean;
+  export function unlock(fd: number, offset?: number, length?: number): void;
+}
+
 declare module "bare-native" {
   import { EventEmitter } from "node:events";
 

@@ -425,7 +425,18 @@ subscriber public key.
 
 The CLI locks a subscriber state directory while it owns that identity. The
 publisher and `device run` commands take the matching publisher lock too.
-Different installations must use different identities.
+Different installations must use different identities. Each role lock is the
+stable sibling path beside its state directory, and the desktop singleton uses
+its existing machine-local path.
+
+Kepos owns these scopes with an advisory kernel file lock held by an open
+descriptor. The lock file remains on disk across normal shutdown and a crash;
+its contents do not identify the owner. A live runtime still excludes a second
+CLI, desktop process, or same-process acquisition, while the kernel releases
+ownership after process death so a replacement can restart with the unchanged
+identity directory. Do not manually delete or replace a lock file while a
+runtime may be active. This is local-filesystem coordination, not a
+distributed lease or authentication mechanism.
 
 ## Route and observations
 
