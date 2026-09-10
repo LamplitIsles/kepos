@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { Duplex } from "node:stream";
 import { test } from "node:test";
 
 import { createHomeRegistry } from "../src/home/registry.js";
 import { startHomeServer } from "../src/home/server.js";
+import { readHomeRegistryFromConnection } from "../src/runtime/registry-client.js";
 
 const publisherKey = "ab".repeat(32);
 
@@ -118,6 +120,33 @@ test("Home server exposes the configured Registry", async () => {
   } finally {
     await home.close();
   }
+});
+
+test("Home registry reader accepts a complete response when a carrier closes without end", async () => {
+  const registry = createHomeRegistry({
+    publisherKey,
+    displayName: "carrier-close",
+    services: [{ id: "ssh", name: "SSH", kind: "tcp" }],
+  });
+  const body = Buffer.from(`${JSON.stringify(registry)}\n`);
+  const connection = new Duplex({
+    read() {},
+    write(_chunk, _encoding, callback) {
+      callback();
+    },
+  });
+  const result = readHomeRegistryFromConnection(connection);
+  setImmediate(() => {
+    connection.emit(
+      "data",
+      Buffer.from(
+        `HTTP/1.1 200 OK\r\nContent-Length: ${body.byteLength}\r\nConnection: close\r\n\r\n`,
+      ),
+    );
+    connection.emit("data", body);
+    connection.emit("close");
+  });
+  assert.deepEqual(await result, registry);
 });
 
 async function withHome(run: (home: Awaited<ReturnType<typeof startHomeServer>>) => Promise<void>): Promise<void> {

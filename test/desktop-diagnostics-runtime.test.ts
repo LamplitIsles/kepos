@@ -115,6 +115,7 @@ function runningPublisher(): RunningPublisher {
     denyPairing: () => undefined,
     pairingStatus: () => ({ phase: "idle" }),
     applyPolicy: async () => false,
+    serviceStatus: () => [],
     status: publisherStatus,
     stop: async () => undefined,
   };

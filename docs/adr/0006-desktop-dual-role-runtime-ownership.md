@@ -32,6 +32,13 @@ role keeps its existing state, identity, and connection model:
 - the publisher listens under its own key and keeps one inbound connection per
   active subscriber.
 
+The publisher may additionally consume explicitly selected services from
+authorized upstream publishers. Those outbound connections belong to the
+publisher role and use its publisher key; they never reuse the subscriber
+role's identity, pinned contact, gateway, or local service mappings. Each
+upstream publisher separately authorizes that publisher key, while this
+publisher separately authorizes its own downstream subscribers.
+
 Under ADR 0008, the process owns one shared DHT instance and lends it to every
 enabled role. Desktop never connects its subscriber to its own publisher
 implicitly.
@@ -82,6 +89,8 @@ controls or filesystem watching.
 ## Consequences
 
 - A desktop can consume remote services while sharing local services.
+- A desktop publisher can republish selected upstream TCP, HTTP, or bounded
+  UDP services without turning its subscriber role into an implicit provider.
 - CLI and desktop cannot use the same publisher or subscriber state at once.
 - Two enabled roles share one device-owned DHT and one preferred DHT candidate
   listener. HyperDHT still uses an ephemeral DHT client socket and ephemeral

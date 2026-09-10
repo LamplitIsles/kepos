@@ -11,13 +11,13 @@ import { loadPublisherIdentity, setupPublisher } from "../src/state/publisher.js
 const subscriberKey = "11".repeat(32);
 
 test("publisher service policy defaults TCP and accepts HTTP or UDP", () => {
-  assert.equal(parsePublisherService({ id: "site", name: "Site", targetPort: 8080 }).kind, "tcp");
+  assert.equal(parsePublisherService({ id: "site", name: "Site", source: { localPort: 8080 } }).kind, "tcp");
   assert.equal(
-    parsePublisherService({ id: "site", name: "Site", targetPort: 8080, kind: "http" }).kind,
+    parsePublisherService({ id: "site", name: "Site", source: { localPort: 8080 }, kind: "http" }).kind,
     "http",
   );
   assert.equal(
-    parsePublisherService({ id: "site", name: "Site", targetPort: 8080, kind: "udp" }).kind,
+    parsePublisherService({ id: "site", name: "Site", source: { localPort: 8080 }, kind: "udp" }).kind,
     "udp",
   );
 });
@@ -47,7 +47,7 @@ subscribers = [{ label = "subscriber", public_key = "${subscriberKey}" }]
 id = "site"
 name = "Site"
 kind = "http"
-target_port = 8080
+source = { local_port = 8080 }
 `);
   assert.equal(config.publisher?.services[0]?.kind, "http");
   const source = serializeKeposConfig(config);

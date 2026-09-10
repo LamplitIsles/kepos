@@ -21,15 +21,40 @@
   };
   subscriberLabels = map (subscriber: subscriber.label) cfg.subscribers;
   subscriberKeys = map (subscriber: subscriber.publicKey) cfg.subscribers;
+  sourceType = lib.types.submodule {
+    options = {
+      localPort = lib.mkOption {
+        type = lib.types.nullOr (lib.types.ints.between 1 65535);
+        default = null;
+        description = "Publisher loopback port used as the service source.";
+      };
+      publisherKey = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "[0-9a-f]{64}");
+        default = null;
+        description = "Upstream publisher public key used as the service source.";
+      };
+      serviceId = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching serviceIdPattern);
+        default = null;
+        description = "Service ID selected from the upstream publisher.";
+      };
+    };
+  };
   serviceType = lib.types.submodule {
     options = {
       name = lib.mkOption {
         type = lib.types.nonEmptyStr;
         description = "Human-readable service name shown by Kepos Home.";
       };
-      targetPort = lib.mkOption {
-        type = lib.types.ints.between 1 65535;
-        description = "Publisher loopback TCP port.";
+      kind = lib.mkOption {
+        type = lib.types.enum ["tcp" "http" "udp"];
+        default = "tcp";
+        description = "Published service transport kind.";
+      };
+      source = lib.mkOption {
+        type = sourceType;
+        default = {};
+        description = "Exactly one localPort, or both publisherKey and serviceId.";
       };
       allow = lib.mkOption {
         type = lib.types.nullOr (lib.types.listOf (lib.types.strMatching "[0-9a-f]{64}"));
@@ -42,8 +67,15 @@
     {
       inherit id;
       inherit (service) name;
-      target_port = service.targetPort;
+      source =
+        if service.source.localPort != null then {
+          local_port = service.source.localPort;
+        } else {
+          publisher_key = service.source.publisherKey;
+          service_id = service.source.serviceId;
+        };
     }
+    // lib.optionalAttrs (service.kind != "tcp") { inherit (service) kind; }
     // lib.optionalAttrs (service.allow != null) {
       inherit (service) allow;
     })
@@ -78,7 +110,7 @@ in {
       type = lib.types.package;
       default = pkgs.callPackage ./package.nix {};
       defaultText = lib.literalExpression "pkgs.callPackage ./nix/package.nix {}";
-      description = "Kepos package used by the publisher service.";
+      description = "Kepos package used by the publisher service, including local and authorized-upstream sources.";
     };
 
     stateDir = lib.mkOption {
@@ -108,7 +140,7 @@ in {
     services = lib.mkOption {
       type = lib.types.attrsOf serviceType;
       default = {};
-      description = "Loopback TCP services published over the shared Kepos connection.";
+      description = "Explicit local or authorized-upstream services published over the shared Kepos connection.";
     };
   };
 
@@ -131,6 +163,17 @@ in {
       {
         assertion = lib.length (lib.unique subscriberKeys) == lib.length subscriberKeys;
         message = "services.kepos.publisher.subscribers public keys must be unique";
+      }
+      {
+        assertion = lib.all (service:
+          (service.source.localPort != null
+            && service.source.publisherKey == null
+            && service.source.serviceId == null)
+          || (service.source.localPort == null
+            && service.source.publisherKey != null
+            && service.source.serviceId != null)
+        ) (lib.attrValues cfg.services);
+        message = "services.kepos.publisher.services sources must be local or a complete upstream reference";
       }
     ];
 

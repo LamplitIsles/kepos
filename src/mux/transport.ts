@@ -142,6 +142,10 @@ export interface MuxPublisherOptions {
   serviceAuthorized?: (serviceId: string) => boolean;
   serviceKind?: (serviceId: string) => "tcp" | "http" | "udp";
   serviceTargetPort?: (serviceId: string) => number | undefined;
+  udpRemote?: (
+    serviceId: string,
+    onReply: (flowId: Uint8Array, payload: Uint8Array) => void,
+  ) => import("./udp.js").UdpPublisherRemote | undefined;
   /** Public identity used to add the HTTP forwarding header. */
   subscriberPublicKey?: string;
   metricsContext?: PublisherMetricsContext;
@@ -164,6 +168,7 @@ export interface MuxSubscriberOptions {
     lastPongElapsedMs: number;
     missedPongs: number;
   }) => void;
+  observationRole?: ObservationRole;
   observe?: Observe;
   outerId?: string;
   transportSnapshot?: () => unknown;
@@ -172,6 +177,7 @@ export interface MuxSubscriberOptions {
 export interface RunningMuxPublisher {
   close: () => void;
   closeUdpFlows?: (serviceId?: string) => void;
+  closeServiceChannels?: (serviceId?: string) => void;
 }
 
 export interface RunningMuxSubscriber {
@@ -882,7 +888,7 @@ export function createMuxSubscriber(
       const id = crypto.randomBytes(16);
       const emit = createObservationEmitter({
         observe: options.observe,
-        role: "subscriber",
+        role: options.observationRole ?? "subscriber",
         outerId,
         channelId: b4a.toString(id, "hex"),
         serviceId,
@@ -992,6 +998,7 @@ function pairPublisherServiceProtocol(
   options: MuxPublisherOptions,
   now: () => number,
   outerId: string,
+  activeServiceChannels: Set<{ serviceId: string; stream: MuxTunnel }>,
 ): void {
   mux.pair({ protocol }, (id) => {
     let serviceId: string | undefined;
@@ -1019,6 +1026,9 @@ function pairPublisherServiceProtocol(
       async (openedServiceId) => {
         serviceId = openedServiceId;
         emit("channel.open");
+        const activeChannel = { serviceId: openedServiceId, stream: tunnel.stream };
+        activeServiceChannels.add(activeChannel);
+        tunnel.stream.once("close", () => activeServiceChannels.delete(activeChannel));
         try {
           tunnel.stream.setPublisherToSubscriberRateLimiter(
             options.publisherToSubscriberRateLimiter?.(openedServiceId),
@@ -1029,6 +1039,10 @@ function pairPublisherServiceProtocol(
             );
           }
           const target = await options.connect(openedServiceId);
+          if (tunnel.stream.destroyed) {
+            target.destroy();
+            return;
+          }
           tunnel.stream.accept();
           tunnel.messages.status.send("");
           if (options.metrics && options.metricsContext) {
@@ -1089,11 +1103,16 @@ export function createMuxPublisher(
   let pairingChannel: MuxChannel | undefined;
   let pairingOpened = false;
   const controlChannels = new Set<MuxChannel>();
+  const activeServiceChannels = new Set<{
+    serviceId: string;
+    stream: MuxTunnel;
+  }>();
   const udp = createUdpPublisherForwarder(outer, {
     authorized: () => authorized,
     serviceAuthorized: options.serviceAuthorized,
     serviceKind: (serviceId) => options.serviceKind?.(serviceId) ?? "tcp",
-    targetPort: (serviceId) => options.serviceTargetPort?.(serviceId),
+    localTargetPort: (serviceId) => options.serviceTargetPort?.(serviceId),
+    remoteForService: options.udpRemote,
     publisherToSubscriberRateLimiter: options.publisherToSubscriberRateLimiter,
     now,
   });
@@ -1104,7 +1123,13 @@ export function createMuxPublisher(
     for (const channel of pairPublisherControlChannel(mux, options)) {
       controlChannels.add(channel);
     }
-    pairPublisherServiceProtocol(mux, options, now, outerId);
+    pairPublisherServiceProtocol(
+      mux,
+      options,
+      now,
+      outerId,
+      activeServiceChannels,
+    );
   };
 
   if (options.authorized ?? true) installAuthorizedProtocols();
@@ -1196,9 +1221,20 @@ export function createMuxPublisher(
       for (const channel of controlChannels) channel.close();
       controlChannels.clear();
       udp.close();
+      for (const channel of activeServiceChannels) {
+        channel.stream.closeFrom("publisher.close");
+      }
+      activeServiceChannels.clear();
       outer.destroy();
     },
     closeUdpFlows: (serviceId?: string) => udp.closeFlows(serviceId),
+    closeServiceChannels: (serviceId?: string) => {
+      for (const channel of [...activeServiceChannels]) {
+        if (serviceId === undefined || channel.serviceId === serviceId) {
+          channel.stream.closeFrom("publisher.service-policy");
+        }
+      }
+    },
   };
 }
 

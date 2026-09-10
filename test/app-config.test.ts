@@ -45,7 +45,7 @@ subscribers = [{ label = "phone", public_key = "${subscriberKey}" }]
 [[publisher.services]]
 id = "navidrome"
 name = "Navidrome"
-target_port = 4533
+source = { local_port = 4533 }
 allow = ["${subscriberKey}"]
 
 [subscriber]
@@ -67,7 +67,7 @@ local_port = 2222
           {
             id: "navidrome",
             name: "Navidrome",
-            targetPort: 4533,
+            source: { localPort: 4533 },
             allow: [subscriberKey],
           },
         ],
@@ -141,12 +141,63 @@ subscribers = []
 id = "ssh"
 name = "SSH"
 kind = "tcp"
-target_port = 22
+source = { local_port = 22 }
 `);
 
   assert.deepEqual(config.publisher?.services, [
-    { id: "ssh", name: "SSH", kind: "tcp", targetPort: 22 },
+    { id: "ssh", name: "SSH", kind: "tcp", source: { localPort: 22 } },
   ]);
+});
+
+test("shared config round-trips an explicit upstream service source", () => {
+  const publisherKey = "22".repeat(32);
+  const config = parseKeposConfig(`
+[publisher]
+display_name = "republisher"
+subscribers = []
+
+[[publisher.services]]
+id = "remote-site"
+name = "Remote site"
+kind = "http"
+source = { publisher_key = "${publisherKey}", service_id = "site" }
+`);
+
+  assert.deepEqual(config.publisher?.services, [
+    {
+      id: "remote-site",
+      name: "Remote site",
+      kind: "http",
+      source: { publisherKey, serviceId: "site" },
+    },
+  ]);
+  assert.deepEqual(parseKeposConfig(serializeKeposConfig(config)), config);
+});
+
+test("shared config rejects ambiguous or incomplete service sources", () => {
+  const publisherKey = "22".repeat(32);
+  for (const source of [
+    `{ local_port = 3000, publisher_key = "${publisherKey}", service_id = "site" }`,
+    `{ local_port = 3000, service_id = "site" }`,
+    `{ publisher_key = "${publisherKey}" }`,
+    `{ service_id = "site" }`,
+    `{ }`,
+  ]) {
+    assert.throws(
+      () =>
+        parseKeposConfig(`
+[publisher]
+display_name = "republisher"
+subscribers = []
+
+[[publisher.services]]
+id = "remote-site"
+name = "Remote site"
+source = ${source}
+`),
+      /source|upstream|local/i,
+    );
+  }
 });
 
 test("shared config round-trips a fixed-target UDP service and mapping", () => {
@@ -159,7 +210,7 @@ subscribers = []
 id = "stardew"
 name = "Stardew direct IP"
 kind = "udp"
-target_port = 24642
+source = { local_port = 24642 }
 
 [subscriber]
 
@@ -174,7 +225,7 @@ local_port = 24642
       id: "stardew",
       name: "Stardew direct IP",
       kind: "udp",
-      targetPort: 24_642,
+      source: { localPort: 24_642 },
     },
   ]);
   assert.deepEqual(config.subscriber?.services, [
@@ -193,7 +244,7 @@ subscribers = []
 id = "forgejo"
 name = "Forgejo"
 kind = "http"
-target_port = 3000
+source = { local_port = 3000 }
 max_publisher_to_subscriber_bps = 2000000
 `;
   const config = parseKeposConfig(source);
@@ -202,7 +253,7 @@ max_publisher_to_subscriber_bps = 2000000
       id: "forgejo",
       name: "Forgejo",
       kind: "http",
-      targetPort: 3000,
+      source: { localPort: 3000 },
       maxPublisherToSubscriberBps: 2_000_000,
     },
   ]);
@@ -225,7 +276,7 @@ subscribers = []
 [[publisher.services]]
 id = "forgejo"
 name = "Forgejo"
-target_port = 3000
+source = { local_port = 3000 }
 max_publisher_to_subscriber_bps = ${value}
 `),
       /max_publisher_to_subscriber_bps|positive|safe|integer|losslessly/i,
@@ -241,7 +292,7 @@ subscribers = []
 [[publisher.services]]
 id = "forgejo"
 name = "Forgejo"
-target_port = 3000
+source = { local_port = 3000 }
 max_publisher_to_subscriber_bps = true
 `),
     /maxPublisherToSubscriberBps|positive|safe|integer/i,
@@ -356,7 +407,7 @@ test("shared config atomically persists the validated desktop shape", async () =
         {
           id: "dagger",
           name: "Dagger",
-          targetPort: 18_080,
+          source: { localPort: 18_080 },
           allow: ["11".repeat(32)],
         },
       ],

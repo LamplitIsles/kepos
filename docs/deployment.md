@@ -38,11 +38,12 @@ Import and configure the module:
     services = {
       ssh = {
         name = "SSH";
-        targetPort = 22;
+        source.localPort = 22;
       };
       navidrome = {
         name = "Navidrome";
-        targetPort = 4533;
+        kind = "http";
+        source.localPort = 4533;
         allow = ["<subscriber-public-key>"];
       };
     };
@@ -50,10 +51,30 @@ Import and configure the module:
 }
 ```
 
-The Home Manager module currently publishes only raw `tcp` services: its
-`services.<id>` schema has no `kind` option. Use a TOML publisher configuration
-for a `kind = "http"` target rather than adding an unsupported Nix attribute;
-see [the HTTP service contract](cli.md#http-service-device-authentication).
+Each Home Manager service has an explicit `source`: set `source.localPort` for
+a loopback service, or set `source.publisherKey` and `source.serviceId` for an
+authorized upstream service. `kind` defaults to `tcp` and may be `http` or
+`udp`.
+
+For example, a republisher can select an upstream service while retaining its
+own downstream policy:
+
+```nix
+services.kepos.publisher.services.remote-navidrome = {
+  name = "Remote Navidrome";
+  kind = "http";
+  source = {
+    publisherKey = "<upstream-publisher-public-key>";
+    serviceId = "navidrome";
+  };
+};
+```
+
+The upstream publisher must list the republisher's publisher key as an
+authorized subscriber. The republisher's `subscribers` and service `allow`
+values independently authorize downstream devices. A selected upstream that
+is unavailable stays in the generated registry with a bounded unavailable
+status and resumes new traffic after recovery.
 
 On first start, the user service runs `setup publisher --state` to create the
 seed-only `publisher.json` under `$XDG_STATE_HOME/kepos-neo/publisher`.

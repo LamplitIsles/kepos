@@ -145,14 +145,20 @@ export function serializeKeposConfig(config: KeposConfig): string {
           id,
           name,
           kind,
-          targetPort,
+          source,
           allow,
           maxPublisherToSubscriberBps,
         }) => ({
           id,
           name,
           ...(kind === undefined ? {} : { kind }),
-          target_port: targetPort,
+          source:
+            "localPort" in source
+              ? { local_port: source.localPort }
+              : {
+                  publisher_key: source.publisherKey,
+                  service_id: source.serviceId,
+                },
           ...(allow === undefined ? {} : { allow }),
           ...(maxPublisherToSubscriberBps === undefined
             ? {}
@@ -255,16 +261,36 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
         "id",
         "name",
         "kind",
-        "target_port",
+        "source",
         "allow",
         "max_publisher_to_subscriber_bps",
       ],
     );
+    const source = requireTable(service.source, `publisher.services[${index}].source`);
+    rejectUnknownFields(
+      source,
+      [`publisher.services[${index}].source`],
+      ["local_port", "publisher_key", "service_id"],
+    );
+    const hasLocalPort = Object.prototype.hasOwnProperty.call(source, "local_port");
+    const hasPublisherKey = Object.prototype.hasOwnProperty.call(source, "publisher_key");
+    const hasServiceId = Object.prototype.hasOwnProperty.call(source, "service_id");
+    if (hasLocalPort && (hasPublisherKey || hasServiceId)) {
+      throw new Error(
+        `publisher.services[${index}].source must describe either a local or upstream source`,
+      );
+    }
+    const sourceValue = hasLocalPort
+      ? { localPort: source.local_port }
+      : {
+          ...(hasPublisherKey ? { publisherKey: source.publisher_key } : {}),
+          ...(hasServiceId ? { serviceId: source.service_id } : {}),
+        };
     return {
       id: service.id,
       name: service.name,
       ...(service.kind === undefined ? {} : { kind: service.kind }),
-      targetPort: service.target_port,
+      source: sourceValue,
       ...(service.allow === undefined ? {} : { allow: service.allow }),
       ...(service.max_publisher_to_subscriber_bps === undefined
         ? {}
@@ -305,7 +331,7 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
           id,
           name,
           kind,
-          targetPort,
+          source,
           allow,
           maxPublisherToSubscriberBps,
         },
@@ -314,7 +340,7 @@ function parsePublisher(value: unknown): PublisherRuntimePolicy {
         id,
         name,
         ...(rawServices[index]?.kind === undefined ? {} : { kind }),
-        targetPort,
+        source,
         ...(allow === undefined ? {} : { allow }),
         ...(maxPublisherToSubscriberBps === undefined
           ? {}

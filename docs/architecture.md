@@ -30,18 +30,19 @@ browser / SSH / native client
           v
         publisher
           |
-          | loopback TCP or fixed-target UDP
+          | configured local source, or one authenticated upstream connection
           v
-    Navidrome / SSH / another service
+    local service / upstream publisher
 ```
 
 The local TCP connection terminates at the subscriber and a separate local TCP
-connection starts at the publisher. For UDP, the subscriber's loopback
-datagram endpoint is mapped to a publisher-side connected IPv4 socket for the
-configured target. Kepos moves TCP payload bytes, lifecycle messages, and
-backpressure through Protomux; UDP payloads retain datagram boundaries and use
-the encrypted unordered SecretStream message API. TCP/UDP headers and TCP
-acknowledgements do not cross the peer connection.
+connection starts at the immediate publisher or republisher. For UDP, the
+subscriber's loopback datagram endpoint is mapped to a publisher-side
+connected IPv4 socket for a local source, or to a flow on the republisher's
+authenticated upstream carrier. Kepos moves TCP payload bytes, lifecycle
+messages, and backpressure through Protomux; UDP payloads retain datagram
+boundaries and use the encrypted unordered SecretStream message API.
+TCP/UDP headers and TCP acknowledgements do not cross the peer connection.
 
 The default `tcp` kind is byte-transparent. A publisher may instead opt a
 plaintext HTTP/1.1 target into `http`: a framing-aware publisher-side adapter
@@ -78,6 +79,30 @@ publisher has authenticated and authorized the subscriber. Bootstrap, DHT, and
 transport components cannot add a device to a publisher subscriber-device
 policy.
 
+### Service sources and republication
+
+A publisher service has exactly one source. `source.localPort` selects a
+fixed loopback service on that publisher. `source.publisherKey` together with
+`source.serviceId` selects a named service from an explicitly authorized
+upstream publisher. The downstream publisher owns the public ID, name, and
+subscriber allowlist; the upstream publisher authorizes the republisher's
+publisher key through its ordinary subscriber policy. No downstream device
+identity is delegated to the upstream hop.
+
+The publisher runtime owns one outbound authenticated connection per distinct
+configured upstream and shares its TCP/HTTP opens and UDP carrier across the
+local aliases that reference it. The republisher is a trusted plaintext
+processing hop. A TCP/HTTP stream and a UDP flow are still terminated and
+recreated at each hop, so a source outage or policy edit closes affected
+resources rather than promising session continuity. Home and desktop surfaces
+retain configured upstream entries and mark them unavailable with a bounded
+reason; healthy local services and other upstreams continue independently.
+
+One-hop republication is the accepted validation topology, not a protocol hop
+limit. Kepos does not discover or import an upstream registry, fail over to a
+different source, or detect cycles/self-reference. Operators select sources
+explicitly and keep the resulting service relationships acyclic.
+
 ## Holepunch stack
 
 Kepos uses the Holepunch networking primitives directly rather than presenting
@@ -97,9 +122,11 @@ a generic VPN abstraction:
 
 A dual-role device owns one HyperDHT node and lends it to the publisher and
 subscriber roles. That shared transport does not merge their identities,
-allowlists, state directories, locks, or wire protocols. Standalone CLI role
-commands can still own independent nodes when separate transport policy or
-failure isolation is required.
+allowlists, state directories, locks, or wire protocols. Publisher-owned
+upstream connections use the publisher identity and do not reuse the
+separately pinned subscriber contact. Standalone CLI role commands can still
+own independent nodes when separate transport policy or failure isolation is
+required.
 
 The detailed layer model, NAT behavior, relay terminology, and compatibility
 limits live in [Network transport and compatibility](network-transport-and-compatibility.md).
@@ -201,9 +228,11 @@ identity.
 A headless publisher requires a complete `[publisher]` TOML policy at startup
 and reconciles valid changes while it runs. Removing a subscriber device closes
 its active connection; new devices and service authorizations appear
-immediately. Desktop **Add device** is a special live Android pairing path:
-approval persists the new labeled device to TOML, updates the in-memory policy,
-and promotes the final connection without a second NAT traversal.
+immediately. Source, transport-kind, or service ACL changes close affected
+service streams and UDP flows so stale forwarding cannot continue. Desktop
+**Add device** is a special live Android pairing path: approval persists the new
+labeled device to TOML, updates the in-memory policy, and promotes the final
+connection without a second NAT traversal.
 
 Publisher metrics are an optional `GET /metrics` endpoint. Its stable labels
 are a subscriber-local label, a short public-key fingerprint, service, and

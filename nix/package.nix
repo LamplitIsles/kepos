@@ -66,7 +66,7 @@ in
     '';
 
     meta = {
-      description = "Persistent P2P access to a publisher's local TCP services";
+      description = "Persistent P2P access to local and authorized-upstream TCP, HTTP, and bounded UDP services";
       homepage = "https://github.com/LamplitIsles/kepos";
       license = lib.licenses.asl20;
       mainProgram = "kepos";

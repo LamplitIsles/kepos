@@ -70,27 +70,27 @@ subscribers = [
 [[publisher.services]]
 id = "ssh"
 name = "SSH"
-target_port = 22
+source = { local_port = 22 }
 
 [[publisher.services]]
 id = "navidrome"
 name = "Navidrome"
 kind = "http"
-target_port = 4533
+source = { local_port = 4533 }
 allow = ["<subscriber-public-key>"]
 
 [[publisher.services]]
 id = "forgejo"
 name = "Forgejo"
 kind = "http"
-target_port = 3000
+source = { local_port = 3000 }
 max_publisher_to_subscriber_bps = 2000000
 
 [[publisher.services]]
 id = "stardew"
 name = "Stardew direct IP"
 kind = "udp"
-target_port = 24642
+source = { local_port = 24642 }
 
 [subscriber]
 enabled = true
@@ -118,6 +118,34 @@ complete runtime policy. `enabled` controls desktop auto-start only. Identities
 and the subscriber's pinned publisher contact always stay in the state
 directory.
 
+Every published service has exactly one explicit `source`. Use
+`source = { local_port = <port> }` for a loopback service, or
+`source = { publisher_key = "<upstream-public-key>", service_id = "<id>" }`
+for a named service on an upstream publisher. The upstream must allow this
+publisher's public key in its subscriber policy; the republishing publisher's
+own `subscribers` and per-service `allow` values independently control its
+downstream devices. The republishing publisher handles plaintext traffic at
+each hop, and operators keep source relationships acyclic. A source remains
+configured when its upstream is unreachable, but is reported unavailable until
+the upstream connection and named service recover.
+
+For example, a publisher can expose an upstream HTTP and UDP service under its
+own names while retaining a local SSH service:
+
+```toml
+[[publisher.services]]
+id = "remote-navidrome"
+name = "Remote Navidrome"
+kind = "http"
+source = { publisher_key = "<upstream-public-key>", service_id = "navidrome" }
+
+[[publisher.services]]
+id = "remote-stardew"
+name = "Remote Stardew"
+kind = "udp"
+source = { publisher_key = "<upstream-public-key>", service_id = "stardew" }
+```
+
 Create the publisher identity independently with its state path; setup reads
 only `--state`. The TOML supplies the publisher policy when the runtime starts:
 
@@ -129,9 +157,11 @@ npm run kepos -- setup publisher \
 The headless publisher polls its selected TOML policy every second while it
 runs. Valid changes apply without restarting the process, publisher identity, or
 DHT listener. Removing a subscriber device from the policy disconnects only
-that subscriber and denies reconnects; service-list, target, and service ACL
-changes affect the next Home-registry request and newly opened service
-channels, while existing service tunnels drain normally. Invalid or incomplete
+that subscriber and denies reconnects; service-list, source, transport-kind,
+and service ACL changes affect the next Home-registry request and newly opened
+service channels, while affected existing service tunnels and UDP flows close
+so they cannot continue using an obsolete source or authorization decision.
+Invalid or incomplete
 TOML keeps the last valid policy and reports a reload failure. Desktop's **Add
 device** approval is different: it updates both TOML and the running desktop
 publisher.
@@ -157,7 +187,7 @@ publisher-to-subscriber direction:
 id = "forgejo"
 name = "Forgejo"
 kind = "http"
-target_port = 3000
+source = { local_port = 3000 }
 max_publisher_to_subscriber_bps = 2000000
 ```
 
@@ -171,15 +201,16 @@ opened channels; existing channels keep the limit they had when they opened.
 
 ## UDP services
 
-Publish a UDP service with `kind = "udp"` and a fixed loopback target. The
-publisher never accepts a subscriber-selected host or port:
+Publish a UDP service with `kind = "udp"` and either a fixed local source or an
+explicit upstream source. The publisher never accepts a subscriber-selected
+host or port:
 
 ```toml
 [[publisher.services]]
 id = "stardew"
 name = "Stardew direct IP"
 kind = "udp"
-target_port = 24642
+source = { local_port = 24642 }
 allow = ["<subscriber-public-key>"]
 ```
 
@@ -192,9 +223,10 @@ kind = "udp"
 local_port = 24642
 ```
 
-The desktop service card copies `127.0.0.1:24642`; it does not open a browser
-URL. A zero `local_port` selects an available loopback port, which the desktop
-shows and copies after the listener binds. The CLI spelling is
+The desktop service card copies `127.0.0.1:24642` for the subscriber-side
+listener; it does not open a browser URL. A zero `local_port` selects an
+available loopback port, which the desktop shows and copies after the listener
+binds. The CLI spelling is
 `--service stardew:udp:24642` (the existing two-part `id:local-port` spelling
 continues to mean TCP).
 

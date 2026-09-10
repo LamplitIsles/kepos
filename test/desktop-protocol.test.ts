@@ -18,7 +18,7 @@ const snapshot: DesktopSnapshot = {
     activeSubscribers: 1,
     activeSubscriberKeys: ["cd".repeat(32)],
     acceptedConnections: 2,
-    services: [{ id: "site", name: "Site", targetPort: 8080 }],
+    services: [{ id: "site", name: "Site", source: { localPort: 8080 }, available: true }],
   },
   subscriber: {
     phase: "running",

@@ -28,7 +28,11 @@ import {
 } from "../pairing/publisher.js";
 import type { PairingRequest } from "../pairing/protocol.js";
 import { loadPublisherIdentity } from "../state/publisher.js";
-import type { PublisherService, SubscriberDevice } from "../config.js";
+import type {
+  PublisherService,
+  PublisherServiceSource,
+  SubscriberDevice,
+} from "../config.js";
 import {
   createPublisherMetricsRecorder,
   type PublisherMetricsRecorder,
@@ -39,6 +43,11 @@ import {
   type RunningMetricsServer,
 } from "../metrics/server.js";
 import { cleanupAll } from "./cleanup.js";
+import {
+  createUpstreamConnectionManager,
+  type RunningUpstreamConnectionManager,
+  type UpstreamServiceStatus,
+} from "./upstream.js";
 
 const maximumPairingCandidates = 3;
 export type PublisherRuntimeService = Omit<PublisherService, "kind"> & {
@@ -80,6 +89,15 @@ export interface PublisherRuntimeStatus {
   pairing: PublisherPairingSnapshot;
 }
 
+export interface PublisherRuntimeServiceStatus {
+  id: string;
+  name: string;
+  kind?: PublisherRuntimeService["kind"];
+  source: PublisherServiceSource;
+  available: boolean;
+  error?: string;
+}
+
 export interface RunningPublisher {
   publisherKey: string;
   home: RunningHomeServer;
@@ -92,6 +110,7 @@ export interface RunningPublisher {
   pairingStatus: () => PublisherPairingSnapshot;
   metrics?: RunningMetricsServer;
   applyPolicy: (policy: PublisherRuntimePolicy) => Promise<boolean>;
+  serviceStatus: () => PublisherRuntimeServiceStatus[];
   status: () => PublisherRuntimeStatus;
   stop: () => Promise<void>;
 }
@@ -117,16 +136,53 @@ export async function startPublisher(
     policy.subscribers.map((device) => [device.publicKey, device]),
   );
   let appliedPolicy = clonePolicy(policy);
+  const ownsDht = options.dht === undefined;
+  const dht =
+    options.dht ?? createDht({ bootstrap: options.bootstrap, keyPair });
+  const now = options.now ?? Date.now;
   const metrics: PublisherMetricsRecorder = createPublisherMetricsRecorder(
     policy,
-    options.now ?? Date.now,
+    now,
   );
-  const home = await startHomeServer({
+  const subscriberHomes = new Map<string, Promise<RunningHomeServer>>();
+  let home: RunningHomeServer;
+  let stopped = false;
+  let registryUpdate: Promise<void> = Promise.resolve();
+  let upstreams: RunningUpstreamConnectionManager;
+  const updateHomeRegistries = (): void => {
+    registryUpdate = registryUpdate.then(async () => {
+      const publisherServices = [...services.values()].map((service) =>
+        registryService(service, upstreams),
+      );
+      home?.updateRegistry({ displayName, services: publisherServices });
+      await Promise.all(
+        [...subscriberHomes.entries()].map(async ([subscriberKey, starting]) => {
+          const subscriberHome = await starting;
+          subscriberHome.updateRegistry({
+            displayName,
+            services: [...services.values()]
+              .filter((service) => serviceAllows(service, subscriberKey))
+              .map((service) => registryService(service, upstreams)),
+          });
+        }),
+      );
+    }).catch(() => undefined);
+  };
+  upstreams = createUpstreamConnectionManager({
+    dht,
+    keyPair,
+    now,
+    observe: options.observe,
+    log: options.log,
+    onStatusChange: updateHomeRegistries,
+  });
+  home = await startHomeServer({
     publisherKey,
     displayName,
-    services: [...services.values()].map(registryService),
+    services: [...services.values()].map((service) =>
+      registryService(service, upstreams),
+    ),
   });
-  const subscriberHomes = new Map<string, Promise<RunningHomeServer>>();
   const subscriberHome = (
     subscriberKey: string,
   ): Promise<RunningHomeServer> => {
@@ -137,7 +193,7 @@ export async function startPublisher(
       displayName,
       services: [...services.values()]
         .filter((service) => serviceAllows(service, subscriberKey))
-        .map(registryService),
+        .map((service) => registryService(service, upstreams)),
     });
     subscriberHomes.set(subscriberKey, starting);
     void starting.catch(() => subscriberHomes.delete(subscriberKey));
@@ -163,10 +219,6 @@ export async function startPublisher(
       metrics.applyPolicy(appliedPolicy);
     },
   });
-  const ownsDht = options.dht === undefined;
-  const dht =
-    options.dht ?? createDht({ bootstrap: options.bootstrap, keyPair });
-  const now = options.now ?? Date.now;
   const serviceRateLimiters = new Map<
     string,
     { rateBps: number; limiter: TokenBucketRateLimiter }
@@ -206,7 +258,6 @@ export async function startPublisher(
   let pendingCandidateAdmissions = 0;
   let cancelPairingExpiry: (() => void) | undefined;
   let accepted = 0;
-  let stopped = false;
   let metricsServer: RunningMetricsServer | undefined;
 
   function closePairingCandidates(): void {
@@ -386,14 +437,29 @@ export async function startPublisher(
               `Service is not allowed for this subscriber: ${serviceId}`,
             );
           }
-          return connectLoopback(service.targetPort);
+          if ("localPort" in service.source) {
+            return connectLoopback(service.source.localPort);
+          }
+          return upstreams.open(service.source, service.kind);
         },
         serviceAuthorized: (serviceId) => {
           const service = services.get(serviceId);
           return service !== undefined && serviceAllows(service, subscriberKey);
         },
         serviceKind: (serviceId) => services.get(serviceId)?.kind ?? "tcp",
-        serviceTargetPort: (serviceId) => services.get(serviceId)?.targetPort,
+        serviceTargetPort: (serviceId) => {
+          const service = services.get(serviceId);
+          return service && "localPort" in service.source
+            ? service.source.localPort
+            : undefined;
+        },
+        udpRemote: (serviceId, onReply) => {
+          const service = services.get(serviceId);
+          if (!service || service.kind !== "udp" || !("publisherKey" in service.source)) {
+            return undefined;
+          }
+          return upstreams.udpRemote(service.source, onReply);
+        },
         subscriberPublicKey: subscriberKey,
         publisherToSubscriberRateLimiter,
         metricsContext,
@@ -436,12 +502,14 @@ export async function startPublisher(
       ...(metricsServer ? [() => metricsServer!.close()] : []),
       () => server.close(),
       () => home.close(),
+      () => upstreams.stop(),
       ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
     ]).catch(() => undefined);
     throw error;
   }
 
   options.log?.(`Publisher ready: ${publisherKey}`);
+  upstreams.reconcile([...services.values()]);
 
   let policyApplication: Promise<void> = Promise.resolve();
   const applyPolicy = (nextPolicy: PublisherRuntimePolicy): Promise<boolean> => {
@@ -455,6 +523,20 @@ export async function startPublisher(
             !next.subscribers.some((device) => device.publicKey === subscriberKey),
         ),
       );
+      const previousServices = new Map(
+        appliedPolicy.services.map((service) => [service.id, service]),
+      );
+      const changedServices = new Set<string>();
+      for (const serviceId of new Set([
+        ...previousServices.keys(),
+        ...next.services.map((service) => service.id),
+      ])) {
+        const previous = previousServices.get(serviceId);
+        const current = next.services.find((service) => service.id === serviceId);
+        if (!previous || !current || serviceForwardingFingerprint(previous) !== serviceForwardingFingerprint(current)) {
+          changedServices.add(serviceId);
+        }
+      }
       displayName = next.displayName;
       services = new Map(
         next.services.map((service) => [service.id, service]),
@@ -468,25 +550,16 @@ export async function startPublisher(
       subscribers = new Map(
         next.subscribers.map((device) => [device.publicKey, device]),
       );
+      upstreams.reconcile([...services.values()]);
       metrics.applyPolicy(next);
       appliedPolicy = next;
-      home.updateRegistry({
-        displayName,
-        services: [...services.values()].map(registryService),
-      });
-      await Promise.all(
-        [...subscriberHomes.entries()].map(async ([subscriberKey, starting]) => {
-          const subscriberHome = await starting;
-          subscriberHome.updateRegistry({
-            displayName,
-            services: [...services.values()]
-              .filter((service) => serviceAllows(service, subscriberKey))
-              .map(registryService),
-          });
-        }),
-      );
+      updateHomeRegistries();
+      await registryUpdate;
       for (const [subscriberKey, current] of activeBySubscriberKey) {
-        current.mux.closeUdpFlows?.();
+        for (const serviceId of changedServices) {
+          current.mux.closeServiceChannels?.(serviceId);
+          current.mux.closeUdpFlows?.(serviceId);
+        }
         if (removedSubscribers.has(subscriberKey)) current.mux.close();
       }
       return true;
@@ -554,6 +627,20 @@ export async function startPublisher(
     pairingStatus: () => pairing.snapshot(),
     metrics: metricsServer,
     applyPolicy,
+    serviceStatus: () =>
+      [...services.values()].map((service) => {
+        const status: UpstreamServiceStatus = "publisherKey" in service.source
+          ? upstreams.status(service.source, service.kind)
+          : { available: true };
+        return {
+          id: service.id,
+          name: service.name,
+          ...(service.kind === undefined ? {} : { kind: service.kind }),
+          source: service.source,
+          available: status.available,
+          ...(status.error ? { error: status.error } : {}),
+        };
+      }),
     status: () => ({
       role: "publisher",
       state: stopped ? "stopped" : "running",
@@ -575,6 +662,7 @@ export async function startPublisher(
         ...(metricsServer ? [() => metricsServer!.close()] : []),
         () => server.close(),
         () => home.close(),
+        () => upstreams.stop(),
         ...[...subscriberHomes.values()].map(
           (starting) => async () => (await starting).close(),
         ),
@@ -592,11 +680,11 @@ function clonePolicy(policy: PublisherRuntimePolicy): PublisherRuntimePolicy {
       label,
     })),
     services: policy.services.map(
-      ({ id, name, kind, targetPort, allow, maxPublisherToSubscriberBps }) => ({
+      ({ id, name, kind, source, allow, maxPublisherToSubscriberBps }) => ({
         id,
         name,
         ...(kind === undefined ? {} : { kind }),
-        targetPort,
+        source: { ...source },
         ...(allow === undefined ? {} : { allow: [...allow] }),
         ...(maxPublisherToSubscriberBps === undefined
           ? {}
@@ -624,11 +712,11 @@ function policyFingerprint(policy: PublisherRuntimePolicy): string {
           left.label.localeCompare(right.label),
       ),
     services: policy.services.map(
-      ({ id, name, kind, targetPort, allow, maxPublisherToSubscriberBps }) => ({
+      ({ id, name, kind, source, allow, maxPublisherToSubscriberBps }) => ({
         id,
         name,
         kind: kind ?? "tcp",
-        targetPort,
+        source,
         ...(allow === undefined ? {} : { allow: [...new Set(allow)].sort() }),
         ...(maxPublisherToSubscriberBps === undefined
           ? {}
@@ -645,13 +733,32 @@ function serviceAllows(
   return service.allow === undefined || service.allow.includes(subscriberKey);
 }
 
+function serviceForwardingFingerprint(service: PublisherRuntimeService): string {
+  return JSON.stringify({
+    kind: service.kind ?? "tcp",
+    source: service.source,
+    allow: service.allow === undefined ? undefined : [...new Set(service.allow)].sort(),
+  });
+}
+
 function registryService(
   service: PublisherRuntimeService,
-): { id: string; name: string; kind: "tcp" | "udp" } {
+  upstreams?: RunningUpstreamConnectionManager,
+): {
+  id: string;
+  name: string;
+  kind: "tcp" | "udp";
+  available?: boolean;
+  error?: string;
+} {
+  const status = "publisherKey" in service.source && upstreams
+    ? upstreams.status(service.source, service.kind)
+    : { available: true };
   return {
     id: service.id,
     name: service.name,
     kind: service.kind === "udp" ? "udp" : "tcp",
+    ...(status.available ? {} : { available: false, ...(status.error ? { error: status.error } : {}) }),
   };
 }
 

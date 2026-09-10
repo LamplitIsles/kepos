@@ -55,11 +55,11 @@ function policy(subscribers = devices) {
     displayName: "publisher",
     subscribers,
     services: [
-      { id: "ssh", name: "SSH", targetPort: 22 },
+      { id: "ssh", name: "SSH", source: { localPort: 22 } },
       {
         id: "private",
         name: "Private",
-        targetPort: 23,
+        source: { localPort: 23 },
         allow: [subscriberKey],
       },
     ],
@@ -157,7 +157,7 @@ test("metrics recorder keeps offline zeros, reset gauges, counters, and policy r
 
   recorder.applyPolicy({
     ...policy([{ label: "phone", publicKey: subscriberKey }, { label: "laptop", publicKey: publisherKey }]),
-    services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
+    services: [{ id: "ssh", name: "SSH", source: { localPort: 22 } }],
   });
   exposition = recorder.render();
   assert.doesNotMatch(exposition, /subscriber_label="tablet"/);
@@ -167,7 +167,7 @@ test("metrics recorder keeps offline zeros, reset gauges, counters, and policy r
   recorder.serviceChannelOpened(metricsContext("outer-3"), "ssh");
   recorder.serviceBytes(metricsContext("outer-3"), "ssh", "publisher_to_subscriber", 13);
   recorder.applyPolicy({ ...policy(), services: [] });
-  recorder.applyPolicy({ ...policy(), services: [{ id: "ssh", name: "SSH", targetPort: 22 }] });
+  recorder.applyPolicy({ ...policy(), services: [{ id: "ssh", name: "SSH", source: { localPort: 22 } }] });
   assert.match(
     recorder.render(),
     /service_active_channels\{service="ssh"[^}]+\} 0/,
@@ -216,7 +216,7 @@ test("metrics preserve draining service traffic across ACL revocation and regran
     ...policy(),
     services: [
       policy().services[0],
-      { id: "private", name: "Private", targetPort: 23, allow: [secondSubscriberKey] },
+      { id: "private", name: "Private", source: { localPort: 23 }, allow: [secondSubscriberKey] },
     ],
   });
   assert.match(
@@ -503,7 +503,7 @@ test("mux service payloads feed publisher metrics in both directions", async () 
   const recorder: PublisherMetricsRecorder = createPublisherMetricsRecorder({
     displayName: "publisher",
     subscribers: [{ label: "phone", publicKey: subscriberKey }],
-    services: [{ id: "ssh", name: "SSH", targetPort: 22 }],
+    services: [{ id: "ssh", name: "SSH", source: { localPort: 22 } }],
   });
   recorder.connectionActivated(metricsContext("outer-1"));
   const publisher = createMuxPublisher(publisherOuter, {
