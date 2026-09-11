@@ -5,7 +5,6 @@ import {
   defaultKeposConfigPath,
   defaultKeposDiagnosticsDirectory,
   defaultKeposPeerStatePath,
-  defaultKeposRoleStatePath,
 } from "../../../src/platform/paths.js";
 
 export interface DesktopPathsContext {
@@ -17,8 +16,6 @@ export interface DesktopPathsContext {
 export interface DesktopPaths {
   configPath: string;
   peerStateDir: string;
-  publisherStateDir: string;
-  subscriberStateDir: string;
 }
 
 export const DESKTOP_BOOTSTRAP_ASSET = "kepos-bootstrap.json";
@@ -62,18 +59,6 @@ export function defaultDesktopPaths(
       context.platform,
     ),
     peerStateDir: defaultKeposPeerStatePath(
-      context.environment,
-      context.homeDirectory,
-      context.platform,
-    ),
-    publisherStateDir: defaultKeposRoleStatePath(
-      "publisher",
-      context.environment,
-      context.homeDirectory,
-      context.platform,
-    ),
-    subscriberStateDir: defaultKeposRoleStatePath(
-      "subscriber",
       context.environment,
       context.homeDirectory,
       context.platform,

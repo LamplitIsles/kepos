@@ -54,11 +54,6 @@ function runDesktopUiPage(smokeAcknowledgement: boolean): DesktopUiPage {
     string,
     (event: { data: string }) => void
   >();
-  const relationshipButtons = ["remote", "hosted"].map((view) => {
-    const button = new FakeElement();
-    button.dataset.relationshipTab = view;
-    return button;
-  });
   const document = {
     addEventListener: (
       _type: string,
@@ -68,7 +63,7 @@ function runDesktopUiPage(smokeAcknowledgement: boolean): DesktopUiPage {
     createElement: (): FakeElement => new FakeElement(),
     execCommand: (_command: string): boolean => true,
     querySelector: (_selector: string): FakeElement => new FakeElement(),
-    querySelectorAll: (_selector: string): FakeElement[] => relationshipButtons,
+    querySelectorAll: (_selector: string): FakeElement[] => [],
   };
   const window = {
     addEventListener: (
@@ -100,22 +95,24 @@ function runDesktopUiPage(smokeAcknowledgement: boolean): DesktopUiPage {
   };
 }
 
-const unconfiguredSnapshot = JSON.stringify({
+const canonicalSnapshot = JSON.stringify({
   type: "snapshot",
   appPhase: "running",
-  subscriber: {
+  peer: {
     phase: "running",
-    connection: "unconfigured",
-    subscriberKey: "ab".repeat(32),
+    peerKey: "ab".repeat(32),
+    connections: [],
     services: [],
+    bindings: [],
   },
 });
 const renderedAcknowledgement = {
   type: "windows-smoke-rendered",
-  connection: "unconfigured",
+  role: "peer",
+  connection: "connecting",
   serviceCount: 0,
-  subscriberKeyPresent: true,
-  connectFormVisible: true,
+  peerKeyPresent: true,
+  connectFormVisible: false,
 };
 
 test("desktop smoke acknowledgement crosses the page bridge as one JSON object", () => {
@@ -123,7 +120,7 @@ test("desktop smoke acknowledgement crosses the page bridge as one JSON object",
   const ready = JSON.stringify({ type: "ready" });
   assert.deepEqual(smokePage.messages, [ready]);
 
-  smokePage.dispatchHostMessage(unconfiguredSnapshot);
+  smokePage.dispatchHostMessage(canonicalSnapshot);
   assert.deepEqual(smokePage.messages, [
     ready,
     JSON.stringify(renderedAcknowledgement),
@@ -133,10 +130,10 @@ test("desktop smoke acknowledgement crosses the page bridge as one JSON object",
     renderedAcknowledgement,
   );
 
-  smokePage.dispatchHostMessage(unconfiguredSnapshot);
+  smokePage.dispatchHostMessage(canonicalSnapshot);
   assert.equal(smokePage.messages.length, 2);
 
   const productionPage = runDesktopUiPage(false);
-  productionPage.dispatchHostMessage(unconfiguredSnapshot);
+  productionPage.dispatchHostMessage(canonicalSnapshot);
   assert.deepEqual(productionPage.messages, [ready]);
 });

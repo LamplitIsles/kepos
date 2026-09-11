@@ -24,11 +24,10 @@ test("desktop singleton uses one machine-local lock independent of subscriber st
   const homeDirectory = await mkdtemp(
     path.join(tmpdir(), "kepos-desktop-home-"),
   );
-  const environment = {};
+  const stateHome = path.join(homeDirectory, "state");
+  const environment = { XDG_STATE_HOME: stateHome };
   const expected = path.join(
-    homeDirectory,
-    ".local",
-    "state",
+    stateHome,
     "kepos-neo",
     "desktop.runtime.lock",
   );

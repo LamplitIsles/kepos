@@ -228,7 +228,11 @@ in {
       {
         assertion = lib.all (service:
           let source = service.source;
-          in (source.localPort != null) + (source.unixSocket != null) + (source.peer != null || source.service != null) == 1
+          in lib.length (lib.filter (selected: selected) [
+            (source.localPort != null)
+            (source.unixSocket != null)
+            (source.peer != null || source.service != null)
+          ]) == 1
           && ((source.peer == null) == (source.service == null))) (lib.attrValues cfg.services);
         message = "services.kepos.peer.services sources must select exactly one complete variant";
       }
@@ -239,7 +243,10 @@ in {
       }
       {
         assertion = lib.all (binding:
-          (binding.localPort != null) + (binding.unixSocket != null) == 1
+          lib.length (lib.filter (selected: selected) [
+            (binding.localPort != null)
+            (binding.unixSocket != null)
+          ]) == 1
           && (binding.unixSocket == null || (lib.hasPrefix "/" binding.unixSocket && builtins.stringLength binding.unixSocket <= 103))) cfg.bindings;
         message = "services.kepos.peer bindings must select one valid local endpoint";
       }

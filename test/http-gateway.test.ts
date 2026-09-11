@@ -9,11 +9,25 @@ import {
   DEFAULT_GATEWAY_PORT,
   startHttpGateway,
 } from "../src/home/gateway.js";
+import { parseGatewayDomain, parseGatewayHost } from "../src/home/gateway-options.js";
 
 const maximumHeaderBytes = 16 * 1024;
 
 test("HTTP gateway has a fixed default port", () => {
   assert.equal(DEFAULT_GATEWAY_PORT, 17_480);
+});
+
+test("HTTP gateway option boundaries reject malformed hosts and domains", () => {
+  assert.equal(parseGatewayHost("0.0.0.0", "host"), "0.0.0.0");
+  assert.throws(() => parseGatewayHost("", "host"), /valid bind host/);
+  assert.throws(() => parseGatewayHost("bad host", "host"), /valid bind host/);
+  assert.throws(() => parseGatewayHost("x".repeat(254), "host"), /valid bind host/);
+  assert.equal(parseGatewayDomain("Peers.Example", "domain"), "peers.example");
+  assert.throws(() => parseGatewayDomain("", "domain"), /valid DNS domain/);
+  assert.throws(() => parseGatewayDomain(".example", "domain"), /valid DNS domain/);
+  assert.throws(() => parseGatewayDomain("-example", "domain"), /valid DNS domain/);
+  assert.throws(() => parseGatewayDomain(`a.${"x".repeat(64)}`, "domain"), /valid DNS domain/);
+  assert.throws(() => parseGatewayDomain("x".repeat(254), "domain"), /valid DNS domain/);
 });
 
 test("HTTP gateway binds to loopback unless a host is explicit", async () => {

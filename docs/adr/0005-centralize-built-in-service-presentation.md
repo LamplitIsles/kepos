@@ -1,6 +1,7 @@
 # ADR 0005: Centralize built-in service presentation
 
-Status: Accepted
+Status: Accepted (historical role-specific presentation model; canonical
+peer surface superseded by ADR 0013)
 
 Date: 2026-07-24
 
@@ -8,6 +9,11 @@ Amended: 2026-07-28 to add the registry HTTP fallback and dedicated
 BookOrbit/Mihomo presentations.
 
 ## Context
+
+The role-specific resolver described here was superseded by the canonical
+peer service snapshot in ADR 0013. `src/runtime/service-handlers.ts` is no
+longer a production module; the remaining text records the earlier
+presentation decision and its durable service-action intent.
 
 The publisher registry describes service identity and transport, but it does
 not say whether a client should open a service, copy an address, copy a command,

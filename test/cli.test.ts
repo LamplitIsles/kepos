@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -15,18 +15,17 @@ import {
   parseGatewayDomainOption,
   parseGatewayHostOption,
   parseGatewayPortOption,
-  parseMetricsListenOption,
   parseOptions,
   parseRouteOption,
-  parseSubscriberService,
   repeatedOption,
   requiredOption,
   requiredState,
   singleOption,
 } from "../src/cli/options.js";
+import { waitForSignal } from "../src/cli/signals.js";
 import type { PeerConfig } from "../src/config.js";
 import type { RunningPeer } from "../src/runtime/peer.js";
-import { setupPublisher } from "../src/state/publisher.js";
+import { loadPeerIdentity, setupPeer } from "../src/state/peer.js";
 
 const peerKey = "11".repeat(32);
 const otherPeerKey = "22".repeat(32);
@@ -58,7 +57,7 @@ test("setup peer and peer key create and reuse one canonical identity and config
   }
 });
 
-test("peer pair owns explicit trust without broadening service grants", async () => {
+test("peer pair edits only canonical trust and leaves service grants independent", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-cli-pair-"));
   const configPath = path.join(root, "config.toml");
   const stateDir = path.join(root, "peer");
@@ -76,13 +75,17 @@ test("peer pair owns explicit trust without broadening service grants", async ()
   }
 });
 
-test("peer convert is explicit offline identity selection and preserves the old public key", async () => {
+test("peer convert requires an expected key and preserves the selected identity", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-cli-convert-"));
+  const generatedDir = path.join(root, "generated");
   const source = path.join(root, "legacy-publisher");
   const destination = path.join(root, "peer");
   const stdout: string[] = [];
   try {
-    const legacy = await setupPublisher({ stateDir: source });
+    await setupPeer({ stateDir: generatedDir });
+    const identity = await loadPeerIdentity(generatedDir);
+    await mkdir(source, { mode: 0o700 });
+    await writeFile(path.join(source, "publisher.json"), JSON.stringify(identity), { mode: 0o600 });
     const dependencies = createDefaultCliDependencies({ stdout: (line) => stdout.push(line) });
     await runCli([
       "peer",
@@ -92,12 +95,12 @@ test("peer convert is explicit offline identity selection and preserves the old 
       "--destination",
       destination,
       "--expected-public-key",
-      legacy.publisherKey,
+      (await dependencies.getPeerPublicKey(generatedDir)),
     ], dependencies);
-    assert.equal(stdout.at(-1), `Peer key: ${legacy.publisherKey}`);
+    assert.equal(stdout.at(-1), `Peer key: ${await dependencies.getPeerPublicKey(generatedDir)}`);
     await assert.rejects(
-      runCli(["peer", "convert", "--source", source, "--destination", destination], dependencies),
-      /expected|destination|exists/i,
+      runCli(["peer", "convert", "--source", source, "--destination", path.join(root, "missing-key")], dependencies),
+      /--expected-public-key is required/i,
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -130,7 +133,6 @@ test("peer status reads only canonical config and identity", async () => {
 });
 
 function fakeRunningPeer(events: string[]): RunningPeer {
-  const config: PeerConfig = emptyConfig();
   return {
     peerKey,
     gateway: { port: 17_480, url: "http://home.localhost:17480" },
@@ -170,21 +172,32 @@ test("peer run owns the canonical lock, reloads serially, and stops the runtime"
   const stdout: string[] = [];
   let reload: (() => void) | undefined;
   let reads = 0;
-  const config = emptyConfig();
   const running = fakeRunningPeer(events);
   const dependencies: CliDependencies = {
     ...createDefaultCliDependencies({ stdout: (line) => stdout.push(line) }),
     loadConfig: async () => {
       reads++;
-      return config;
+      return emptyConfig();
     },
     acquirePeerRuntimeLock: async () => ({
       release: async () => {
         events.push("release");
       },
     }),
-    startPeer: async () => {
+    startPeer: async (options) => {
       events.push("start");
+      options.observe?.({
+        component: "kepos",
+        event: "outer.connected",
+        timestamp: "ignored",
+        elapsedMs: 0,
+        role: "peer",
+        text: "value",
+        count: 2,
+        enabled: true,
+        empty: null,
+        nested: { value: "json" },
+      });
       return running;
     },
     scheduleConfigReload: (callback) => {
@@ -201,6 +214,7 @@ test("peer run owns the canonical lock, reloads serially, and stops the runtime"
     assert.deepEqual(events, ["start", "cancel-reload", "apply", "stop", "stop", "release"]);
     assert.equal(reads, 2);
     assert.match(stdout.join("\n"), /Peer running: key=/);
+    assert.match(stdout.join("\n"), /outer.connected elapsedMs=0 role=peer text=value count=2 enabled=true empty=null nested=\{"value":"json"\}/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -226,24 +240,19 @@ test("canonical CLI option parsers validate and normalize supported values", () 
     "--label", "phone",
     "--bootstrap", "127.0.0.1:49737",
     "--bootstrap", "bootstrap.example:49738",
-    "--metrics-listen", "[::1]:9464",
     "--route", "public",
     "--gateway-port", "17480",
     "--gateway-host", "127.0.0.1",
     "--gateway-domain", "Peers.Example",
     "--observations", "ndjson",
   ], [
-    "--state", "--label", "--bootstrap", "--metrics-listen", "--route",
+    "--state", "--label", "--bootstrap", "--route",
     "--gateway-port", "--gateway-host", "--gateway-domain", "--observations",
   ]);
 
   assert.equal(requiredState(options), path.resolve("./peer"));
   assert.equal(requiredOption(options, "--label"), "phone");
-  assert.deepEqual(repeatedOption(options, "--bootstrap"), [
-    "127.0.0.1:49737",
-    "bootstrap.example:49738",
-  ]);
-  assert.deepEqual(parseMetricsListenOption(options), { host: "::1", port: 9464 });
+  assert.deepEqual(repeatedOption(options, "--bootstrap"), ["127.0.0.1:49737", "bootstrap.example:49738"]);
   assert.equal(parseRouteOption(options), "public");
   assert.equal(parseGatewayPortOption(options), 17480);
   assert.equal(parseGatewayHostOption(options), "127.0.0.1");
@@ -253,20 +262,8 @@ test("canonical CLI option parsers validate and normalize supported values", () 
     { host: "bootstrap.example", port: 49738 },
   ]);
   assert.equal(observationMode(options), "ndjson");
-  assert.deepEqual(parseSubscriberService("ssh:2222"), {
-    id: "ssh",
-    localPort: 2222,
-  });
-  assert.deepEqual(parseSubscriberService("game:udp:0"), {
-    id: "game",
-    kind: "udp",
-    localPort: 0,
-  });
+  assert.equal(singleOption(options, "--missing"), undefined);
 
-  assert.deepEqual(parseMetricsListenOption(parseOptions(
-    ["--metrics-listen", "127.0.0.1:0"],
-    ["--metrics-listen"],
-  )), { host: "127.0.0.1", port: 0 });
   assert.equal(parseRouteOption(parseOptions([], ["--route"])), "auto");
   assert.equal(parseGatewayPortOption(parseOptions([], ["--gateway-port"])), undefined);
   assert.equal(parseGatewayHostOption(parseOptions([], ["--gateway-host"])), undefined);
@@ -278,21 +275,178 @@ test("canonical CLI option parsers validate and normalize supported values", () 
   assert.throws(() => parseOptions(["--state"], ["--state"]), /requires a value/);
   assert.throws(() => requiredState(parseOptions([], ["--state"])), /--state is required/);
   assert.throws(() => requiredOption(parseOptions([], ["--label"]), "--label"), /required/);
-  assert.throws(() => singleOption(
-    parseOptions(["--label", "a", "--label", "b"], ["--label"]),
-    "--label",
-  ), /may be used only once/);
-  assert.throws(() => parseMetricsListenOption(parseOptions(
-    ["--metrics-listen", "bad"],
-    ["--metrics-listen"],
-  )), /host:port/);
-  assert.throws(() => parseBootstrapOptions(parseOptions(
-    ["--bootstrap", "bad"],
-    ["--bootstrap"],
-  )), /host:port/);
-  assert.throws(() => observationMode(parseOptions(
-    ["--observations", "json"],
-    ["--observations"],
-  )), /human or ndjson/);
-  assert.throws(() => parseSubscriberService("home:22"), /non-reserved/);
+  assert.throws(() => singleOption(parseOptions(["--label", "a", "--label", "b"], ["--label"]), "--label"), /may be used only once/);
+  assert.throws(() => parseBootstrapOptions(parseOptions(["--bootstrap", "bad"], ["--bootstrap"])), /host:port/);
+  assert.throws(() => observationMode(parseOptions(["--observations", "json"], ["--observations"])), /human or ndjson/);
+});
+
+test("waitForSignal stops once and removes every signal listener", async () => {
+  let stopCalls = 0;
+  let releaseStop!: () => void;
+  const stopped = new Promise<void>((resolve) => {
+    releaseStop = resolve;
+  });
+  const waiting = waitForSignal(async () => {
+    stopCalls++;
+    await stopped;
+  });
+  process.emit("SIGINT");
+  process.emit("SIGTERM");
+  assert.equal(stopCalls, 1);
+  releaseStop();
+  await waiting;
+  process.emit("SIGINT");
+  assert.equal(stopCalls, 1);
+
+  const rejected = waitForSignal(async () => {
+    throw new Error("stop failed");
+  });
+  process.emit("SIGTERM");
+  await assert.rejects(rejected, /stop failed/);
+});
+
+test("canonical CLI handles missing, existing, and failing command state", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-cli-edges-"));
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const base = createDefaultCliDependencies({
+    stdout: (line) => stdout.push(line),
+    stderr: (line) => stderr.push(line),
+  });
+  try {
+    await runCli([], base);
+    await runCli(["--help"], base);
+    assert.equal(stdout.filter((line) => line.startsWith("Usage:")).length, 2);
+
+    const stateDir = path.join(root, "peer");
+    const configPath = path.join(root, "config.toml");
+    let saves = 0;
+    const existingConfig = emptyConfig();
+    await runCli(["setup", "peer", "--state", stateDir, "--config", configPath], {
+      ...base,
+      setupPeer: async () => ({ created: false, publicKey: peerKey }),
+      loadConfig: async () => existingConfig,
+      saveConfig: async () => {
+        saves++;
+      },
+    });
+    assert.equal(saves, 0);
+
+    await assert.rejects(
+      runCli(["setup", "peer", "--state", stateDir, "--config", configPath], {
+        ...base,
+        setupPeer: async () => ({ created: false, publicKey: peerKey }),
+        loadConfig: async () => {
+          throw new Error("config is unreadable");
+        },
+      }),
+      /config is unreadable/,
+    );
+
+    await runCli(["peer", "status", "--state", stateDir, "--config", configPath], {
+      ...base,
+      loadConfig: async () => undefined,
+      getPeerPublicKey: async () => peerKey,
+    });
+    assert.deepEqual(JSON.parse(stdout.at(-1) ?? "null").config, {
+      peers: 0,
+      services: 0,
+      bindings: 0,
+    });
+
+    let paired: PeerConfig | undefined;
+    await runCli([
+      "peer",
+      "pair",
+      "--config",
+      configPath,
+      "--label",
+      "dial-peer",
+      "--public-key",
+      otherPeerKey,
+      "--connection",
+      "dial",
+    ], {
+      ...base,
+      loadConfig: async () => existingConfig,
+      saveConfig: async (config) => {
+        paired = config;
+      },
+    });
+    assert.equal(paired?.peers[0]?.connection, "dial");
+    await assert.rejects(
+      runCli([
+        "peer",
+        "pair",
+        "--config",
+        configPath,
+        "--label",
+        "bad",
+        "--public-key",
+        otherPeerKey,
+        "--connection",
+        "sideways",
+      ], base),
+      /dial or accept/,
+    );
+
+    await assert.rejects(
+      runCli(["peer", "run", "--state", stateDir, "--config", configPath], {
+        ...base,
+        loadConfig: async () => undefined,
+      }),
+      /requires a canonical config/,
+    );
+
+    let released = 0;
+    await assert.rejects(
+      runCli(["peer", "run", "--state", stateDir, "--config", configPath], {
+        ...base,
+        loadConfig: async () => emptyConfig(),
+        acquirePeerRuntimeLock: async () => ({
+          release: async () => {
+            released++;
+          },
+        }),
+        startPeer: async () => {
+          throw new Error("peer startup failed");
+        },
+      }),
+      /peer startup failed/,
+    );
+    assert.equal(released, 1);
+
+    const events: string[] = [];
+    const running = fakeRunningPeer(events);
+    await runCli([
+      "peer",
+      "run",
+      "--state",
+      stateDir,
+      "--config",
+      configPath,
+      "--observations",
+      "ndjson",
+    ], {
+      ...base,
+      loadConfig: async () => emptyConfig(),
+      acquirePeerRuntimeLock: async () => ({ release: async () => undefined }),
+      startPeer: async (options) => {
+        options.observe?.({
+          component: "kepos",
+          event: "outer.connected",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          elapsedMs: 1,
+          role: "peer",
+        });
+        return running;
+      },
+      scheduleConfigReload: () => () => undefined,
+      waitForSignal: async (stop) => stop(),
+    });
+    assert.match(stderr.join("\n"), /Peer running: key=/);
+    assert.match(stdout.join("\n"), /\"event\":\"outer.connected\"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

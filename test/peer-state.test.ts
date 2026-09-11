@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { derivePublisherHomeKey } from "../src/keys.js";
+import {
+  derivePublisherHomeKey,
+  generateClientIdentity,
+} from "../src/keys.js";
 import {
   convertPeerIdentity,
   loadPeerIdentity,
   setupPeer,
 } from "../src/state/peer.js";
-import { setupPublisher } from "../src/state/publisher.js";
-import { setupSubscriber } from "../src/state/subscriber.js";
 
 test("canonical peer state is seed-only, owner-only, and reusable", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-state-"));
@@ -26,9 +27,10 @@ test("canonical peer state is seed-only, owner-only, and reusable", async () => 
     });
     const identity = await loadPeerIdentity(stateDir);
     assert.equal(first.publicKey, derivePublisherHomeKey(identity.seed));
-    assert.deepEqual(JSON.parse(await readFile(path.join(stateDir, "peer.json"), "utf8")), {
-      seed: identity.seed,
-    });
+    assert.deepEqual(
+      JSON.parse(await readFile(path.join(stateDir, "peer.json"), "utf8")),
+      { seed: identity.seed },
+    );
     if (process.platform !== "win32") {
       assert.equal((await stat(stateDir)).mode & 0o777, 0o700);
       assert.equal((await stat(path.join(stateDir, "peer.json"))).mode & 0o777, 0o600);
@@ -38,55 +40,119 @@ test("canonical peer state is seed-only, owner-only, and reusable", async () => 
   }
 });
 
-test("identity conversion is explicit, offline, and preserves publisher or subscriber keys", async () => {
+test("conversion requires the expected retained public key and preserves private permissions", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-convert-"));
   try {
-    const publisherSource = path.join(root, "publisher");
-    const publisherDestination = path.join(root, "publisher-peer");
-    const publisher = await setupPublisher({ stateDir: publisherSource });
-    assert.deepEqual(
-      await convertPeerIdentity({
-        source: publisherSource,
-        destination: publisherDestination,
-        expectedPublicKey: publisher.publisherKey,
-      }),
-      { destination: publisherDestination, publicKey: publisher.publisherKey },
+    const source = path.join(root, "legacy-publisher");
+    const destination = path.join(root, "peer");
+    await mkdirPrivate(source);
+    const publisher = await setupPeer({ stateDir: path.join(root, "generated") });
+    const publisherIdentity = await loadPeerIdentity(path.join(root, "generated"));
+    await writeFile(
+      path.join(source, "publisher.json"),
+      JSON.stringify({ seed: publisherIdentity.seed }),
+      { mode: 0o600 },
     );
-    assert.deepEqual(await readdir(publisherDestination), ["peer.json"]);
-    assert.equal(
-      await readFile(path.join(publisherDestination, "peer.json"), "utf8"),
-      await readFile(path.join(publisherSource, "publisher.json"), "utf8"),
-    );
-
-    const subscriberSource = path.join(root, "subscriber");
-    const subscriberDestination = path.join(root, "subscriber-peer");
-    const subscriber = await setupSubscriber({ stateDir: subscriberSource });
+    const sourceFileBefore = await stat(path.join(source, "publisher.json"));
     const converted = await convertPeerIdentity({
-      source: path.join(subscriberSource, "client.identity.json"),
-      destination: subscriberDestination,
-      expectedPublicKey: subscriber.publicKey,
+      source,
+      destination,
+      expectedPublicKey: publisher.publicKey,
     });
-    assert.equal(converted.publicKey, subscriber.publicKey);
-    assert.equal(
-      (await loadPeerIdentity(subscriberDestination)).seed,
-      (JSON.parse(await readFile(path.join(subscriberSource, "client.identity.json"), "utf8")) as { secretKey: string }).secretKey.slice(0, 64),
-    );
-
-    await assert.rejects(
-      convertPeerIdentity({
-        source: publisherSource,
-        destination: publisherDestination,
-      }),
-      /destination already exists/i,
-    );
-    await assert.rejects(
-      convertPeerIdentity({
-        source: publisherSource,
-        destination: path.join(publisherSource, "nested"),
-      }),
-      /outside the source/i,
-    );
+    assert.deepEqual(converted, { destination, publicKey: publisher.publicKey });
+    assert.deepEqual(await readdir(destination), ["peer.json"]);
+    assert.deepEqual(await loadPeerIdentity(destination), publisherIdentity);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(destination)).mode & 0o777, 0o700);
+      assert.equal((await stat(path.join(destination, "peer.json"))).mode & 0o777, 0o600);
+      assert.equal((await stat(path.join(source, "publisher.json"))).mode & 0o777, sourceFileBefore.mode & 0o777);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("conversion accepts one explicitly selected legacy client identity without preserving its schema", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-client-convert-"));
+  try {
+    const identity = generateClientIdentity();
+    const source = path.join(root, "client.identity.json");
+    const destination = path.join(root, "peer");
+    await writeFile(source, `${JSON.stringify(identity)}\n`, { mode: 0o600 });
+    const result = await convertPeerIdentity({
+      source,
+      destination,
+      expectedPublicKey: identity.publicKey,
+    });
+    assert.equal(result.publicKey, identity.publicKey);
+    assert.deepEqual(await loadPeerIdentity(destination), {
+      seed: identity.secretKey.slice(0, 64),
+    });
+    assert.deepEqual(JSON.parse(await readFile(path.join(destination, "peer.json"), "utf8")), {
+      seed: identity.secretKey.slice(0, 64),
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("conversion rejects missing, invalid, mismatched, corrupt, and non-empty destinations before writing", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-convert-errors-"));
+  try {
+    const generatedDir = path.join(root, "generated");
+    const generated = await setupPeer({ stateDir: generatedDir });
+    const identity = await loadPeerIdentity(generatedDir);
+    const source = path.join(root, "publisher.json");
+    await writeFile(source, JSON.stringify({ seed: identity.seed }), { mode: 0o600 });
+
+    for (const expectedPublicKey of [
+      undefined,
+      "AB".repeat(32),
+      "00".repeat(32),
+    ]) {
+      const destination = path.join(root, `rejected-${String(expectedPublicKey)}`);
+      await assert.rejects(
+        convertPeerIdentity({
+          source,
+          destination,
+          expectedPublicKey: expectedPublicKey as unknown as string,
+        }),
+        /expected public key|match/i,
+      );
+      await assert.rejects(() => stat(destination), /ENOENT/);
+    }
+
+    const corrupt = path.join(root, "corrupt.json");
+    await writeFile(corrupt, "{not-json", { mode: 0o600 });
+    const corruptDestination = path.join(root, "corrupt-destination");
+    await assert.rejects(
+      convertPeerIdentity({
+        source: corrupt,
+        destination: corruptDestination,
+        expectedPublicKey: generated.publicKey,
+      }),
+      /invalid legacy identity/i,
+    );
+    await assert.rejects(() => stat(corruptDestination), /ENOENT/);
+
+    const existing = path.join(root, "existing");
+    await writeFile(existing, "do not overwrite");
+    await assert.rejects(
+      convertPeerIdentity({
+        source,
+        destination: existing,
+        expectedPublicKey: generated.publicKey,
+      }),
+      /already exists/i,
+    );
+    assert.equal(await readFile(existing, "utf8"), "do not overwrite");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function mkdirPrivate(directory: string): Promise<void> {
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(directory, { mode: 0o700, recursive: true });
+  if (process.platform !== "win32") await chmod(directory, 0o700);
+}

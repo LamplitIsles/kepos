@@ -236,9 +236,7 @@ async function peerConvertCommand(
   const result = await dependencies.convertPeerIdentity({
     source: required(options, "--source"),
     destination: required(options, "--destination"),
-    ...(options.get("--expected-public-key")
-      ? { expectedPublicKey: options.get("--expected-public-key") }
-      : {}),
+    expectedPublicKey: required(options, "--expected-public-key"),
   });
   dependencies.stdout(`Peer key: ${result.publicKey}`);
 }
@@ -267,6 +265,7 @@ async function peerRunCommand(
     const started = await dependencies.startPeer({
       stateDir,
       config,
+      persistConfig: (nextConfig) => dependencies.saveConfig(nextConfig, configPath),
       observe: observationWriter(mode, dependencies),
     });
     running = started;

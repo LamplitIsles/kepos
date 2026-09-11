@@ -1,10 +1,15 @@
 # ADR 0003: Android subscriber and Bare host boundaries
 
-Status: Accepted
+Status: Accepted (historical subscriber-only spike; canonical production
+runtime superseded by ADR 0013)
 
 Date: 2026-07-21
 
 ## Context
+
+The subscriber-only production decision in this spike was superseded by ADR
+0013. The host/Worklet lifecycle boundary and its test-owned native seams
+remain applicable to the canonical peer runtime.
 
 Kepos needs an Android client that keeps a subscriber connection ready while its UI is closed. Android will not publish services. The first spike also needs to tell us whether Bare Kit can host the same JavaScript runtime that may later power the real subscriber.
 

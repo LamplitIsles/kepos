@@ -138,6 +138,8 @@ export interface StartPeerOptions {
   connectTimeoutMs?: number;
   capabilityTimeoutMs?: number;
   serviceAcquisitionTimeoutMs?: number;
+  /** Persist the complete canonical config before pairing is authorized. */
+  persistConfig?: (config: PeerConfig) => Promise<void>;
   pairing?: {
     enabled?: boolean;
     displayName?: string;
@@ -402,7 +404,7 @@ export async function startPeer(
     publisherKey: peerKey,
     displayName: options.pairing?.displayName ?? "Kepos peer",
     now,
-    persistSubscriber: async (device) => {
+    persistPeer: async (device) => {
       const existing = activeConfig.peers.find(
         ({ publicKey }) => publicKey === device.publicKey,
       );
@@ -418,6 +420,10 @@ export async function startPeer(
           },
         ],
       };
+      if (!options.persistConfig) {
+        throw new Error("peer pairing config persistence is unavailable");
+      }
+      await options.persistConfig(nextConfig);
       await applyConfig(nextConfig);
       pairingCandidates.delete(device.publicKey);
       const entry = peerEntries.get(device.publicKey);
@@ -1072,15 +1078,27 @@ export async function startPeer(
     serviceId: string,
     signal?: CancellationSignal,
     expectedKind?: PeerService["kind"],
+    acquisition: { currentOnly?: boolean } = {},
   ): Promise<Duplex> {
     const entry = peerEntries.get(resolvePeerKey(peerReference));
     if (!entry) throw new Error(`Peer is not configured: ${peerReference}`);
+    const initialConnection = entry.current;
+    const initialGeneration = initialConnection?.generation;
+    if (acquisition.currentOnly && initialGeneration === undefined) {
+      throw new Error(`Peer is offline: ${entry.definition.label}`);
+    }
     const timeoutMs =
       options.serviceAcquisitionTimeoutMs ?? defaultServiceAcquisitionTimeoutMs;
     const deadline = now() + timeoutMs;
     while (!stopped) {
       throwIfAborted(signal);
       const connection = entry.current;
+      if (
+        acquisition.currentOnly &&
+        (!connection || connection.generation !== initialGeneration)
+      ) {
+        throw new Error("Peer connection changed before service acquisition");
+      }
       if (connection && !connection.closed) {
         if (connection.capability === "pending") {
           const capability = await waitWithAbort(
@@ -1126,6 +1144,9 @@ export async function startPeer(
             ? `Peer is unavailable: ${entry.error}`
             : `Peer is offline: ${entry.definition.label}`,
         );
+      }
+      if (acquisition.currentOnly) {
+        throw new Error("Peer connection is unavailable");
       }
       await waitWithAbort(sleep(25), signal, deadline, now);
     }
@@ -1306,7 +1327,13 @@ export async function startPeer(
     }, options.serviceAcquisitionTimeoutMs ?? defaultServiceAcquisitionTimeoutMs);
     socket.once("close", () => abort.abort());
     try {
-      const tunnel = await openPeerService(binding.peer, binding.service, abort.signal);
+      const tunnel = await openPeerService(
+        binding.peer,
+        binding.service,
+        abort.signal,
+        undefined,
+        { currentOnly: true },
+      );
       if (socket.destroyed) {
         tunnel.destroy();
         return;
@@ -1547,24 +1574,6 @@ function resolveConfiguredPeerKey(
   const peer = peers.find(({ label }) => label === reference);
   if (!peer) throw new Error(`unknown peer label: ${reference}`);
   return peer.publicKey;
-}
-
-function validateRuntimeConfig(config: PeerConfig, ownKey: string): void {
-  const peers = new Set(config.peers.map(({ publicKey }) => publicKey));
-  if (peers.has(ownKey)) {
-    throw new Error("peer config must not list the local peer as a remote peer");
-  }
-  for (const service of config.services) {
-    if ("peer" in service.source) {
-      resolveConfiguredPeerKey(config.peers, service.source.peer);
-    }
-    for (const key of service.allow) {
-      if (!peers.has(key)) throw new Error(`service ${service.id} grants an unknown peer: ${key}`);
-    }
-  }
-  for (const binding of config.bindings) {
-    resolveConfiguredPeerKey(config.peers, binding.peer);
-  }
 }
 
 function bindingKey(

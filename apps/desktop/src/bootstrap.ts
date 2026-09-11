@@ -105,13 +105,9 @@ export async function ensureDesktopBootstrap(
 }
 
 export async function ensureDesktopPeerState(
-  config: KeposConfig,
+  _config: KeposConfig,
   context: DesktopBootstrapContext,
 ): Promise<SetupPeerResult> {
-  const parsed = parsePeerConfig(config);
   const paths = defaultDesktopPaths(context);
   return (context.ensurePeer ?? ensurePeer)({ stateDir: paths.peerStateDir });
 }
-
-/** @deprecated role state is no longer created by desktop startup. */
-export const ensureDesktopRoleState = ensureDesktopPeerState;

@@ -199,8 +199,8 @@ npm run kepos -- peer convert \
 
 It recognizes one `publisher.json` seed or one validated
 `client.identity.json` keypair, refuses a linked/ambiguous source, refuses an
-existing destination or a destination inside the source, verifies the
-expected public key when supplied, and writes only private owner-only state.
+existing destination or a destination inside the source, requires and
+verifies the expected public key, and writes only private owner-only state.
 It prints the resulting public key, never the seed or secret key. It is not a
 startup migration.
 

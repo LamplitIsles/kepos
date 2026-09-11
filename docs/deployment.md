@@ -117,8 +117,9 @@ Use this order during a later operator-controlled cutover:
 3. Make a backup of old state and config outside the active canonical paths.
 4. Run `peer convert --source ... --destination ...
    --expected-public-key ...` for the selected old publisher or subscriber
-   identity. The helper is offline-only, refuses overwrite and linked or
-   ambiguous sources, and writes one private `peer.json`.
+   identity. The expected key is mandatory. The helper is offline-only,
+   refuses overwrite and linked or ambiguous sources, and writes one private
+   `peer.json`.
 5. Install the canonical TOML with `peers`, `services`, and `bindings`; keep
    allowlists explicit and do not turn a label conversion into a broad grant.
 6. Run `peer status`, start the canonical unit, and perform an isolated service

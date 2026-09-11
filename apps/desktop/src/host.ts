@@ -11,16 +11,10 @@ import {
 } from "./diagnostics-contract.js";
 import {
   acquirePeerRuntimeLock,
-  acquirePublisherRuntimeLock,
-  acquireSubscriberRuntimeLock,
   type RuntimeLock,
 } from "../../../src/runtime/runtime-lock.js";
-import { setSubscriberPublisher } from "../../../src/state/subscriber.js";
 import { createDesktopController } from "./controller.js";
-import type {
-  DesktopOptions,
-  DesktopSubscriberOptions,
-} from "./options.js";
+import type { DesktopOptions } from "./options.js";
 import type { DesktopSnapshot } from "./protocol.js";
 import {
   parseDesktopSmokeRenderAcknowledgement,
@@ -67,18 +61,13 @@ export interface StartDesktopHostOptions {
 
 export interface DesktopHostDependencies {
   acquireSingleton(homeDirectory: string): Promise<RuntimeLock>;
-  acquirePeerLock?: (stateDir: string) => Promise<RuntimeLock>;
-  acquirePublisherLock(stateDir: string): Promise<RuntimeLock>;
-  acquireSubscriberLock(stateDir: string): Promise<RuntimeLock>;
+  acquirePeerLock(stateDir: string): Promise<RuntimeLock>;
   createWindow(width: number, height: number): DesktopNativeWindow;
   createWebView(): DesktopNativeWebView;
   createTray(): DesktopTray;
   startRuntime(
     options: StartDesktopRuntimeOptions,
   ): Promise<RunningDesktopRuntime>;
-  setSubscriberPublisher(
-    options: Parameters<typeof setSubscriberPublisher>[0],
-  ): Promise<void>;
   schedulePoll(callback: () => void): () => void;
   exit(code: number): void;
 }
@@ -91,31 +80,36 @@ export interface RunningDesktopHost {
 const initialSnapshot: DesktopSnapshot = {
   type: "snapshot",
   appPhase: "starting",
+  peer: {
+    phase: "starting",
+    connections: [],
+    services: [],
+    bindings: [],
+  },
 };
 
 export async function startDesktopHost(
   options: StartDesktopHostOptions,
   dependencies: DesktopHostDependencies,
 ): Promise<RunningDesktopHost> {
-  const diagnostics =
-    options.diagnostics ?? createNoopDesktopDiagnosticSink();
-  const reportDiagnostic = (observation: Parameters<DesktopDiagnosticSink["observe"]>[0]): void => {
+  const diagnostics = options.diagnostics ?? createNoopDesktopDiagnosticSink();
+  const reportDiagnostic = (
+    observation: Parameters<DesktopDiagnosticSink["observe"]>[0],
+  ): void => {
     try {
       diagnostics.observe(observation);
     } catch {
-      // Diagnostics are best effort and never affect host startup.
+      // Diagnostics are best effort and never affect the host.
     }
   };
   const closeDiagnostics = async (): Promise<void> => {
     try {
       await diagnostics.shutdown();
     } catch {
-      // Diagnostics are best effort and never affect host startup or shutdown.
+      // Diagnostics are best effort during shutdown too.
     }
   };
-  reportDiagnostic(
-    createDesktopLifecycleObservation("starting"),
-  );
+  reportDiagnostic(createDesktopLifecycleObservation("starting"));
 
   let singleton: RuntimeLock;
   try {
@@ -124,79 +118,44 @@ export async function startDesktopHost(
     await closeDiagnostics();
     throw error;
   }
+
   let startupOptions: DesktopOptions;
   try {
     startupOptions = await options.loadOptions();
     reportDiagnostic(createDesktopConfigObservation("load", "success"));
   } catch (error) {
     reportDiagnostic(createDesktopConfigObservation("load", "failed", error));
-    try {
-      await singleton.release();
-    } catch {
-      // Preserve the startup error after attempting singleton release.
-    }
+    await singleton.release().catch(() => undefined);
     await closeDiagnostics();
     throw error;
   }
-  let publisherLock: RuntimeLock | undefined;
-  let subscriberLock: RuntimeLock | undefined;
-  let peerLock: RuntimeLock | undefined;
+
+  let peerLock: RuntimeLock;
   try {
-    if (startupOptions.peer) {
-      peerLock = await (dependencies.acquirePeerLock ?? acquirePeerRuntimeLock)(
-        startupOptions.peer.stateDir,
-      );
-    }
-    if (startupOptions.publisher) {
-      publisherLock = await dependencies.acquirePublisherLock(
-        startupOptions.publisher.stateDir,
-      );
-    }
-    if (startupOptions.subscriber) {
-      subscriberLock = await dependencies.acquireSubscriberLock(
-        startupOptions.subscriber.stateDir,
-      );
-    }
+    peerLock = await dependencies.acquirePeerLock(startupOptions.peer.stateDir);
   } catch (error) {
-    for (const release of [
-      () => subscriberLock?.release(),
-      () => publisherLock?.release(),
-      () => peerLock?.release(),
-      () => singleton.release(),
-    ]) {
-      try {
-        await release();
-      } catch {
-        // Preserve the lock acquisition error after trying every prior release.
-      }
-    }
+    await singleton.release().catch(() => undefined);
     await closeDiagnostics();
     throw error;
   }
-  let createdWindow: DesktopNativeWindow | undefined;
-  let createdWebView: DesktopNativeWebView | undefined;
-  let createdTray: DesktopTray | undefined;
+
+  let window: DesktopNativeWindow | undefined;
+  let webView: DesktopNativeWebView | undefined;
+  let tray: DesktopTray | undefined;
   try {
-    createdWindow = dependencies.createWindow(720, 620);
-    createdWebView = dependencies.createWebView();
-    createdTray = dependencies.createTray();
-    buildDesktopTray(createdTray);
+    window = dependencies.createWindow(720, 620);
+    webView = dependencies.createWebView();
+    tray = dependencies.createTray();
+    buildDesktopTray(tray);
   } catch (error) {
-    await cleanNativeSetup(
-      createdWindow,
-      createdWebView,
-      createdTray,
-      publisherLock,
-      subscriberLock,
-      peerLock,
-      singleton,
-    );
+    await cleanNativeSetup(window, webView, tray, peerLock, singleton);
     await closeDiagnostics();
     throw error;
   }
-  const mainWindow = createdWindow;
-  const mainWebView = createdWebView;
-  const mainTray = createdTray;
+
+  const mainWindow = window;
+  const mainWebView = webView;
+  const mainTray = tray;
   let liveTray: DesktopTray | undefined = mainTray;
   let runtime: RunningDesktopRuntime | undefined;
   let runtimeStartTask: Promise<RunningDesktopRuntime> | undefined;
@@ -204,26 +163,21 @@ export async function startDesktopHost(
   let shutdownPromise: Promise<void> | undefined;
   let mainWindowClosed = false;
 
-  async function openService(url: string): Promise<void> {
-    if (shutdownPromise !== undefined) {
-      throw new Error("Kepos desktop is stopping");
-    }
+  const openService = async (url: string): Promise<void> => {
+    if (shutdownPromise !== undefined) throw new Error("Kepos desktop is stopping");
     mainWebView.openExternal(url);
-  }
+  };
 
-  function shutdown(): Promise<void> {
+  const shutdown = (): Promise<void> => {
     shutdownPromise ??= (async () => {
       let failure: unknown;
-      const cleanup = async (
-        step: () => void | Promise<void>,
-      ): Promise<void> => {
+      const cleanup = async (step: () => void | Promise<void>): Promise<void> => {
         try {
           await step();
         } catch (error) {
           failure ??= error;
         }
       };
-
       const trayToDestroy = liveTray;
       liveTray = undefined;
       await cleanup(() => {
@@ -232,25 +186,22 @@ export async function startDesktopHost(
       await cleanup(() => cancelPoll?.());
       cancelPoll = undefined;
       let runtimeToStop = runtime;
-      if (runtimeToStop === undefined && runtimeStartTask !== undefined) {
+      if (!runtimeToStop && runtimeStartTask) {
         try {
           runtimeToStop = await runtimeStartTask;
         } catch {
-          // The runtime owns release of every role lock on startup failure.
+          // startDesktopPeerRuntime releases the lock on startup failure.
         }
       }
-      if (runtimeToStop === undefined) {
-        reportDiagnostic(createDesktopLifecycleObservation("stopping"));
-      }
+      if (!runtimeToStop) reportDiagnostic(createDesktopLifecycleObservation("stopping"));
       await cleanup(() => runtimeToStop?.stop());
       runtime = undefined;
-      if (runtimeToStop === undefined) {
-        reportDiagnostic(createDesktopLifecycleObservation("stopped"));
-      }
+      if (!runtimeToStop) reportDiagnostic(createDesktopLifecycleObservation("stopped"));
       await cleanup(closeDiagnostics);
       await cleanup(() => {
         mainWebView.destroy();
       });
+      await cleanup(() => peerLock.release());
       await cleanup(() => singleton.release());
       await cleanup(() => {
         if (!mainWindowClosed) mainWindow.close();
@@ -259,148 +210,41 @@ export async function startDesktopHost(
       if (failure !== undefined) throw failure;
     })();
     return shutdownPromise;
-  }
+  };
 
-  async function reconfigure(
+  const reconfigure = async (
     configuration: DesktopRuntimeConfiguration,
-  ): Promise<void> {
-    if (shutdownPromise !== undefined) {
-      throw new Error("Kepos desktop is stopping");
-    }
+  ): Promise<void> => {
+    if (shutdownPromise !== undefined) throw new Error("Kepos desktop is stopping");
     if (!runtime) throw new Error("Kepos desktop runtime is unavailable");
     await runtime.reconfigure(configuration);
-  }
-
-  let persistedSubscriberPublisherKey: string | undefined;
-
-  async function connectSubscriber(publisherKey: string): Promise<void> {
-    const subscriber = startupOptions.subscriber;
-    if (!subscriber) throw new Error("subscriber is not configured");
-    const setup = subscriber.subscriberSetup;
-    if (!setup || setup.configured !== false) return;
-
-    const configuration = (nextSubscriber: DesktopSubscriberOptions) => ({
-      ...(startupOptions.bootstrap
-        ? { bootstrap: startupOptions.bootstrap }
-        : {}),
-      ...(startupOptions.publisher
-        ? { publisher: startupOptions.publisher }
-        : {}),
-      subscriber: nextSubscriber,
-    });
-    const publishRetryableUnconfigured = async (
-      error: unknown,
-    ): Promise<void> => {
-      const retryableSubscriber = {
-        ...subscriber,
-        subscriberSetup: {
-          ...setup,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      };
-      startupOptions = {
-        ...startupOptions,
-        subscriber: retryableSubscriber,
-      };
-      try {
-        await reconfigure(configuration(retryableSubscriber));
-      } catch {
-        // Preserve the original failure; the retryable options remain active.
-      }
-    };
-
-    if (persistedSubscriberPublisherKey !== publisherKey) {
-      try {
-        await dependencies.setSubscriberPublisher({
-          stateDir: subscriber.stateDir,
-          label: "publisher",
-          publisherKey,
-        });
-      } catch (error) {
-        await publishRetryableUnconfigured(error);
-        throw error;
-      }
-      persistedSubscriberPublisherKey = publisherKey;
-    }
-
-    const { subscriberSetup: _subscriberSetup, ...configuredSubscriber } =
-      subscriber;
-    try {
-      await reconfigure(configuration(configuredSubscriber));
-    } catch (error) {
-      await publishRetryableUnconfigured(error);
-      throw error;
-    }
-
-    startupOptions = {
-      ...startupOptions,
-      subscriber: configuredSubscriber,
-    };
-  }
+  };
 
   const controller = createDesktopController({
-    initialSnapshot: {
-      ...initialSnapshot,
-      ...(startupOptions.publisher
-        ? {
-            publisher: {
-              phase: "starting" as const,
-              activeSubscribers: 0,
-              activeSubscriberKeys: [],
-              acceptedConnections: 0,
-              services: [],
-            },
-          }
-        : {}),
-      ...(startupOptions.subscriber
-        ? {
-            subscriber: {
-              phase: "starting" as const,
-              connection: "connecting" as const,
-              services: [],
-            },
-          }
-        : {}),
-      ...(startupOptions.peer
-        ? {
-            peer: {
-              phase: "starting" as const,
-              peerKey: undefined,
-              connections: [],
-              services: [],
-              bindings: [],
-            },
-          }
-        : {}),
-    },
+    initialSnapshot,
     send: (message) => mainWebView.postMessage(message),
     openService,
     approvePairing: () => requireRuntime(runtime).approvePairing(),
     cancelPairing: () => requireRuntime(runtime).cancelPairing(),
-    createPairingInvitation: () =>
-      requireRuntime(runtime).createPairingInvitation(),
+    createPairingInvitation: () => requireRuntime(runtime).createPairingInvitation(),
     denyPairing: () => requireRuntime(runtime).denyPairing(),
-    setSubscriberPublisher: connectSubscriber,
     copyDiagnostics: () =>
-      diagnostics.createSummary(
-        DESKTOP_DIAGNOSTIC_SUMMARY_MAX_BYTES - 16 * 1024,
-      ),
+      diagnostics.createSummary(DESKTOP_DIAGNOSTIC_SUMMARY_MAX_BYTES - 16 * 1024),
     quit: shutdown,
   });
+
   const smokeRenderFile = options.smokeRenderFile;
   let smokeRenderRecorded = false;
   const receiveMessage = async (message: string): Promise<void> => {
     if (smokeRenderFile) {
       await appendFile(`${smokeRenderFile}.messages`, `${message}\n`);
-      console.error(`Windows smoke page message: ${message}`);
       let acknowledgement: DesktopSmokeRenderAcknowledgement | undefined;
       try {
         acknowledgement = parseDesktopSmokeRenderAcknowledgement(message);
-      } catch (error) {
-        console.error("Windows smoke acknowledgement parse failed", error);
-        // Let malformed or unrelated messages take the normal command path.
+      } catch {
+        // Normal command handling below reports malformed messages.
       }
-      if (acknowledgement !== undefined) {
+      if (acknowledgement) {
         if (!smokeRenderRecorded) {
           smokeRenderRecorded = true;
           await writeFile(smokeRenderFile, `${message}\n`);
@@ -411,81 +255,38 @@ export async function startDesktopHost(
     }
     await controller.receive(message);
   };
+
   try {
     mainTray.on("select", (id) => {
-      if (id === trayItemIds.open) {
-        mainWindow.show();
-        return;
-      }
-      if (id === trayItemIds.quit) {
-        void shutdown().catch((error: unknown) => console.error(error));
-      }
+      if (id === trayItemIds.open) mainWindow.show();
+      else if (id === trayItemIds.quit) void shutdown().catch(console.error);
     });
     mainWebView.on("message", (message) => {
-      void receiveMessage(message).catch((error: unknown) => {
-        console.error(error);
-      });
+      void receiveMessage(message).catch(console.error);
     });
     mainWindow.content(mainWebView);
     mainWebView.loadHTML(
       renderDesktopUi({ smokeAcknowledgement: smokeRenderFile !== undefined }),
     );
   } catch (error) {
-    await cleanNativeSetup(
-      mainWindow,
-      mainWebView,
-      liveTray,
-      publisherLock,
-      subscriberLock,
-      peerLock,
-      singleton,
-    );
+    await cleanNativeSetup(mainWindow, mainWebView, liveTray, peerLock, singleton);
     await closeDiagnostics();
     throw error;
   }
   mainWindow.on("willClose", () => {
     mainWindowClosed = true;
-    if (shutdownPromise !== undefined) return;
-    void shutdown().catch((error: unknown) => {
-      console.error(error);
-    });
+    if (shutdownPromise === undefined) void shutdown().catch(console.error);
   });
 
-  let startedRuntime: RunningDesktopRuntime;
   try {
     runtimeStartTask = dependencies.startRuntime({
-      ...(startupOptions.bootstrap
-        ? { bootstrap: startupOptions.bootstrap }
-        : {}),
-      ...(startupOptions.publisher
-        ? {
-            publisher: {
-              ...startupOptions.publisher,
-              lock: publisherLock,
-            },
-          }
-        : {}),
-      ...(startupOptions.subscriber
-        ? {
-            subscriber: {
-              ...startupOptions.subscriber,
-              lock: subscriberLock,
-            },
-          }
-        : {}),
-      ...(startupOptions.peer
-        ? {
-            peer: {
-              ...startupOptions.peer,
-              lock: peerLock,
-            },
-          }
-        : {}),
+      peer: { ...startupOptions.peer, lock: peerLock },
+      ...(startupOptions.bootstrap ? { bootstrap: startupOptions.bootstrap } : {}),
       onSnapshot: (snapshot) => {
         try {
           diagnostics.updateSnapshot(snapshot);
         } catch {
-          // Diagnostics are best effort and never affect runtime snapshots.
+          // Diagnostics are best effort.
         }
         if (liveTray) updateDesktopTray(liveTray, snapshot);
         controller.publish(snapshot);
@@ -493,24 +294,17 @@ export async function startDesktopHost(
       },
       onObservation: reportDiagnostic,
     });
-    startedRuntime = await runtimeStartTask;
+    runtime = await runtimeStartTask;
   } catch {
-    // startDesktopRuntime publishes a safe failed snapshot and releases every
-    // role lock it received. Keep the window open so the user can read it.
+    // Keep the window available to show the failure and allow shutdown.
     return { reconfigure, shutdown };
   }
-  if (shutdownPromise === undefined) {
-    runtime = startedRuntime;
-    try {
-      cancelPoll = dependencies.schedulePoll(() => {
-        void runtime?.poll().catch((error: unknown) => console.error(error));
-      });
-    } catch (error) {
-      await shutdown().catch(() => undefined);
-      throw error;
-    }
-  }
 
+  if (shutdownPromise === undefined) {
+    cancelPoll = dependencies.schedulePoll(() => {
+      void runtime?.poll().catch(console.error);
+    });
+  }
   return { reconfigure, shutdown };
 }
 
@@ -522,41 +316,29 @@ function requireRuntime(
 }
 
 async function cleanNativeSetup(
-  mainWindow: DesktopNativeWindow | undefined,
-  mainWebView: DesktopNativeWebView | undefined,
+  window: DesktopNativeWindow | undefined,
+  webView: DesktopNativeWebView | undefined,
   tray: DesktopTray | undefined,
-  publisherLock: RuntimeLock | undefined,
-  subscriberLock: RuntimeLock | undefined,
-  peerLock: RuntimeLock | undefined,
+  peerLock: RuntimeLock,
   singleton: RuntimeLock,
 ): Promise<void> {
-  const steps = [
+  for (const step of [
     () => tray?.destroy(),
-    () => mainWebView?.destroy(),
-    () => mainWindow?.close(),
-    () => subscriberLock?.release(),
-    () => publisherLock?.release(),
-    () => peerLock?.release(),
+    () => webView?.destroy(),
+    () => window?.close(),
+    () => peerLock.release(),
     () => singleton.release(),
-  ];
-  for (const step of steps) {
+  ]) {
     try {
       await step();
     } catch {
-      // Preserve the native setup error after attempting every cleanup step.
+      // Preserve the original setup error after attempting every cleanup.
     }
   }
 }
 
-export const defaultDesktopHostDependencies = {
+export const defaultDesktopHostDependencies: Omit<DesktopHostDependencies, "createWindow" | "createWebView" | "createTray" | "schedulePoll" | "exit"> = {
   acquireSingleton: acquireDesktopSingleton,
   acquirePeerLock: acquirePeerRuntimeLock,
-  acquirePublisherLock: acquirePublisherRuntimeLock,
-  acquireSubscriberLock: acquireSubscriberRuntimeLock,
   startRuntime: startDesktopRuntime,
-  setSubscriberPublisher: async (
-    options: Parameters<typeof setSubscriberPublisher>[0],
-  ) => {
-    await setSubscriberPublisher(options);
-  },
 };

@@ -19,7 +19,6 @@ export interface DesktopControllerOptions {
   cancelPairing(): Promise<void>;
   createPairingInvitation(): Promise<void>;
   denyPairing(): Promise<void>;
-  setSubscriberPublisher(publisherKey: string): Promise<void>;
   copyDiagnostics: () => Promise<string>;
   quit(): Promise<void>;
 }
@@ -70,13 +69,6 @@ export function createDesktopController(
       await options.denyPairing();
       return;
     }
-    if (command.type === "setSubscriberPublisher") {
-      if (current.subscriber?.connection !== "unconfigured") {
-        throw new Error("subscriber is already configured");
-      }
-      await options.setSubscriberPublisher(command.publisherKey);
-      return;
-    }
     if (command.type === "copyDiagnostics") {
       try {
         options.send(
@@ -116,19 +108,7 @@ export function createDesktopController(
       }
     }
 
-    const service = current.subscriber?.services.find(
-      ({ id }) => id === command.serviceId,
-    );
-    if (
-      service?.action !== "open" ||
-      !service.available ||
-      service.url === undefined
-    ) {
-      throw new Error(
-        `${command.serviceId} is not an available HTTP service`,
-      );
-    }
-    await options.openService(service.url);
+    throw new Error(`${command.serviceId} is not an available peer binding`);
   }
 
   return {

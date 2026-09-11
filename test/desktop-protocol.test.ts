@@ -10,70 +10,48 @@ import {
 const snapshot: DesktopSnapshot = {
   type: "snapshot",
   appPhase: "running",
-  publisher: {
+  peer: {
     phase: "running",
-    displayName: "This Mac",
-    publisherKey: "a7".repeat(32),
-    keyFingerprint: "a7".repeat(8),
-    activeSubscribers: 1,
-    activeSubscriberKeys: ["cd".repeat(32)],
-    acceptedConnections: 2,
-    services: [{ id: "site", name: "Site", source: { localPort: 8080 }, available: true }],
-  },
-  subscriber: {
-    phase: "running",
-    connection: "connected",
-    subscriberKey: "cd".repeat(32),
-    remotePublisher: {
-      displayName: "kosmos",
-      publisherKey: "e4".repeat(32),
-      keyFingerprint: "e499c38286e33f48",
-    },
+    peerKey: "a7".repeat(32),
     gatewayPort: 17_480,
-    services: [
-      {
-        id: "navidrome",
-        name: "Navidrome",
-        access: "http",
-        action: "copy-url",
-        icon: "music",
-        available: true,
-        url: "http://navidrome.localhost:17480",
-        copyText: "http://navidrome.localhost:17480",
-      },
-      {
-        id: "ssh",
-        name: "SSH",
-        access: "ssh",
-        action: "copy-command",
-        icon: "terminal",
-        available: true,
-        copyText: "ssh -p 2222 127.0.0.1",
-      },
-    ],
+    connections: [{
+      label: "phone",
+      publicKey: "cd".repeat(32),
+      connection: "accept",
+      status: "connected",
+      generation: 2,
+      capability: "ready",
+      services: 2,
+    }],
+    services: [{
+      id: "site",
+      name: "Site",
+      kind: "http",
+      source: { localPort: 8080 },
+      available: true,
+    }],
+    bindings: [{
+      peer: "phone",
+      service: "site",
+      listen: { localPort: 0 },
+      port: 42_000,
+      available: true,
+    }],
+    pairing: {
+      phase: "pending",
+      peerKey: "ef".repeat(32),
+      keyFingerprint: "ef".repeat(8),
+      label: "tablet",
+      platform: "android",
+    },
   },
 };
 
-test("desktop protocol accepts only closed page commands", () => {
-  assert.deepEqual(parseDesktopCommand('{"type":"ready"}'), {
-    type: "ready",
-  });
-  assert.deepEqual(
-    parseDesktopCommand(
-      '{"type":"openService","serviceId":"navidrome"}',
-    ),
-    { type: "openService", serviceId: "navidrome" },
-  );
-  assert.deepEqual(parseDesktopCommand('{"type":"quit"}'), {
-    type: "quit",
-  });
-  assert.deepEqual(
-    parseDesktopCommand(
-      JSON.stringify({ type: "setSubscriberPublisher", publisherKey: "ab".repeat(32) }),
-    ),
-    { type: "setSubscriberPublisher", publisherKey: "ab".repeat(32) },
-  );
+test("desktop protocol accepts only canonical page commands", () => {
   for (const type of [
+    "ready",
+    "quit",
+    "copyDiagnostics",
     "createPairingInvitation",
     "cancelPairing",
     "approvePairing",
@@ -81,61 +59,30 @@ test("desktop protocol accepts only closed page commands", () => {
   ]) {
     assert.deepEqual(parseDesktopCommand(JSON.stringify({ type })), { type });
   }
-  assert.throws(
-    () => parseDesktopCommand('{"type":"showHome"}'),
-    /unsupported/,
-  );
+  assert.deepEqual(parseDesktopCommand('{"type":"openService","serviceId":"site"}'), {
+    type: "openService",
+    serviceId: "site",
+  });
+  assert.throws(() => parseDesktopCommand('{"type":"setSubscriberPublisher"}'), /unsupported/);
+  assert.throws(() => parseDesktopCommand('{"type":"showHome"}'), /unsupported/);
 });
 
-test("desktop protocol rejects malformed, oversized, and open-ended commands", () => {
+test("desktop protocol rejects malformed and open-ended commands", () => {
   assert.throws(() => parseDesktopCommand("{"), /JSON/);
+  assert.throws(() => parseDesktopCommand("x".repeat(64 * 1024 + 1)), /64 KiB/);
+  assert.throws(() => parseDesktopCommand('{"type":"eval","source":"alert(1)"}'), /unsupported/);
   assert.throws(
-    () => parseDesktopCommand("x".repeat(64 * 1024 + 1)),
-    /64 KiB/,
-  );
-  assert.throws(
-    () => parseDesktopCommand('{"type":"eval","source":"alert(1)"}'),
-    /unsupported/,
-  );
-  assert.throws(
-    () =>
-      parseDesktopCommand(
-        '{"type":"openService","serviceId":"navidrome","url":"https://evil.example"}',
-      ),
-    /unknown field/,
-  );
-  assert.throws(
-    () =>
-      parseDesktopCommand(
-        '{"type":"openService","serviceId":"../../etc/passwd"}',
-      ),
+    () => parseDesktopCommand('{"type":"openService","serviceId":"../../etc/passwd"}'),
     /service id/,
   );
-  for (const publisherKey of ["AB".repeat(32), "a".repeat(63), "g".repeat(64)]) {
-    assert.throws(
-      () =>
-        parseDesktopCommand(
-          JSON.stringify({ type: "setSubscriberPublisher", publisherKey }),
-        ),
-      /publisher key is invalid/,
-    );
-  }
   assert.throws(
-    () =>
-      parseDesktopCommand(
-        JSON.stringify({
-          type: "setSubscriberPublisher",
-          publisherKey: "ab".repeat(32),
-          label: "publisher",
-        }),
-      ),
+    () => parseDesktopCommand('{"type":"openService","serviceId":"site","url":"https://evil.example"}'),
     /unknown field/,
   );
 });
 
-test("desktop snapshot serialization is stable and round-trippable", () => {
+test("desktop snapshot serialization is stable and does not contain private identity material", () => {
   const serialized = serializeDesktopSnapshot(snapshot);
-
   assert.equal(serialized, serializeDesktopSnapshot({ ...snapshot }));
   assert.deepEqual(JSON.parse(serialized), snapshot);
   assert.doesNotMatch(serialized, /seed|secret/i);

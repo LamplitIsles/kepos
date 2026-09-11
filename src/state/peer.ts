@@ -36,8 +36,8 @@ export interface ConvertPeerIdentityOptions {
   source: string;
   /** New peer state directory; it must not already exist. */
   destination: string;
-  /** Optional deployment assertion for the retained public key. */
-  expectedPublicKey?: string;
+  /** Required deployment assertion for the retained public key. */
+  expectedPublicKey: string;
 }
 
 export interface ConvertPeerIdentityResult {
@@ -117,13 +117,12 @@ export async function convertPeerIdentity(
   if (await pathExists(destination)) {
     throw new Error(`peer identity destination already exists: ${destination}`);
   }
+  if (!publicKeyPattern.test(options.expectedPublicKey)) {
+    throw new Error("expected public key must be 32 bytes of lowercase hex");
+  }
   const identity = await readLegacyIdentity(source);
   const publicKey = derivePublisherHomeKey(identity.seed);
-  if (
-    options.expectedPublicKey !== undefined &&
-    (!publicKeyPattern.test(options.expectedPublicKey) ||
-      options.expectedPublicKey !== publicKey)
-  ) {
+  if (options.expectedPublicKey !== publicKey) {
     throw new Error("converted peer identity does not match expected public key");
   }
   await writeStateDirectoryAtomically(
@@ -132,8 +131,6 @@ export async function convertPeerIdentity(
   );
   return { destination, publicKey };
 }
-
-export const convertLegacyIdentity = convertPeerIdentity;
 
 async function readLegacyIdentity(source: string): Promise<PeerIdentity> {
   const sourceStat = await lstat(source).catch((error: unknown) => {

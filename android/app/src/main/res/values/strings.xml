@@ -1,7 +1,7 @@
 <resources>
   <string name="app_name">Kepos</string>
   <string name="runtime_channel_name">Kepos connection</string>
-  <string name="runtime_notification_title">Kepos subscriber</string>
+  <string name="runtime_notification_title">Kepos peer</string>
   <string name="start">Start</string>
   <string name="stop">Stop</string>
 </resources>

@@ -33,7 +33,7 @@ test("Android host boundaries are explicit extraction seams", async () => {
   const notificationIcon = await readProjectFile(
     "android/app/src/main/res/drawable/ic_kepos_notification.xml",
   );
-  const subscriberRuntime = await readProjectFile("src/runtime/subscriber.ts");
+  const peerRuntime = await readProjectFile("src/runtime/peer.ts");
   const gateway = await readProjectFile("src/home/gateway.ts");
   const bareKitSession = await readProjectFile(
     "android/barekit-host/src/main/java/io/github/ttalab/barekit/host/BareKitRuntimeSession.kt",
@@ -59,7 +59,7 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.notEqual(
     await readProjectFile("src/android/worklet/main.ts"),
     null,
-    "missing real subscriber Worklet entry",
+    "missing real canonical peer Worklet entry",
   );
   assert.notEqual(
     await readProjectFile("scripts/fetch-bare-kit.ts"),
@@ -87,13 +87,11 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.match(foregroundService!, /START_STICKY/);
   assert.match(foregroundService!, /R\.drawable\.ic_kepos_notification/);
   assert.match(notificationIcon!, /M15,9H4V31H15M25,9H36V31H25M10,20H30/);
-  assert.match(foregroundService!, /filesDir\.resolve\("subscriber"\)/);
-  assert.match(foregroundService!, /BuildConfig\.GATEWAY_PORT/);
-  assert.match(foregroundService!, /BuildConfig\.MIHOMO_PORT/);
-  assert.match(foregroundService!, /BuildConfig\.DSH_PORT/);
-  assert.match(foregroundService!, /BuildConfig\.OPENCLAW_PORT/);
-  assert.doesNotMatch(foregroundService!, /BuildConfig\.NAVIDROME_PORT/);
-  assert.doesNotMatch(`${subscriberRuntime}\n${gateway}`, /\bAbortController\b/);
+  assert.match(foregroundService!, /filesDir\.resolve\("peer"\)/);
+  assert.match(foregroundService!, /filesDir\.resolve\("config\.toml"\)/);
+  assert.doesNotMatch(foregroundService!, /BuildConfig\.[A-Z_]+/);
+  assert.match(peerRuntime!, /export async function startPeer/);
+  assert.doesNotMatch(`${peerRuntime}\n${gateway}`, /startSubscriber|startPublisher/);
   assert.doesNotMatch(workflow!, /uses: actions\/(?:checkout|setup-node)@v\d/);
   assert.ok(
     bareKitSession!.indexOf("worklet.start") < bareKitSession!.indexOf("armRead()"),
@@ -125,23 +123,13 @@ test("Android device commands isolate tests and preserve installed state", async
   );
   assert.match(appBuild!, /create\("deviceTest"\)/);
   assert.match(appBuild!, /applicationIdSuffix\s*=\s*"\.devicetest"/);
-  assert.match(appBuild!, /GATEWAY_PORT.*18480/);
-  assert.match(appBuild!, /MIHOMO_PORT.*18490/);
-  assert.match(appBuild!, /DSH_PORT.*18380/);
-  assert.match(appBuild!, /OPENCLAW_PORT.*19789/);
-  assert.match(foregroundService!, /BuildConfig\.GATEWAY_PORT/);
-  assert.match(foregroundService!, /BuildConfig\.MIHOMO_PORT/);
-  assert.match(foregroundService!, /BuildConfig\.DSH_PORT/);
-  assert.match(foregroundService!, /BuildConfig\.OPENCLAW_PORT/);
-  assert.match(lifecycleTest!, /BuildConfig\.GATEWAY_PORT/);
-  assert.match(lifecycleTest!, /BuildConfig\.MIHOMO_PORT/);
-  assert.match(lifecycleTest!, /BuildConfig\.DSH_PORT/);
-  assert.match(lifecycleTest!, /BuildConfig\.OPENCLAW_PORT/);
+  assert.doesNotMatch(appBuild!, /(?:GATEWAY|MIHOMO|DSH|OPENCLAW|SSH)_PORT/);
+  assert.match(foregroundService!, /filesDir\.resolve\("peer"\)/);
+  assert.match(foregroundService!, /filesDir\.resolve\("config\.toml"\)/);
+  assert.doesNotMatch(`${foregroundService}\n${lifecycleTest}`, /BuildConfig\.[A-Z_]+/);
   assert.match(worklet!, /Bare\.argv\[2\]/);
   assert.match(worklet!, /Bare\.argv\[3\]/);
-  assert.match(worklet!, /Bare\.argv\[4\]/);
-  assert.match(worklet!, /Bare\.argv\[5\]/);
-  assert.match(worklet!, /Bare\.argv\[6\]/);
+  assert.doesNotMatch(worklet!, /Bare\.argv\[(?:4|5|6)\]/);
   assert.match(foregroundService!, /kepos-bootstrap\.json/);
   assert.match(foregroundService!, /readText\(\)/);
   assert.match(readme!, /npm run android:install/);
@@ -200,7 +188,7 @@ test("Android release build is optimized and signed only on the release Mac", as
   );
 });
 
-test("Android subscriber waits for startup and exposes the real service registry", async () => {
+test("Android peer waits for startup and exposes the canonical runtime snapshot", async () => {
   const worklet = await readProjectFile("src/android/worklet/main.ts");
   const runtimeState = await readProjectFile(
     "android/barekit-host/src/main/java/io/github/ttalab/barekit/host/RuntimeStateMachine.kt",
@@ -212,14 +200,13 @@ test("Android subscriber waits for startup and exposes the real service registry
     "docs/evidence/android-navic-subscriber-spike.md",
   );
 
-  assert.match(worklet!, /await connectTask/);
-  assert.match(worklet!, /readHomeRegistry/);
-  assert.match(worklet!, /initialConnectionState\?\.pending/);
-  assert.match(worklet!, /createAndroidRegistrySnapshot/);
-  assert.match(runtimeState!, /val publisher: PublisherSnapshot\?/);
+  assert.match(worklet!, /await startPeer/);
+  assert.match(worklet!, /loadOrCreateConfig/);
+  assert.match(worklet!, /saveKeposConfig/);
+  assert.match(runtimeState!, /data class PeerConnectionSnapshot/);
   assert.match(runtimeState!, /val services: List<ServiceSnapshot>/);
-  assert.match(screen!, /Remote services/);
-  assert.match(screen!, /Scan another code/);
-  assert.doesNotMatch(screen!, /Copy Home URL/);
+  assert.match(screen!, /Peer services/);
+  assert.match(screen!, /Configured services/);
+  assert.doesNotMatch(screen!, /Scan another code|Copy Home URL/);
   assert.doesNotMatch(evidence!, /124\.160\.204\.171/);
 });

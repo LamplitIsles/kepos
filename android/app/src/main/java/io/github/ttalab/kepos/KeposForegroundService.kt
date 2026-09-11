@@ -83,30 +83,25 @@ class KeposForegroundService : Service() {
 
   private fun stopRuntime() {
     restartController.stop()
-    runtime.stop().whenComplete { _, _ ->
-      handler.post { finishServiceStop() }
-    }
+    runtime.stop().whenComplete { _, _ -> handler.post { finishServiceStop() } }
   }
 
   private fun startRuntime() {
     val state = runtime.snapshot().state
     if (state != RuntimeState.STOPPED && state != RuntimeState.FAILED) return
     try {
-      val stateDir = filesDir.resolve("subscriber")
+      val peerStateDir = filesDir.resolve("peer")
+      val configPath = filesDir.resolve("config.toml")
       runtime.start(
         assets.open(WORKLET_ASSET),
         arguments = arrayOf(
-          stateDir.absolutePath,
-          BuildConfig.GATEWAY_PORT.toString(),
-          BuildConfig.MIHOMO_PORT.toString(),
-          BuildConfig.DSH_PORT.toString(),
-          BuildConfig.OPENCLAW_PORT.toString(),
-          BuildConfig.SSH_PORT.toString(),
+          peerStateDir.absolutePath,
+          configPath.absolutePath,
           readBootstrapAsset(),
         ),
       )
     } catch (error: Throwable) {
-      Log.e(LOG_TAG, "Bare Worklet failed to start", error)
+      Log.e(LOG_TAG, "Bare peer Worklet failed to start", error)
     }
   }
 
@@ -158,16 +153,6 @@ class KeposForegroundService : Service() {
     fun snapshot(): RuntimeSnapshot = runtime.snapshot()
 
     fun ping(): CompletableFuture<RuntimeSnapshot> = runtime.ping()
-
-    fun configurePublisher(publisherKey: String): CompletableFuture<RuntimeSnapshot> =
-      runtime.configurePublisher(publisherKey)
-
-    fun pairPublisher(
-      invitation: String,
-      deviceLabel: String,
-      platform: String,
-    ): CompletableFuture<RuntimeSnapshot> =
-      runtime.pairPublisher(invitation, deviceLabel, platform)
 
     fun observe(listener: (RuntimeSnapshot) -> Unit): AutoCloseable {
       listeners += listener

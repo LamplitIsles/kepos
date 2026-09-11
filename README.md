@@ -136,7 +136,7 @@ operation. This repository has not converted real NUC or Mac state.
 
 | Surface | Canonical boundary |
 | --- | --- |
-| Android | Existing subscriber client and legacy wire target; TCP/HTTP service mappings, no reverse-service UI or UDP listener |
+| Android | One canonical peer runtime in the foreground service; canonical config/state and status UI, no reverse-service UI or reverse UDP |
 | macOS | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix byte-stream endpoints |
 | Windows | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix sockets fail clearly |
 | Headless CLI | Node.js 24 `peer` setup/key/status/pair/convert/run commands, gateway, TCP/HTTP/UDP service paths |

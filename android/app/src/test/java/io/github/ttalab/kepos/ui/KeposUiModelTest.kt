@@ -1,10 +1,13 @@
 package io.github.ttalab.kepos.ui
 
-import io.github.ttalab.barekit.host.PublisherSnapshot
+import io.github.ttalab.barekit.host.BindingSnapshot
+import io.github.ttalab.barekit.host.PeerConnectionSnapshot
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 import io.github.ttalab.barekit.host.ServiceSnapshot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KeposUiModelTest {
@@ -16,181 +19,57 @@ class KeposUiModelTest {
   }
 
   @Test
-  fun unconfiguredRuntimeShowsSetupInsteadOfAnEmptyServiceHome() {
-    val model = KeposUiModel.from(
-      RuntimeSnapshot(RuntimeState.RUNNING, configured = false),
-    )
-
-    assertEquals(KeposDestination.SETUP, model.destination)
-  }
-
-  @Test
-  fun configuredRuntimeWaitsForARealPublisherRegistry() {
-    val model = KeposUiModel.from(
-      RuntimeSnapshot(
-        RuntimeState.RUNNING,
-        configured = true,
-        connection = "connecting",
-      ),
-    )
+  fun startingRuntimeShowsTheCanonicalLoadingState() {
+    val model = KeposUiModel.from(RuntimeSnapshot(RuntimeState.STARTING))
 
     assertEquals(KeposDestination.CONNECTING, model.destination)
-    assertEquals(emptyList<ServiceUiModel>(), model.services)
+    assertTrue(model.services.isEmpty())
   }
 
   @Test
-  fun pairingProgressDistinguishesNetworkSetupFromHumanApproval() {
-    assertEquals("Sending pairing request", connectionTitle("pairing-connecting"))
-    assertEquals(
-      "Kepos is finding and authenticating the publisher from the invitation.",
-      connectionDetail("pairing-connecting"),
+  fun runningPeerExposesIdentityConnectionsServicesAndBindings() {
+    val model = KeposUiModel.from(
+      RuntimeSnapshot(
+        state = RuntimeState.RUNNING,
+        peerKey = "ab".repeat(32),
+        connections = listOf(
+          PeerConnectionSnapshot(
+            label = "desktop",
+            publicKey = "cd".repeat(32),
+            connection = "dial",
+            status = "connected",
+            generation = 1,
+            capability = "ready",
+            services = 2,
+          ),
+        ),
+        services = listOf(
+          ServiceSnapshot("ssh", "SSH", "tcp", true),
+          ServiceSnapshot("photos", "Photos", "http", false, "offline"),
+        ),
+        bindings = listOf(
+          BindingSnapshot("desktop", "ssh", "127.0.0.1", 2200, true),
+        ),
+      ),
     )
-    assertEquals("Waiting for approval", connectionTitle("awaiting-approval"))
-    assertEquals(
-      "The request reached your publisher. Choose Allow on that device.",
-      connectionDetail("awaiting-approval"),
-    )
-  }
-
-  @Test
-  fun serviceHomeUsesPublisherNameAndPreservesRegistryOrder() {
-    val model = KeposUiModel.from(connectedSnapshot())
 
     assertEquals(KeposDestination.SERVICES, model.destination)
-    assertEquals("kosmos", model.publisherName)
-    assertEquals(listOf("forgejo", "navidrome"), model.services.map { it.id })
+    assertEquals("ab".repeat(32), model.peerKey)
+    assertEquals("connected", model.connection)
+    assertEquals(listOf("ssh", "photos"), model.services.map { it.id })
+    assertEquals(1, model.bindings)
+    assertTrue(model.available)
+    assertFalse(model.services[1].available)
+    assertEquals("offline", model.services[1].error)
   }
 
   @Test
-  fun serviceActionsAndIconsFollowTheRealAccessSurface() {
-    val services = KeposUiModel.from(connectedSnapshot()).services
-
-    assertEquals(ServiceAction.OPEN, services[0].action)
-    assertEquals(ServiceIcon.GIT, services[0].icon)
-    assertEquals(ServiceAction.COPY_URL, services[1].action)
-    assertEquals(ServiceIcon.MUSIC, services[1].icon)
-  }
-
-  @Test
-  fun buildServicesUseTheSharedHammerIconKind() {
-    val snapshot = connectedSnapshot().copy(
-      services = listOf(
-        ServiceSnapshot(
-          id = "woodpecker",
-          name = "Woodpecker",
-          access = "http",
-          action = "open",
-          icon = "build",
-          url = "http://woodpecker.localhost:17480/",
-        ),
-      ),
+  fun failedRuntimeSurfacesItsError() {
+    val model = KeposUiModel.from(
+      RuntimeSnapshot(RuntimeState.FAILED, error = "peer stopped"),
     )
 
-    val service = KeposUiModel.from(snapshot).services.single()
-
-    assertEquals(ServiceIcon.BUILD, service.icon)
+    assertEquals(KeposDestination.FAILED, model.destination)
+    assertEquals("peer stopped", model.error)
   }
-
-  @Test
-  fun newRegistryServicesUseDedicatedIcons() {
-    val snapshot = connectedSnapshot().copy(
-      services = listOf(
-        ServiceSnapshot("bookorbit", "BookOrbit", "http", "open", "book"),
-        ServiceSnapshot("mihomo", "Mihomo", "tcp", "copy-url", "proxy"),
-        ServiceSnapshot(
-          "mihomo-dashboard",
-          "Mihomo Dashboard",
-          "http",
-          "open",
-          "dashboard",
-        ),
-      ),
-    )
-
-    val services = KeposUiModel.from(snapshot).services
-
-    assertEquals(ServiceIcon.BOOK, services[0].icon)
-    assertEquals(ServiceIcon.PROXY, services[1].icon)
-    assertEquals(ServiceIcon.DASHBOARD, services[2].icon)
-  }
-
-  @Test
-  fun servicesWithoutAnActionAreOmitted() {
-    val snapshot = connectedSnapshot().copy(
-      services = listOf(
-        ServiceSnapshot(
-          id = "photos",
-          name = "Photos",
-          access = "http",
-          url = "http://photos.localhost:17480/",
-        ),
-        ServiceSnapshot(id = "database", name = "Database", access = "tcp"),
-      ),
-    )
-
-    val services = KeposUiModel.from(snapshot).services
-
-    assertEquals(emptyList<ServiceUiModel>(), services)
-  }
-
-  @Test
-  fun entePhotosAndStorageBothCopyTheirUrls() {
-    val snapshot = connectedSnapshot().copy(
-      services = listOf(
-        ServiceSnapshot(
-          id = "ente",
-          name = "Ente Photos",
-          access = "http",
-          action = "copy-url",
-          icon = "photos",
-          url = "http://ente.localhost:17480",
-          copyText = "http://ente.localhost:17480",
-        ),
-        ServiceSnapshot(
-          id = "ente-storage",
-          name = "Ente Storage",
-          access = "http",
-          action = "copy-url",
-          icon = "storage",
-          url = "http://ente-storage.localhost:17480",
-          copyText = "http://ente-storage.localhost:17480",
-        ),
-      ),
-    )
-
-    val services = KeposUiModel.from(snapshot).services
-
-    assertEquals(ServiceAction.COPY_URL, services[0].action)
-    assertEquals(ServiceIcon.PHOTOS, services[0].icon)
-    assertEquals("http://ente.localhost:17480", services[0].url)
-    assertEquals(ServiceAction.COPY_URL, services[1].action)
-    assertEquals(ServiceIcon.STORAGE, services[1].icon)
-    assertEquals("http://ente-storage.localhost:17480", services[1].url)
-  }
-
-  private fun connectedSnapshot() = RuntimeSnapshot(
-    state = RuntimeState.RUNNING,
-    configured = true,
-    connection = "connected",
-    publisher = PublisherSnapshot("kosmos", "ab".repeat(32)),
-    services = listOf(
-      ServiceSnapshot(
-        id = "forgejo",
-        name = "Forgejo",
-        access = "http",
-        action = "open",
-        icon = "git",
-        url = "http://forgejo.localhost:17480/",
-      ),
-      ServiceSnapshot(
-        id = "navidrome",
-        name = "Navidrome",
-        access = "http",
-        action = "copy-url",
-        icon = "music",
-        url = "http://navidrome.localhost:17480",
-        copyText = "http://navidrome.localhost:17480",
-      ),
-    ),
-  )
 }

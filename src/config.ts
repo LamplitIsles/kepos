@@ -1,45 +1,8 @@
 import b4a from "b4a";
 
-export interface PublisherIdentity {
-  seed: string;
-}
-
-export interface SubscriberDevice {
-  publicKey: string;
-  label: string;
-}
-
-export interface SubscriberContact {
-  publisherKey: string;
-  label: string;
-  requestedLocalPort: number;
-}
-
-export interface LocalPublisherServiceSource {
-  localPort: number;
-}
-
-export interface UpstreamPublisherServiceSource {
-  publisherKey: string;
-  serviceId: string;
-}
-
-export type PublisherServiceSource =
-  | LocalPublisherServiceSource
-  | UpstreamPublisherServiceSource;
-
-export interface PublisherService {
-  id: string;
-  name: string;
-  kind: "tcp" | "http" | "udp";
-  source: PublisherServiceSource;
-  allow?: string[];
-  maxPublisherToSubscriberBps?: number;
-}
-
 const keyHexPattern = /^[0-9a-f]{64}$/;
 const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
-const maximumSubscriberLabelBytes = 128;
+const peerLabelMaximumBytes = 128;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -49,7 +12,6 @@ function parseKeyHex(value: unknown, field: string): string {
   if (typeof value !== "string" || !keyHexPattern.test(value)) {
     throw new Error(`${field} must be 32 bytes of lowercase hex`);
   }
-
   return value;
 }
 
@@ -58,10 +20,10 @@ function rejectUnknownFields(
   allowedFields: readonly string[],
   subject: string,
 ): void {
-  const unknownField = Object.keys(value).find((field) => !allowedFields.includes(field));
-  if (unknownField) {
-    throw new Error(`${subject} has unknown field: ${unknownField}`);
-  }
+  const unknownField = Object.keys(value).find(
+    (field) => !allowedFields.includes(field),
+  );
+  if (unknownField) throw new Error(`${subject} has unknown field: ${unknownField}`);
 }
 
 function parseNonEmptyString(value: unknown, field: string): string {
@@ -71,241 +33,6 @@ function parseNonEmptyString(value: unknown, field: string): string {
   return value;
 }
 
-export function parseSubscriberDevice(
-  value: unknown,
-  field = "subscriber device",
-): SubscriberDevice {
-  if (!isRecord(value)) {
-    throw new Error(`${field} must be an object`);
-  }
-  rejectUnknownFields(value, ["publicKey", "label"], field);
-  const publicKey = parseKeyHex(value.publicKey, `${field}.publicKey`);
-  const label = value.label;
-  if (
-    typeof label !== "string" ||
-    label.length === 0 ||
-    label.trim() !== label ||
-    b4a.byteLength(label, "utf8") > maximumSubscriberLabelBytes ||
-    /[\u0000-\u001f\u007f]/u.test(label)
-  ) {
-    throw new Error(`${field}.label must be a non-empty bounded label`);
-  }
-  return { publicKey, label };
-}
-
-export function parseSubscriberDevices(
-  value: unknown,
-  field = "subscribers",
-): SubscriberDevice[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`${field} must be an array`);
-  }
-  const devices = value.map((entry, index) =>
-    parseSubscriberDevice(entry, `${field}[${index}]`),
-  );
-  const labels = new Set<string>();
-  const keys = new Set<string>();
-  for (const device of devices) {
-    if (labels.has(device.label)) {
-      throw new Error(`duplicate subscriber device label: ${device.label}`);
-    }
-    if (keys.has(device.publicKey)) {
-      throw new Error(`duplicate subscriber device public key: ${device.publicKey}`);
-    }
-    labels.add(device.label);
-    keys.add(device.publicKey);
-  }
-  return devices;
-}
-
-function parseLocalPort(value: unknown, field = "localPort"): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65_535) {
-    throw new Error(`${field} must be an integer from 1 through 65535`);
-  }
-  return value;
-}
-
-function parseUpstreamServiceId(value: unknown, field: string): string {
-  if (typeof value !== "string" || !serviceIdPattern.test(value)) {
-    throw new Error(`${field} must be a lowercase service identifier`);
-  }
-  return value;
-}
-
-function parsePublisherServiceSource(
-  value: unknown,
-  field: string,
-): PublisherServiceSource {
-  if (!isRecord(value)) {
-    throw new Error(`${field} must be an object`);
-  }
-  const hasLocalPort = Object.prototype.hasOwnProperty.call(value, "localPort");
-  const hasPublisherKey = Object.prototype.hasOwnProperty.call(value, "publisherKey");
-  const hasServiceId = Object.prototype.hasOwnProperty.call(value, "serviceId");
-  if (hasLocalPort && (hasPublisherKey || hasServiceId)) {
-    throw new Error(`${field} must describe either a local or upstream source`);
-  }
-  if (!hasLocalPort && !hasPublisherKey && !hasServiceId) {
-    throw new Error(`${field} must describe a local or upstream source`);
-  }
-  if (hasLocalPort) {
-    rejectUnknownFields(value, ["localPort"], field);
-    return { localPort: parseLocalPort(value.localPort, `${field}.localPort`) };
-  }
-  rejectUnknownFields(value, ["publisherKey", "serviceId"], field);
-  if (!hasPublisherKey || !hasServiceId) {
-    throw new Error(`${field} upstream source requires publisherKey and serviceId`);
-  }
-  return {
-    publisherKey: parseKeyHex(value.publisherKey, `${field}.publisherKey`),
-    serviceId: parseUpstreamServiceId(value.serviceId, `${field}.serviceId`),
-  };
-}
-
-function parseMaxPublisherToSubscriberBps(
-  value: unknown,
-  field = "maxPublisherToSubscriberBps",
-): number {
-  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
-    throw new Error(`${field} must be a positive safe integer`);
-  }
-  return value as number;
-}
-
-export function parsePublisherIdentity(value: unknown): PublisherIdentity {
-  if (!isRecord(value)) {
-    throw new Error("publisher identity must be an object");
-  }
-  rejectUnknownFields(value, ["seed"], "publisher identity");
-
-  const seed = parseKeyHex(value.seed, "seed");
-  return { seed };
-}
-
-export function serializePublisherIdentity(
-  identity: PublisherIdentity,
-): string {
-  return `${JSON.stringify(parsePublisherIdentity(identity), null, 2)}\n`;
-}
-
-export function parseSubscriberContact(value: unknown): SubscriberContact {
-  if (!isRecord(value)) {
-    throw new Error("subscriber contact must be an object");
-  }
-  rejectUnknownFields(
-    value,
-    ["publisherKey", "label", "requestedLocalPort"],
-    "subscriber contact",
-  );
-
-  const publisherKey = parseKeyHex(value.publisherKey, "publisherKey");
-  if (typeof value.label !== "string" || value.label.trim().length === 0) {
-    throw new Error("label must be a non-empty string");
-  }
-  if (
-    typeof value.requestedLocalPort !== "number" ||
-    !Number.isInteger(value.requestedLocalPort) ||
-    value.requestedLocalPort < 0 ||
-    value.requestedLocalPort > 65_535
-  ) {
-    throw new Error("requestedLocalPort must be an integer from 0 through 65535");
-  }
-
-  return {
-    publisherKey,
-    label: value.label,
-    requestedLocalPort: value.requestedLocalPort,
-  };
-}
-
-export function serializeSubscriberContact(contact: SubscriberContact): string {
-  return `${JSON.stringify(parseSubscriberContact(contact), null, 2)}\n`;
-}
-
-export function parsePublisherService(
-  value: unknown,
-  field = "publisher service",
-): PublisherService {
-  if (!isRecord(value)) {
-    throw new Error(`${field} must be an object`);
-  }
-  rejectUnknownFields(
-    value,
-    [
-      "id",
-      "name",
-      "kind",
-      "source",
-      "allow",
-      "maxPublisherToSubscriberBps",
-    ],
-    field,
-  );
-  if (typeof value.id !== "string" || !serviceIdPattern.test(value.id)) {
-    throw new Error(`${field}.id must be a lowercase service identifier`);
-  }
-  if (value.id === "home") {
-    throw new Error(`${field}.id uses reserved service id home`);
-  }
-  const kind = value.kind === undefined ? "tcp" : value.kind;
-  if (kind !== "tcp" && kind !== "http" && kind !== "udp") {
-    throw new Error(`${field}.kind must be tcp or http or udp`);
-  }
-
-  return {
-    id: value.id,
-    name: parseNonEmptyString(value.name, `${field}.name`),
-    kind,
-    source: parsePublisherServiceSource(value.source, `${field}.source`),
-    ...(value.allow === undefined
-      ? {}
-      : { allow: parseServiceAllow(value.allow, `${field}.allow`) }),
-    ...(value.maxPublisherToSubscriberBps === undefined
-      ? {}
-      : {
-          maxPublisherToSubscriberBps: parseMaxPublisherToSubscriberBps(
-            value.maxPublisherToSubscriberBps,
-            `${field}.maxPublisherToSubscriberBps`,
-          ),
-        }),
-  };
-}
-
-function parseServiceAllow(value: unknown, field: string): string[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`${field} must be an array`);
-  }
-  return value.map((entry, index) =>
-    parseKeyHex(entry, `${field}[${index}]`),
-  );
-}
-
-export function parsePublisherServices(
-  value: unknown,
-  field = "services",
-): PublisherService[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`${field} must be an array`);
-  }
-  const seenIds = new Set<string>();
-  return value.map((entry, index) => {
-    const service = parsePublisherService(entry, `${field}[${index}]`);
-    if (seenIds.has(service.id)) {
-      throw new Error(`duplicate service id: ${service.id}`);
-    }
-    seenIds.add(service.id);
-    return service;
-  });
-}
-
-/**
- * The configuration model used by the peer runtime.
- *
- * The publisher/subscriber types above are retained only by the legacy wire
- * adapters.  TOML readers and new runtime callers use these peer-oriented
- * types instead; a peer has one identity and a connection direction is a
- * property of a configured relationship, never of that identity.
- */
 export type PeerConnectionDirection = "dial" | "accept";
 
 export interface PeerDefinition {
@@ -370,8 +97,6 @@ export interface PeerConfig {
   bindings: PeerBinding[];
 }
 
-const peerLabelMaximumBytes = 128;
-
 function parsePeerReference(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim() !== value || value.length === 0) {
     throw new Error(`${field} must be a non-empty peer label or public key`);
@@ -432,7 +157,6 @@ function parsePeerServiceSource(
   field: string,
 ): PeerServiceSource {
   if (!isRecord(value)) throw new Error(`${field} must be an object`);
-  const endpointKeys = ["localPort", "unixSocket"] as const;
   const hasLocalPort = Object.prototype.hasOwnProperty.call(value, "localPort");
   const hasUnixSocket = Object.prototype.hasOwnProperty.call(value, "unixSocket");
   const hasPeer = Object.prototype.hasOwnProperty.call(value, "peer");
@@ -448,11 +172,11 @@ function parsePeerServiceSource(
     throw new Error(`${field} must describe exactly one local endpoint`);
   }
   if (hasLocalPort) {
-    rejectUnknownFields(value, endpointKeys, field);
+    rejectUnknownFields(value, ["localPort"], field);
     return { localPort: parsePeerPort(value.localPort, `${field}.localPort`, false) };
   }
   if (hasUnixSocket) {
-    rejectUnknownFields(value, endpointKeys, field);
+    rejectUnknownFields(value, ["unixSocket"], field);
     return { unixSocket: parseAbsoluteUnixSocket(value.unixSocket, `${field}.unixSocket`) };
   }
   rejectUnknownFields(value, ["peer", "service"], field);
@@ -521,13 +245,10 @@ function parsePeerService(value: unknown, field: string): PeerService {
   if (kind === "udp" && "unixSocket" in source) {
     throw new Error(`${field}.source Unix sockets cannot provide UDP services`);
   }
-  const maxPublisherToSubscriberBps = value.maxPublisherToSubscriberBps as
-    | number
-    | undefined;
+  const maxRate = value.maxPublisherToSubscriberBps as number | undefined;
   if (
-    maxPublisherToSubscriberBps !== undefined &&
-    (!Number.isSafeInteger(maxPublisherToSubscriberBps) ||
-      (maxPublisherToSubscriberBps as number) <= 0)
+    maxRate !== undefined &&
+    (!Number.isSafeInteger(maxRate) || maxRate <= 0)
   ) {
     throw new Error(`${field}.maxPublisherToSubscriberBps must be a positive safe integer`);
   }
@@ -537,9 +258,7 @@ function parsePeerService(value: unknown, field: string): PeerService {
     kind,
     source,
     allow: parsePeerAllow(value.allow, `${field}.allow`),
-    ...(maxPublisherToSubscriberBps === undefined
-      ? {}
-      : { maxPublisherToSubscriberBps }),
+    ...(maxRate === undefined ? {} : { maxPublisherToSubscriberBps: maxRate }),
   };
 }
 
@@ -590,9 +309,7 @@ export function parsePeerConfig(value: unknown): PeerConfig {
   for (const service of services) {
     if (serviceIds.has(service.id)) throw new Error(`duplicate service id: ${service.id}`);
     serviceIds.add(service.id);
-    if ("peer" in service.source) {
-      resolvePeerReference(service.source.peer, peers, "service source peer");
-    }
+    if ("peer" in service.source) resolvePeerReference(service.source.peer, peers, "service source peer");
     for (const publicKey of service.allow) {
       if (!publicKeys.has(publicKey)) {
         throw new Error(`service ${service.id} allow references an unknown peer public key`);
@@ -603,11 +320,6 @@ export function parsePeerConfig(value: unknown): PeerConfig {
   const bindingKeys = new Set<string>();
   for (const [index, binding] of bindings.entries()) {
     resolvePeerReference(binding.peer, peers, `bindings[${index}].peer`);
-    if (!serviceIds.has(binding.service)) {
-      // A binding intentionally names a remote service, so only the local
-      // identifier syntax is known at this layer. Availability is resolved at
-      // runtime from the authenticated remote catalog.
-    }
     const peerKey = keyHexPattern.test(binding.peer)
       ? binding.peer
       : peers.find(({ label }) => label === binding.peer)!.publicKey;
@@ -633,7 +345,9 @@ function parsePeerNetwork(value: unknown): PeerNetworkConfig {
     bootstrap = value.bootstrap.map((entry, index) => {
       if (!isRecord(entry)) throw new Error(`network.bootstrap[${index}] must be an object`);
       rejectUnknownFields(entry, ["host", "port"], `network.bootstrap[${index}]`);
-      if (typeof entry.host !== "string" || entry.host.length === 0) throw new Error(`network.bootstrap[${index}].host must be non-empty`);
+      if (typeof entry.host !== "string" || entry.host.length === 0) {
+        throw new Error(`network.bootstrap[${index}].host must be non-empty`);
+      }
       return { host: entry.host, port: parsePeerPort(entry.port, `network.bootstrap[${index}].port`, false) };
     });
     if (bootstrap.length === 0) bootstrap = undefined;

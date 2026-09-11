@@ -40,7 +40,7 @@ function transportObservation(
     timestamp,
     elapsedMs: 12,
     event: "outer.closed",
-    role: "subscriber",
+    role: "peer",
     route: "auto",
     outerId: "outer-0123456789abcdef",
     channelId: "0123456789abcdef0123456789abcdef",
@@ -101,7 +101,7 @@ test("desktop diagnostics final boundary is closed and drops hostile values", ()
   assert.deepEqual(normalized, {
     source: "transport",
     timestamp,
-    role: "subscriber",
+    role: "peer",
     event: "outer.closed",
     route: "auto",
     outerId: "outer-0123456789abcdef",
@@ -350,7 +350,7 @@ test("desktop diagnostics summary selects exactly the latest 200 events", async 
         timestamp,
         elapsedMs: index,
         event: "channel.close",
-        role: "subscriber",
+        role: "peer",
         outerId: `outer-${index.toString(16).padStart(16, "0")}`,
         channelId: index.toString(16).padStart(32, "0"),
         bytes: index,
@@ -378,26 +378,12 @@ test("desktop diagnostic sinks remove roles absent from the current snapshot", a
   const snapshot = {
     type: "snapshot" as const,
     appPhase: "running" as const,
-    publisher: {
+    peer: {
       phase: "running" as const,
-      activeSubscribers: 1,
-      activeSubscriberKeys: [],
-      acceptedConnections: 1,
-      services: [{ id: "ssh", name: "SSH", source: { localPort: 22 }, available: true }],
-    },
-    subscriber: {
-      phase: "running" as const,
-      connection: "connected" as const,
-      services: [
-        {
-          id: "home",
-          name: "Home",
-          access: "http" as const,
-          action: "open" as const,
-          icon: "web" as const,
-          available: true,
-        },
-      ],
+      peerKey: "ab".repeat(32),
+      connections: [],
+      services: [],
+      bindings: [],
     },
   };
   try {
@@ -501,7 +487,7 @@ test("desktop diagnostics create test-owned macOS and Windows-path artifacts", a
       const sink = createDesktopDiagnosticSink({ directory, platform });
       try {
         await sink.ready;
-        sink.observe(transportObservation({ role: "subscriber" }));
+        sink.observe(transportObservation({ role: "peer" }));
         await waitFor(async () => {
           try {
             return (
@@ -537,7 +523,6 @@ test("desktop diagnostics command is bounded and serialized with controller comm
     cancelPairing: async () => undefined,
     createPairingInvitation: async () => undefined,
     denyPairing: async () => undefined,
-    setSubscriberPublisher: async () => undefined,
     copyDiagnostics: async () => {
       await pending;
       return JSON.stringify({ platform: "win32", droppedEvents: 0, roles: {}, events: [] });

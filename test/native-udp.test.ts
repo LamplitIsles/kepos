@@ -1,11 +1,5 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { createSocket, type Socket as UdpSocket } from "node:dgram";
-import { mkdtemp, rm } from "node:fs/promises";
-import { createConnection, createServer, type Server } from "node:net";
-import os from "node:os";
-import path from "node:path";
-import { once } from "node:events";
 import { test } from "node:test";
 
 import {
@@ -14,41 +8,16 @@ import {
   encodeUdpDataEnvelopes,
   encodeUdpEnvelope,
   UdpDatagramReassembler,
+  UDP_ENVELOPE_HEADER_BYTES,
   UDP_CARRIER_FRAGMENT_PAYLOAD_BYTES,
+  UDP_FRAGMENT_HEADER_BYTES,
   UDP_FLOW_ID_BYTES,
+  UDP_MAX_SERVICE_ID_BYTES,
   UDP_MAX_PAYLOAD_BYTES,
   createUdpPublisherForwarder,
   createUdpSubscriberTransport,
+  type RunningUdpSubscriberTransport,
 } from "../src/mux/udp.js";
-import { parsePeerConfig } from "../src/config.js";
-import { createDht, keyPairFromSeed, type DhtNode } from "../src/mux/hyperdht.js";
-import { createAndroidRegistrySnapshot } from "../src/android/services.js";
-import type { HomeRegistry } from "../src/home/registry.js";
-import { createServicePresentations } from "../src/runtime/service-handlers.js";
-import { parseSubscriberService } from "../src/cli/options.js";
-import {
-  setupPublisher,
-} from "../src/state/publisher.js";
-import {
-  setSubscriberPublisher,
-  setupSubscriber,
-} from "../src/state/subscriber.js";
-import {
-  startPublisher,
-  type PublisherRuntimePolicy,
-} from "../src/runtime/publisher.js";
-import { startSubscriber } from "../src/runtime/subscriber.js";
-import { startPeer, type RunningPeer } from "../src/runtime/peer.js";
-import { listenSubscriberUdpService } from "../src/runtime/udp.js";
-import { loadPeerIdentity, setupPeer } from "../src/state/peer.js";
-
-const require = createRequire(import.meta.url);
-const createHyperDhtTestnet = require("hyperdht/testnet") as (
-  size: number,
-) => Promise<{
-  bootstrap: Array<{ host: string; port: number }>;
-  destroy: () => Promise<void>;
-}>;
 
 class FakeOuter {
   peer?: FakeOuter;
@@ -91,7 +60,7 @@ class FakeOuter {
 
 function waitFor(
   predicate: () => boolean,
-  timeoutMs = 10_000,
+  timeoutMs = 2_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
@@ -110,99 +79,63 @@ function waitFor(
   });
 }
 
-async function bindUdp(): Promise<UdpSocket> {
-  const socket = createSocket("udp4");
-  await new Promise<void>((resolve, reject) => {
-    socket.once("error", reject);
-    socket.bind(0, "127.0.0.1", () => {
-      socket.off("error", reject);
-      resolve();
-    });
-  });
-  return socket;
-}
-
-function udpPort(socket: UdpSocket): number {
-  const address = socket.address();
-  assert.notEqual(typeof address, "string");
-  return address.port;
-}
-
-async function closeUdp(socket: UdpSocket | undefined): Promise<void> {
-  if (!socket) return;
-  await new Promise<void>((resolve) => {
-    try {
-      socket.close(() => resolve());
-    } catch {
-      resolve();
-    }
-  });
-}
-
-async function sendUdp(
-  socket: UdpSocket,
-  port: number,
+function carrierRequest(
+  transport: RunningUdpSubscriberTransport,
+  serviceId: string,
   payload: Uint8Array,
-  timeoutMs = 2_000,
+  messageId = 1,
 ): Promise<Buffer> {
+  const flowId = Uint8Array.from(
+    { length: UDP_FLOW_ID_BYTES },
+    (_, index) => (index + messageId) & 0xff,
+  );
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      socket.off("message", onMessage);
+      unsubscribe();
       reject(new Error("UDP exchange timed out"));
-    }, timeoutMs);
-    const onMessage = (message: Buffer): void => {
+    }, 500);
+    const unsubscribe = transport.onMessage((message) => {
+      let envelope;
+      try {
+        envelope = decodeUdpEnvelope(message);
+      } catch {
+        return;
+      }
+      if (
+        envelope.serviceId !== serviceId ||
+        envelope.flowId.length !== flowId.length ||
+        envelope.flowId.some((value, index) => value !== flowId[index])
+      ) {
+        return;
+      }
+      if (envelope.type === "error" || envelope.type === "close") {
+        clearTimeout(timer);
+        unsubscribe();
+        reject(new Error("UDP request was rejected"));
+        return;
+      }
       clearTimeout(timer);
-      resolve(message);
-    };
-    socket.once("message", onMessage);
-    socket.send(payload, port, "127.0.0.1", (error) => {
-      if (!error) return;
-      clearTimeout(timer);
-      socket.off("message", onMessage);
-      reject(error);
+      unsubscribe();
+      resolve(Buffer.from(envelope.payload));
     });
+    void (async () => {
+      try {
+        for (const envelope of encodeUdpDataEnvelopes({
+          serviceId,
+          flowId,
+          payload,
+          messageId,
+        })) {
+          const result = await transport.send(envelope);
+          if (!result.ok) throw new Error(result.error ?? "UDP send failed");
+        }
+      } catch (error) {
+        clearTimeout(timer);
+        unsubscribe();
+        reject(error);
+      }
+    })();
   });
-}
-
-async function startUdpEcho(
-  prefix: string,
-): Promise<{ socket: UdpSocket; port: number; messages: Buffer[] }> {
-  const socket = await bindUdp();
-  const messages: Buffer[] = [];
-  socket.on("message", (message, remote) => {
-    messages.push(Buffer.from(message));
-    const reply = message.byteLength > 1_000
-      ? Buffer.from(message)
-      : Buffer.concat([Buffer.from(prefix), message]);
-    socket.send(reply, remote.port, remote.address);
-  });
-  return { socket, port: udpPort(socket), messages };
-}
-
-async function startTcpEcho(): Promise<{ server: Server; port: number }> {
-  const server = createServer((socket) => {
-    socket.on("data", (chunk) => socket.write(Buffer.concat([
-      Buffer.from("tcp:", "utf8"),
-      typeof chunk === "string" ? Buffer.from(chunk) : chunk,
-    ])));
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("TCP echo server did not expose an address");
-  }
-  return { server, port: address.port };
-}
-
-async function closeServer(server: Server | undefined): Promise<void> {
-  if (!server?.listening) return;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
 test("UDP envelopes preserve bounded datagrams and reject malformed input", () => {
@@ -242,6 +175,72 @@ test("UDP envelopes preserve bounded datagrams and reject malformed input", () =
   const malformed = encodeUdpEnvelope({ type: "data", serviceId: "game", flowId, payload });
   malformed[3] = 99;
   assert.throws(() => decodeUdpEnvelope(malformed), /type/);
+});
+
+test("UDP codecs reject invalid envelope and fragment boundaries", () => {
+  const flowId = Uint8Array.from({ length: UDP_FLOW_ID_BYTES }, (_, index) => index);
+  const envelope = encodeUdpEnvelope({
+    type: "data",
+    serviceId: "game",
+    flowId,
+    payload: Uint8Array.of(1, 2, 3),
+  });
+  assert.throws(
+    () => encodeUdpEnvelope({ type: "data", serviceId: "game", flowId: Uint8Array.of(1), payload: new Uint8Array() }),
+    /flow id/,
+  );
+  assert.throws(
+    () => encodeUdpEnvelope({ type: "data", serviceId: "a" + "x".repeat(UDP_MAX_SERVICE_ID_BYTES), flowId, payload: new Uint8Array() }),
+    /service id/,
+  );
+  assert.throws(
+    () => encodeUdpEnvelope({ type: "data", serviceId: "game", flowId, payload: new Uint8Array(UDP_CARRIER_FRAGMENT_PAYLOAD_BYTES + 1) }),
+    /fragment/,
+  );
+  const badServiceLength = Uint8Array.from(envelope);
+  badServiceLength[4] = 0;
+  assert.throws(() => decodeUdpEnvelope(badServiceLength), /service id length/);
+  const oversizedServiceLength = Uint8Array.from(envelope);
+  oversizedServiceLength[4] = UDP_MAX_SERVICE_ID_BYTES + 1;
+  assert.throws(() => decodeUdpEnvelope(oversizedServiceLength), /service id length/);
+  const badPayloadLength = Uint8Array.from(envelope);
+  new DataView(badPayloadLength.buffer).setUint16(5 + UDP_FLOW_ID_BYTES, 99);
+  assert.throws(() => decodeUdpEnvelope(badPayloadLength), /payload length/);
+  const badService = Uint8Array.from(envelope);
+  badService[UDP_ENVELOPE_HEADER_BYTES] = 0x21;
+  assert.throws(() => decodeUdpEnvelope(badService), /service id/);
+
+  assert.throws(
+    () => encodeUdpDataEnvelopes({
+      serviceId: "game",
+      flowId,
+      payload: new Uint8Array(UDP_CARRIER_FRAGMENT_PAYLOAD_BYTES + 1),
+    }),
+    /message id/,
+  );
+  assert.throws(
+    () => decodeUdpFragment({ type: "data", serviceId: "game", flowId, payload: new Uint8Array() }),
+    /not a fragment/,
+  );
+  assert.throws(
+    () => decodeUdpFragment({ type: "fragment", serviceId: "game", flowId, payload: new Uint8Array(UDP_FRAGMENT_HEADER_BYTES - 1) }),
+    /truncated/,
+  );
+  const fragments = encodeUdpDataEnvelopes({
+    serviceId: "game",
+    flowId,
+    payload: new Uint8Array(1_100),
+    messageId: 1,
+  });
+  const validFragment = decodeUdpEnvelope(fragments[0]!);
+  const badVersion = Uint8Array.from(validFragment.payload);
+  badVersion[0] = 2;
+  assert.throws(() => decodeUdpFragment({ ...validFragment, payload: badVersion }), /version/);
+  const badMetadata = Uint8Array.from(validFragment.payload);
+  new DataView(badMetadata.buffer).setUint16(7, 1);
+  assert.throws(() => decodeUdpFragment({ ...validFragment, payload: badMetadata }), /metadata/);
+  const badPayload = Uint8Array.from(validFragment.payload).subarray(0, -1);
+  assert.throws(() => decodeUdpFragment({ ...validFragment, payload: badPayload }), /payload length/);
 });
 
 test("UDP fragments reassemble reordered datagrams and drop incomplete state", () => {
@@ -301,6 +300,50 @@ test("UDP fragments reassemble reordered datagrams and drop incomplete state", (
   reassembler.clear();
 });
 
+test("UDP reassembly bounds concurrent messages and rejects metadata conflicts", () => {
+  const flowId = Uint8Array.from({ length: UDP_FLOW_ID_BYTES }, (_, index) => index);
+  const first = encodeUdpDataEnvelopes({
+    serviceId: "game",
+    flowId,
+    payload: Uint8Array.from({ length: 1_100 }, () => 1),
+    messageId: 20,
+  }).map((fragment) => decodeUdpFragment(decodeUdpEnvelope(fragment)));
+  const second = encodeUdpDataEnvelopes({
+    serviceId: "game",
+    flowId,
+    payload: Uint8Array.from({ length: 1_100 }, () => 2),
+    messageId: 21,
+  }).map((fragment) => decodeUdpFragment(decodeUdpEnvelope(fragment)));
+  const drops: string[] = [];
+  const limited = new UdpDatagramReassembler({
+    maxMessages: 1,
+    maxBytes: UDP_MAX_PAYLOAD_BYTES,
+    onDrop: (reason) => drops.push(reason),
+  });
+  assert.equal(limited.push(first[0]!), undefined);
+  assert.equal(limited.push(second[0]!), undefined);
+
+  const byBytes = new UdpDatagramReassembler({
+    maxMessages: 2,
+    maxBytes: UDP_MAX_PAYLOAD_BYTES,
+    onDrop: (reason) => drops.push(reason),
+  });
+  assert.equal(byBytes.push(first[0]!), undefined);
+  assert.equal(byBytes.push(second[0]!), undefined);
+
+  const conflictDrops: string[] = [];
+  const conflicting = new UdpDatagramReassembler({
+    onDrop: (reason) => conflictDrops.push(reason),
+  });
+  assert.equal(conflicting.push(first[0]!), undefined);
+  assert.equal(
+    conflicting.push({ ...first[1]!, count: first[1]!.count + 1 }),
+    undefined,
+  );
+  assert.deepEqual(drops, ["fragment-reassembly-limit", "fragment-reassembly-limit"]);
+  assert.deepEqual(conflictDrops, ["fragment-metadata-conflict"]);
+});
+
 test("UDP transport latches unsupported and rejected carrier sends", async () => {
   const unsupported = new FakeOuter();
   unsupported.rawStream = {};
@@ -332,71 +375,7 @@ test("UDP transport latches unsupported and rejected carrier sends", async () =>
   rejectedTransport.close();
 });
 
-test("desktop presents UDP endpoints without advertising a browser action", () => {
-  const registry: HomeRegistry = {
-    schemaVersion: 2,
-    revision: 1,
-    publisher: { displayName: "publisher", publisherKey: "ab".repeat(32) },
-    services: [
-      { id: "home", name: "Home", kind: "tcp" },
-      { id: "farm", name: "Farm", kind: "udp" },
-      { id: "ssh", name: "SSH", kind: "tcp" },
-    ],
-  };
-  const missing = createServicePresentations(registry.services, 17_480);
-  assert.deepEqual(missing[0], {
-    id: "farm",
-    name: "Farm",
-    access: "udp",
-    action: "copy-endpoint",
-    icon: "port",
-  });
-  assert.deepEqual(
-    createServicePresentations(registry.services, 17_480, new Map([
-      ["farm", { port: 24_642, kind: "udp" }],
-    ]))[0],
-    {
-      id: "farm",
-      name: "Farm",
-      access: "udp",
-      action: "copy-endpoint",
-      icon: "port",
-      copyText: "127.0.0.1:24642",
-    },
-  );
-  assert.equal(
-    createServicePresentations(registry.services, 17_480, new Map([
-      ["farm", { port: 24_642, kind: "tcp" }],
-    ]))[0]?.copyText,
-    undefined,
-  );
-  assert.deepEqual(
-    createAndroidRegistrySnapshot(registry, 17_480).services,
-    [],
-  );
-});
-
-test("CLI UDP service mappings are explicit and keep the two-part TCP default", () => {
-  assert.deepEqual(parseSubscriberService("stardew:udp:24642"), {
-    id: "stardew",
-    kind: "udp",
-    localPort: 24_642,
-  });
-  assert.deepEqual(parseSubscriberService("ssh:2222"), {
-    id: "ssh",
-    localPort: 2_222,
-  });
-  assert.throws(
-    () => parseSubscriberService("stardew:udp:24642:extra"),
-    /id:local-port|id:udp:local-port/,
-  );
-  assert.throws(
-    () => parseSubscriberService("stardew:24642:udp"),
-    /id:local-port|id:udp:local-port/,
-  );
-});
-
-test("unordered UDP transport forwards fixed-target replies and applies ACL before target creation", async () => {
+test("UDP forwarder applies ACL before target creation and forwards fixed-target replies", async () => {
   const subscriberOuter = new FakeOuter();
   const publisherOuter = new FakeOuter();
   subscriberOuter.peer = publisherOuter;
@@ -412,346 +391,175 @@ test("unordered UDP transport forwards fixed-target replies and applies ACL befo
     onDrop: (reason) => drops.push(reason),
   });
   const subscriber = createUdpSubscriberTransport(subscriberOuter);
-  const local = await bindUdp();
-  const listener = await listenSubscriberUdpService("farm", 0, subscriber);
-  // The target is fixed and the publisher forwarder is the only code allowed
-  // to create its per-flow socket. The first denied request must not reach it.
-  const denied = sendUdp(local, listener.port, Buffer.from("denied"), 100).catch(() => undefined);
-  await denied;
-  assert.deepEqual(target.messages, []);
-  allowed = true;
-  assert.equal((await sendUdp(local, listener.port, Buffer.from("hello"))).toString(), "reply:hello");
-  assert.deepEqual(target.messages.map((message: Buffer) => message.toString()), ["hello"]);
-  assert.equal(publisher.available(), true);
-  assert.deepEqual(drops, ["unauthorized-service"]);
-  await listener.close();
-  publisher.close();
-  subscriber.close();
-  await closeUdp(local);
-  await closeUdp(target.socket);
+  try {
+    await assert.rejects(
+      carrierRequest(subscriber, "farm", Buffer.from("denied")),
+      /rejected|timed out/,
+    );
+    assert.deepEqual(target.messages, []);
+    allowed = true;
+    assert.equal(
+      (await carrierRequest(subscriber, "farm", Buffer.from("hello"))).toString(),
+      "reply:hello",
+    );
+    assert.deepEqual(
+      target.messages.map((message: Buffer) => message.toString()),
+      ["hello"],
+    );
+    assert.equal(publisher.available(), true);
+    assert.deepEqual(drops, ["unauthorized-service"]);
+  } finally {
+    publisher.close();
+    subscriber.close();
+    await closeUdp(target.socket);
+  }
 });
 
-test("UDP publisher replies drop when the shared outbound budget is unavailable", async () => {
+test("UDP forwarder drops replies when the shared outbound budget is unavailable", async () => {
   const subscriberOuter = new FakeOuter();
   const publisherOuter = new FakeOuter();
   subscriberOuter.peer = publisherOuter;
   publisherOuter.peer = subscriberOuter;
   const target = await startUdpEcho("reply:");
   const drops: string[] = [];
-  const limiter = {
-    tryConsume: () => false,
-    wait: () => {
-      throw new Error("UDP must not queue on the shared rate limiter");
-    },
-  };
   const publisher = createUdpPublisherForwarder(publisherOuter, {
     authorized: () => true,
     serviceKind: () => "udp",
     localTargetPort: () => target.port,
-    publisherToSubscriberRateLimiter: () => limiter,
+    publisherToSubscriberRateLimiter: () => ({
+      tryConsume: () => false,
+      wait: () => {
+        throw new Error("UDP must not queue on the shared rate limiter");
+      },
+    }),
     onDrop: (reason) => drops.push(reason),
   });
   const subscriber = createUdpSubscriberTransport(subscriberOuter);
-  const local = await bindUdp();
-  const listener = await listenSubscriberUdpService("farm", 0, subscriber);
   try {
     await assert.rejects(
-      sendUdp(local, listener.port, Buffer.from("drop-me"), 150),
+      carrierRequest(subscriber, "farm", Buffer.from("drop-me")),
       /timed out/,
     );
     await waitFor(() => target.messages.length === 1);
     assert.deepEqual(drops, ["publisher-rate-limit"]);
   } finally {
-    await listener.close();
     publisher.close();
     subscriber.close();
-    await closeUdp(local);
     await closeUdp(target.socket);
   }
 });
 
-test("real desktop runtime exchanges UDP and TCP over one authenticated outer", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-native-udp-"));
-  const testnet = await createHyperDhtTestnet(3);
-  const targetA = await startUdpEcho("a:");
-  const targetB = await startUdpEcho("b:");
-  const tcpTarget = await startTcpEcho();
-  let publisher: Awaited<ReturnType<typeof startPublisher>> | undefined;
-  let subscriber: Awaited<ReturnType<typeof startSubscriber>> | undefined;
-  const outerEvents: string[] = [];
-  let localA: UdpSocket | undefined;
-  let localB: UdpSocket | undefined;
-  let localTcp: ReturnType<typeof import("node:net").createConnection> | undefined;
+test("UDP forwarder forwards to a remote service and reports upstream failures", async () => {
+  const subscriberOuter = new FakeOuter();
+  const publisherOuter = new FakeOuter();
+  subscriberOuter.peer = publisherOuter;
+  publisherOuter.peer = subscriberOuter;
+  let available = true;
+  let sendMode: "reply" | "false" | "throw" = "reply";
+  let reply: ((flowId: Uint8Array, payload: Uint8Array) => void) | undefined;
+  const sent: Array<{ flowId: Uint8Array; payload: Uint8Array; messageId: number }> = [];
+  let closedFlows = 0;
+  let closedRemote = 0;
+  const errors: string[] = [];
+  const drops: string[] = [];
+  const remote = {
+    available: () => available,
+    send: async (flowId: Uint8Array, payload: Uint8Array, messageId: number) => {
+      sent.push({ flowId: Uint8Array.from(flowId), payload: Uint8Array.from(payload), messageId });
+      if (sendMode === "false") return { ok: false, error: "upstream rejected" };
+      if (sendMode === "throw") throw new Error("upstream failed");
+      reply?.(flowId, Uint8Array.from([...Buffer.from("remote:"), ...payload]));
+      return { ok: true };
+    },
+    closeFlow: () => {
+      closedFlows++;
+    },
+    close: () => {
+      closedRemote++;
+    },
+  };
+  const publisher = createUdpPublisherForwarder(publisherOuter, {
+    authorized: () => true,
+    serviceKind: () => "udp",
+    remoteForService: (_serviceId, onReply) => {
+      reply = onReply;
+      return remote;
+    },
+    onError: (error) => errors.push(error),
+    onDrop: (reason) => drops.push(reason),
+  });
+  const subscriber = createUdpSubscriberTransport(subscriberOuter);
   try {
-    const publisherState = path.join(root, "publisher");
-    const subscriberState = path.join(root, "subscriber");
-    const publisherIdentity = await setupPublisher({ stateDir: publisherState });
-    const subscriberIdentity = await setupSubscriber({ stateDir: subscriberState });
-    await setSubscriberPublisher({
-      stateDir: subscriberState,
-      label: "publisher",
-      publisherKey: publisherIdentity.publisherKey,
-    });
-    const policy: PublisherRuntimePolicy = {
-      displayName: "publisher",
-      subscribers: [{ publicKey: subscriberIdentity.publicKey, label: "subscriber" }],
-      services: [
-        { id: "farm-a", name: "Farm A", kind: "udp", source: { localPort: targetA.port } },
-        { id: "farm-b", name: "Farm B", kind: "udp", source: { localPort: targetB.port } },
-        { id: "echo", name: "Echo", source: { localPort: tcpTarget.port } },
-      ],
-    };
-    publisher = await startPublisher({
-      stateDir: publisherState,
-      bootstrap: testnet.bootstrap,
-      policy,
-    });
-    subscriber = await startSubscriber({
-      stateDir: subscriberState,
-      bootstrap: testnet.bootstrap,
-      gatewayPort: 0,
-      services: [
-        { id: "farm-a", kind: "udp", localPort: 0 },
-        { id: "farm-b", kind: "udp", localPort: 0 },
-        { id: "echo", localPort: 0 },
-      ],
-      observe: (event) => {
-        if (event.event === "outer.connected") outerEvents.push(event.event);
-      },
-    });
-    assert.equal(outerEvents.length, 1);
-    localA = await bindUdp();
-    localB = await bindUdp();
-    const farmA = subscriber.services.find((service) => service.id === "farm-a");
-    const farmB = subscriber.services.find((service) => service.id === "farm-b");
-    const echo = subscriber.services.find((service) => service.id === "echo");
-    assert.ok(farmA && farmB && echo);
-    assert.equal(farmA.kind, "udp");
-    assert.equal(farmB.kind, "udp");
-    assert.equal((await sendUdp(localA, farmA.port, Buffer.from("one"))).toString(), "a:one");
-    assert.equal((await sendUdp(localB, farmA.port, Buffer.from("two"))).toString(), "a:two");
-    assert.equal((await sendUdp(localA, farmB.port, Buffer.from("three"))).toString(), "b:three");
-    const large = Buffer.alloc(1_200, 0x5a);
-    assert.deepEqual(await sendUdp(localA, farmA.port, large), large);
-    localTcp = createConnection({ host: "127.0.0.1", port: echo.port });
-    await once(localTcp, "connect");
-    localTcp.write("tcp-payload");
-    const [tcpReply] = await once(localTcp, "data");
-    assert.equal(Buffer.from(tcpReply).toString(), "tcp:tcp-payload");
-  } finally {
-    localTcp?.destroy();
-    await closeUdp(localA);
-    await closeUdp(localB);
-    await subscriber?.stop();
-    await publisher?.stop();
-    await closeServer(tcpTarget.server);
-    await closeUdp(targetA.socket);
-    await closeUdp(targetB.socket);
-    await testnet.destroy();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("an old subscriber reaches a UDP service republished by a canonical peer", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-canonical-udp-"));
-  const testnet = await createHyperDhtTestnet(4);
-  const target = await startUdpEcho("canonical:");
-  let macDht: DhtNode | undefined;
-  let nucDht: DhtNode | undefined;
-  let subscriberDht: DhtNode | undefined;
-  let macPeer: RunningPeer | undefined;
-  let nucPeer: RunningPeer | undefined;
-  let subscriber: Awaited<ReturnType<typeof startSubscriber>> | undefined;
-  let local: UdpSocket | undefined;
-  try {
-    const macState = path.join(root, "mac", "peer");
-    const nucState = path.join(root, "nuc", "peer");
-    const subscriberState = path.join(root, "subscriber");
-    const mac = await setupPeer({ stateDir: macState });
-    const nuc = await setupPeer({ stateDir: nucState });
-    const oldSubscriber = await setupSubscriber({ stateDir: subscriberState });
-    macDht = createDht({
-      bootstrap: testnet.bootstrap,
-      keyPair: keyPairFromSeed((await loadPeerIdentity(macState)).seed),
-    });
-    nucDht = createDht({
-      bootstrap: testnet.bootstrap,
-      keyPair: keyPairFromSeed((await loadPeerIdentity(nucState)).seed),
-    });
-    subscriberDht = createDht({ bootstrap: testnet.bootstrap });
-
-    nucPeer = await startPeer({
-      stateDir: nucState,
-      dht: nucDht,
-      config: parsePeerConfig({
-        gateway: { port: 0 },
-        peers: [{ label: "mac", publicKey: mac.publicKey, connection: "accept" }],
-        services: [],
-        bindings: [],
-      }),
-    });
-    const invitation = nucPeer.createPairingInvitation();
-    const pairingTask = startSubscriber({
-      stateDir: subscriberState,
-      dht: subscriberDht,
-      gatewayPort: 0,
-      services: [{ id: "farm", kind: "udp", localPort: 0 }],
-      pairing: {
-        invitation: invitation.uri,
-        deviceLabel: "old-phone",
-        platform: "android",
-      },
-    });
-    await waitFor(() => nucPeer?.pairingStatus().phase === "pending");
-    await nucPeer.approvePairing();
-    subscriber = await pairingTask;
-
-    macPeer = await startPeer({
-      stateDir: macState,
-      dht: macDht,
-      config: parsePeerConfig({
-        gateway: { port: 0 },
-        peers: [{ label: "nuc", publicKey: nuc.publicKey, connection: "dial" }],
-        services: [{
-          id: "farm",
-          name: "Farm",
-          kind: "udp",
-          source: { localPort: target.port },
-          allow: [nuc.publicKey],
-        }],
-        bindings: [],
-      }),
-    });
-    await nucPeer.applyConfig(parsePeerConfig({
-      gateway: { port: 0 },
-      peers: [
-        { label: "mac", publicKey: mac.publicKey, connection: "accept" },
-        {
-          label: "old-phone",
-          publicKey: oldSubscriber.publicKey,
-          connection: "accept",
-        },
-      ],
-      services: [{
-        id: "farm",
-        name: "Republished farm",
-        kind: "udp",
-        source: { peer: "mac", service: "farm" },
-        allow: [oldSubscriber.publicKey],
-      }],
-      bindings: [],
-    }));
-    await waitFor(() => Boolean(
-      macPeer?.status().connections[0]?.status === "connected" &&
-      nucPeer?.status().connections.some(({ publicKey, status }) =>
-        publicKey === mac.publicKey && status === "connected",
-      ) &&
-      nucPeer?.status().services[0]?.available === true,
-    ));
-
-    local = await bindUdp();
-    const farm = subscriber.services.find((service) => service.id === "farm");
-    assert.ok(farm);
-    assert.equal(farm.kind, "udp");
     assert.equal(
-      (await sendUdp(local, farm.port, Buffer.from("forwarded"))).toString(),
-      "canonical:forwarded",
+      (await carrierRequest(subscriber, "upstream", Buffer.from("hello"))).toString(),
+      "remote:hello",
     );
-    const large = Buffer.alloc(1_200, 0x42);
-    assert.deepEqual(await sendUdp(local, farm.port, large), large);
+    assert.equal(sent[0]?.messageId, 0);
+    assert.deepEqual([...sent[0]!.payload], [...Buffer.from("hello")]);
+
+    publisher.receiveReply("upstream", Uint8Array.of(9), Buffer.from("ignored"));
+    available = false;
+    await assert.rejects(
+      carrierRequest(subscriber, "upstream", Buffer.from("offline"), 2),
+      /rejected|timed out/,
+    );
+    assert.deepEqual(drops, ["unavailable-service"]);
+
+    available = true;
+    sendMode = "false";
+    await subscriber.send(encodeUdpEnvelope({
+      type: "data",
+      serviceId: "upstream",
+      flowId: Uint8Array.from({ length: UDP_FLOW_ID_BYTES }, (_, index) => index + 3),
+      payload: Buffer.from("false"),
+    }));
+    await waitFor(() => errors.some((error) => error.includes("upstream rejected")));
+
+    sendMode = "throw";
+    await subscriber.send(encodeUdpEnvelope({
+      type: "data",
+      serviceId: "upstream",
+      flowId: Uint8Array.from({ length: UDP_FLOW_ID_BYTES }, (_, index) => index + 4),
+      payload: Buffer.from("throw"),
+    }));
+    await waitFor(() => errors.some((error) => error.includes("upstream failed")));
+    publisher.closeFlows("upstream");
+    assert.equal(closedRemote, 1);
+    assert.ok(closedFlows >= 2);
   } finally {
-    await closeUdp(local);
-    await subscriber?.stop();
-    await nucPeer?.stop();
-    await macPeer?.stop();
-    await subscriberDht?.destroy({ force: true });
-    await nucDht?.destroy({ force: true });
-    await macDht?.destroy({ force: true });
-    await closeUdp(target.socket);
-    await testnet.destroy();
-    await rm(root, { recursive: true, force: true });
+    publisher.close();
+    subscriber.close();
   }
 });
 
-test("UDP policy revocation, outer replacement, and retained listener recovery are bounded", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-native-udp-recovery-"));
-  const testnet = await createHyperDhtTestnet(3);
-  const target = await startUdpEcho("ok:");
-  let publisher: Awaited<ReturnType<typeof startPublisher>> | undefined;
-  let subscriber: Awaited<ReturnType<typeof startSubscriber>> | undefined;
-  let local: UdpSocket | undefined;
-  try {
-    const publisherState = path.join(root, "publisher");
-    const subscriberState = path.join(root, "subscriber");
-    const publisherIdentity = await setupPublisher({ stateDir: publisherState });
-    const subscriberIdentity = await setupSubscriber({ stateDir: subscriberState });
-    await setSubscriberPublisher({
-      stateDir: subscriberState,
-      label: "publisher",
-      publisherKey: publisherIdentity.publisherKey,
+async function startUdpEcho(
+  prefix: string,
+): Promise<{ socket: UdpSocket; port: number; messages: Buffer[] }> {
+  const socket = createSocket("udp4");
+  const messages: Buffer[] = [];
+  await new Promise<void>((resolve, reject) => {
+    socket.once("error", reject);
+    socket.bind(0, "127.0.0.1", () => {
+      socket.off("error", reject);
+      resolve();
     });
-    const deniedPolicy: PublisherRuntimePolicy = {
-      displayName: "publisher",
-      subscribers: [{ publicKey: subscriberIdentity.publicKey, label: "subscriber" }],
-      services: [{
-        id: "farm",
-        name: "Farm",
-        kind: "udp",
-        source: { localPort: target.port },
-        allow: [],
-      }],
-    };
-    publisher = await startPublisher({
-      stateDir: publisherState,
-      bootstrap: testnet.bootstrap,
-      policy: deniedPolicy,
-    });
-    subscriber = await startSubscriber({
-      stateDir: subscriberState,
-      bootstrap: testnet.bootstrap,
-      gatewayPort: 0,
-      services: [{ id: "farm", kind: "udp", localPort: 0 }],
-    });
-    local = await bindUdp();
-    const listener = subscriber.services[0];
-    assert.ok(listener);
-    await assert.rejects(
-      sendUdp(local, listener.port, Buffer.from("denied"), 150),
-      /timed out/,
-    );
-    assert.deepEqual(target.messages, []);
+  });
+  const address = socket.address();
+  if (typeof address === "string") throw new Error("UDP target has no address");
+  socket.on("message", (message, remote) => {
+    messages.push(Buffer.from(message));
+    socket.send(Buffer.concat([Buffer.from(prefix), message]), remote.port, remote.address);
+  });
+  return { socket, port: address.port, messages };
+}
 
-    const allowedPolicy: PublisherRuntimePolicy = {
-      ...deniedPolicy,
-      services: [{ ...deniedPolicy.services[0]!, allow: [subscriberIdentity.publicKey] }],
-    };
-    assert.equal(await publisher.applyPolicy(allowedPolicy), true);
-    assert.equal((await sendUdp(local, listener.port, Buffer.from("allowed"))).toString(), "ok:allowed");
-    const firstGeneration = subscriber.status().connectionGeneration;
-    assert.equal(subscriber.invalidateConnection(firstGeneration, "test-reconnect"), true);
-    await waitFor(() => subscriber?.status().connection === "connected" && subscriber.status().connectionGeneration > firstGeneration);
-    assert.equal(subscriber.services[0]?.port, listener.port);
-    assert.equal((await sendUdp(local, listener.port, Buffer.from("recovered"))).toString(), "ok:recovered");
-
-    const revokedPolicy: PublisherRuntimePolicy = {
-      ...allowedPolicy,
-      services: [{ ...allowedPolicy.services[0]!, allow: [] }],
-    };
-    assert.equal(await publisher.applyPolicy(revokedPolicy), true);
-    await assert.rejects(
-      sendUdp(local, listener.port, Buffer.from("revoked"), 150),
-      /timed out/,
-    );
-    assert.deepEqual(
-      target.messages.map((message: Buffer) => message.toString()),
-      ["allowed", "recovered"],
-    );
-  } finally {
-    await closeUdp(local);
-    await subscriber?.stop();
-    await publisher?.stop();
-    await closeUdp(target.socket);
-    await testnet.destroy();
-    await rm(root, { recursive: true, force: true });
-  }
-});
+async function closeUdp(socket: UdpSocket | undefined): Promise<void> {
+  if (!socket) return;
+  await new Promise<void>((resolve) => {
+    try {
+      socket.close(() => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}

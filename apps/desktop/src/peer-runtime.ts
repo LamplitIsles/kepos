@@ -1,5 +1,7 @@
 import type { Observe } from "../../../src/mux/observability.js";
 import { renderSVG } from "uqr";
+import { saveKeposConfig } from "../../../src/app-config.js";
+import type { PublisherPairingSnapshot } from "../../../src/pairing/publisher.js";
 import {
   startPeer,
   type PeerRuntimeStatus,
@@ -10,7 +12,6 @@ import type { DhtAddress } from "../../../src/mux/hyperdht.js";
 import type { RuntimeLock } from "../../../src/runtime/runtime-lock.js";
 import type {
   DesktopPeerRole,
-  DesktopService,
   DesktopSnapshot,
 } from "./protocol.js";
 import type {
@@ -23,6 +24,7 @@ export interface StartDesktopPeerRuntimeOptions {
   stateDir: string;
   config: PeerConfig;
   configPath?: string;
+  persistConfig?: (config: PeerConfig) => Promise<void>;
   lock?: RuntimeLock;
   bootstrap?: DhtAddress[];
 }
@@ -53,6 +55,13 @@ export async function startDesktopPeerRuntime(
       config: options.config,
       ...(options.bootstrap ? { bootstrap: options.bootstrap } : {}),
       ...(onObservation ? { observe: onObservation } : {}),
+      ...(options.persistConfig || options.configPath
+        ? {
+            persistConfig:
+              options.persistConfig ??
+              ((config: PeerConfig) => saveKeposConfig(config, options.configPath!)),
+          }
+        : {}),
     });
   } catch (error) {
     await options.lock?.release().catch(() => undefined);
@@ -115,10 +124,7 @@ function peerRole(
   status: PeerRuntimeStatus,
   pairingInvitation?: { uri: string; expiresAt: number; qrSvg: string },
 ): DesktopPeerRole {
-  const pairing =
-    status.pairing.phase === "inviting" && pairingInvitation
-      ? { ...status.pairing, ...pairingInvitation }
-      : status.pairing;
+  const pairing = desktopPairing(status.pairing, pairingInvitation);
   return {
     phase: status.state === "running" ? "running" : "stopped",
     peerKey: status.peerKey,
@@ -128,4 +134,25 @@ function peerRole(
     bindings: status.bindings.map((binding) => ({ ...binding })),
     pairing,
   };
+}
+
+function desktopPairing(
+  pairing: PublisherPairingSnapshot,
+  invitation?: { uri: string; expiresAt: number; qrSvg: string },
+): DesktopPeerRole["pairing"] {
+  if (pairing.phase === "pending") {
+    return {
+      phase: "pending",
+      peerKey: pairing.subscriberKey,
+      keyFingerprint: pairing.keyFingerprint,
+      label: pairing.label,
+      platform: pairing.platform,
+    };
+  }
+  if (pairing.phase === "inviting") {
+    return invitation
+      ? { ...pairing, ...invitation }
+      : { ...pairing };
+  }
+  return { phase: "idle" };
 }

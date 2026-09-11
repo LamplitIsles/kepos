@@ -8,6 +8,7 @@ import {
   parseClientIdentity,
   serializeClientIdentity,
 } from "../src/keys.js";
+import { keyPairFromSecretKey } from "../src/mux/hyperdht.js";
 
 test("publisher seed and derived Home public key are exactly 32 bytes", () => {
   const publisherSeed = generatePublisherSeed();
@@ -23,6 +24,14 @@ test("generated client identity has a HyperDHT-compatible 32-byte public and 64-
   assert.match(identity.publicKey, /^[0-9a-f]{64}$/);
   assert.match(identity.secretKey, /^[0-9a-f]{128}$/);
   assert.deepEqual(parseClientIdentity(identity), identity);
+});
+
+test("HyperDHT reconstructs a key pair from the retained secret key", () => {
+  const identity = generateClientIdentity();
+  const keyPair = keyPairFromSecretKey(identity.secretKey);
+
+  assert.equal(Buffer.from(keyPair.publicKey).toString("hex"), identity.publicKey);
+  assert.equal(Buffer.from(keyPair.secretKey).toString("hex"), identity.secretKey);
 });
 
 test("client identity round-trips through its persisted JSON shape", () => {

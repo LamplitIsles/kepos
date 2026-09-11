@@ -176,14 +176,15 @@ persists the public key as an `accept` peer but does not add service grants.
 
 ### Android and Bare
 
-The Android foreground service still owns one persistent Bare Worklet and the
-existing subscriber client. That shipped client is intentionally the frozen
-legacy-client interoperability target: it consumes the server-side Home,
-TCP/HTTP, and UDP contracts and does not advertise reverse peer services.
-Shared bootstrap/config generation reads the canonical `[network]` settings;
-Android does not grow a reverse-service UI or a Unix-socket interface in this
-change. The Bare host protocol remains the lifecycle boundary between Kotlin
-and the Worklet.
+The Android foreground service owns one persistent Bare Worklet. The Worklet
+loads the canonical peer identity/configuration and starts the same `startPeer`
+runtime used by the repository-owned hosts. Shared bootstrap/config generation
+reads the canonical `[network]` settings. The UI remains a status/service
+console and does not grow a configuration editor, reverse-service UI, or
+reverse UDP interface in this change. Previously built Android binaries are
+the frozen legacy-client interoperability targets; they are not a second
+fresh-build runtime or configuration source. The Bare host protocol remains
+the lifecycle boundary between Kotlin and the Worklet.
 
 ### Nix/Home Manager
 
@@ -203,8 +204,8 @@ closes candidates, current mux channels, bindings, gateway, Home servers, and
 owned DHT resources in dependency order.
 
 The offline conversion helper is separate from startup. It accepts an
-explicit old publisher seed or validated subscriber keypair, verifies an
-optional expected retained public key, refuses overwrite/linked/ambiguous
+explicit old publisher seed or validated subscriber keypair, requires and
+verifies the expected retained public key, refuses overwrite/linked/ambiguous
 sources, and writes a new private canonical directory. It does not inspect
 live state, print private material, or create a legacy fallback.
 

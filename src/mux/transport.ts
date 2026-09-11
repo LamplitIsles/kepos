@@ -24,11 +24,6 @@ import {
   type PublisherToSubscriberRateLimiter,
 } from "./rate-limit.js";
 import { bridgeHttp1 } from "./http-forwarder.js";
-import type {
-  PublisherMetricsDirection,
-  PublisherMetricsContext,
-  PublisherMetricsHooks,
-} from "../metrics/publisher.js";
 import {
   createUdpPublisherForwarder,
   createUdpSubscriberTransport,
@@ -46,6 +41,35 @@ const defaultControlEstablishmentTimeoutMs = 20_000;
 const defaultHeartbeatIntervalMs = 15_000;
 const defaultHeartbeatResponseTimeoutMs = 10_000;
 const defaultMissedPongsBeforeTimeout = 2;
+
+/** Optional metrics hooks for the retained legacy service wire adapter. */
+type LegacyMetricsDirection =
+  | "publisher_to_subscriber"
+  | "subscriber_to_publisher";
+
+interface LegacyMetricsContext {
+  subscriberKey: string;
+  connectionId: string;
+}
+
+interface LegacyMetricsHooks {
+  connectionActivated: (context: LegacyMetricsContext) => void;
+  connectionClosed: (context: LegacyMetricsContext) => void;
+  serviceChannelOpened: (
+    context: LegacyMetricsContext,
+    serviceId: string,
+  ) => void;
+  serviceChannelClosed: (
+    context: LegacyMetricsContext,
+    serviceId: string,
+  ) => void;
+  serviceBytes: (
+    context: LegacyMetricsContext,
+    serviceId: string,
+    direction: LegacyMetricsDirection,
+    bytes: number,
+  ) => void;
+}
 
 interface Encoding<T> {
   decode: (state: unknown) => T;
@@ -149,8 +173,8 @@ export interface MuxPublisherOptions {
   ) => import("./udp.js").UdpPublisherRemote | undefined;
   /** Public identity used to add the HTTP forwarding header. */
   subscriberPublicKey?: string;
-  metricsContext?: PublisherMetricsContext;
-  metrics?: PublisherMetricsHooks;
+  metricsContext?: LegacyMetricsContext;
+  metrics?: LegacyMetricsHooks;
   publisherToSubscriberRateLimiter?: (
     serviceId: string,
   ) => PublisherToSubscriberRateLimiter | undefined;
@@ -1360,9 +1384,7 @@ function createTunnel(
   return { channel, messages, stream };
 }
 
-function metricsDirection(
-  direction: ObservationDirection,
-): PublisherMetricsDirection {
+function metricsDirection(direction: ObservationDirection): LegacyMetricsDirection {
   return direction === "publisher-to-subscriber"
     ? "publisher_to_subscriber"
     : "subscriber_to_publisher";

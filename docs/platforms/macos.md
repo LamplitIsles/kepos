@@ -123,6 +123,6 @@ streams fail on disconnect and are not replayed.
 
 For a later identity-preserving cutover, select Mac's active old subscriber
 public key as this peer's identity, back up state outside the active path, stop
-the old runtime, run `peer convert` with an explicit expected public key,
+the old runtime, run `peer convert` with the required expected public key,
 rewrite canonical peer/allow entries, then start only the canonical peer
 runtime. This implementation run did not inspect or convert real Mac state.

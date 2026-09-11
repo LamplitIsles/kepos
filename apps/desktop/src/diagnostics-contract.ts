@@ -20,7 +20,7 @@ const directionValues = new Set<ObservationDirection>([
   "subscriber-to-publisher",
   "publisher-to-subscriber",
 ]);
-const observationRoles = new Set<ObservationRole>(["publisher", "subscriber"]);
+const observationRoles = new Set<ObservationRole>(["peer"]);
 const observationNames = new Set<ObservationName>([
   "outer.attempt",
   "outer.handshake",

@@ -2,51 +2,28 @@ package io.github.ttalab.kepos.ui
 
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
-import io.github.ttalab.barekit.host.ServiceSnapshot
 
 enum class KeposDestination {
-  SETUP,
   STOPPED,
   CONNECTING,
   SERVICES,
   FAILED,
 }
 
-enum class ServiceAction {
-  OPEN,
-  COPY_URL,
-  COPY_COMMAND,
-}
-
-enum class ServiceIcon {
-  BOOK,
-  MUSIC,
-  TERMINAL,
-  GIT,
-  BUILD,
-  PHOTOS,
-  STORAGE,
-  PROXY,
-  DASHBOARD,
-  WEB,
-  PORT,
-}
-
 data class ServiceUiModel(
   val id: String,
   val name: String,
-  val access: String,
-  val url: String?,
-  val copyText: String?,
-  val action: ServiceAction,
-  val icon: ServiceIcon,
+  val kind: String,
+  val available: Boolean,
+  val error: String?,
 )
 
 data class KeposUiModel(
   val destination: KeposDestination,
-  val publisherName: String? = null,
+  val peerKey: String? = null,
   val connection: String? = null,
   val services: List<ServiceUiModel> = emptyList(),
+  val bindings: Int = 0,
   val available: Boolean = false,
   val error: String? = null,
 ) {
@@ -56,59 +33,28 @@ data class KeposUiModel(
         return KeposUiModel(destination = KeposDestination.STOPPED)
       }
       if (snapshot.state == RuntimeState.FAILED) {
-        return KeposUiModel(
-          destination = KeposDestination.FAILED,
-          error = snapshot.error,
-        )
+        return KeposUiModel(destination = KeposDestination.FAILED, error = snapshot.error)
       }
       if (snapshot.state != RuntimeState.RUNNING) {
         return KeposUiModel(destination = KeposDestination.CONNECTING)
       }
-      if (!snapshot.configured) {
-        return KeposUiModel(destination = KeposDestination.SETUP)
-      }
-      val publisher = snapshot.publisher
-        ?: return KeposUiModel(
-          destination = KeposDestination.CONNECTING,
-          connection = snapshot.connection,
-        )
       return KeposUiModel(
         destination = KeposDestination.SERVICES,
-        publisherName = publisher.displayName,
-        connection = snapshot.connection,
-        services = snapshot.services.mapNotNull(::serviceUiModel),
-        available = snapshot.connection == "connected",
-      )
-    }
-
-    private fun serviceUiModel(service: ServiceSnapshot): ServiceUiModel? {
-      val action = when (service.action) {
-        "open" -> ServiceAction.OPEN
-        "copy-url" -> ServiceAction.COPY_URL
-        "copy-command" -> ServiceAction.COPY_COMMAND
-        else -> return null
-      }
-      val icon = when (service.icon) {
-        "book" -> ServiceIcon.BOOK
-        "music" -> ServiceIcon.MUSIC
-        "terminal" -> ServiceIcon.TERMINAL
-        "git" -> ServiceIcon.GIT
-        "build" -> ServiceIcon.BUILD
-        "photos" -> ServiceIcon.PHOTOS
-        "storage" -> ServiceIcon.STORAGE
-        "proxy" -> ServiceIcon.PROXY
-        "dashboard" -> ServiceIcon.DASHBOARD
-        "web" -> ServiceIcon.WEB
-        else -> ServiceIcon.PORT
-      }
-      return ServiceUiModel(
-        id = service.id,
-        name = service.name,
-        access = service.access,
-        url = service.url,
-        copyText = service.copyText,
-        action = action,
-        icon = icon,
+        peerKey = snapshot.peerKey,
+        connection = snapshot.connections.firstOrNull { it.status == "connected" }?.status
+          ?: snapshot.connections.firstOrNull()?.status,
+        services = snapshot.services.map { service ->
+          ServiceUiModel(
+            id = service.id,
+            name = service.name,
+            kind = service.kind,
+            available = service.available,
+            error = service.error,
+          )
+        },
+        bindings = snapshot.bindings.size,
+        available = snapshot.services.any { it.available },
+        error = snapshot.error,
       )
     }
   }

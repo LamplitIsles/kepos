@@ -4,34 +4,33 @@ For end-user installation, pairing, and troubleshooting, start with the
 [public Kepos guide](https://kepos.guion.io/docs/). This page keeps Android
 build and device-test detail.
 
-The Android app is an arm64 subscriber client for Android 12 and newer. A
-Kotlin foreground service owns one persistent Bare Worklet. The Worklet runs
-the shared HyperDHT/Protomux subscriber wire client, keeps its local listeners
-alive when the Activity closes, and stops only after an explicit service stop.
+The Android app is an arm64 canonical peer runtime for Android 12 and newer.
+A Kotlin foreground service owns one persistent Bare Worklet. The Worklet
+loads the canonical `peer.json` and `config.toml` from app-private storage,
+uses the shared `startPeer` runtime for configured dial/accept relationships,
+and keeps the runtime and its local endpoints alive when the Activity closes.
+It stops only after an explicit service stop.
 
-Android is intentionally the existing legacy-client interoperability target
-for the canonical peer runtime. It can pair with a new accept-side peer,
-read the authenticated Home catalog, and consume established TCP/HTTP/UDP
-operations. It does not advertise `kepos/peer-services/1`, initiate reverse
-service opens, expose a reverse-service UI, or bind UDP services in the app.
-No Android Unix-socket interface is added by the peer-services change.
+The current UI is a status and service console: it shows the canonical peer
+identity, connections, service availability, and local binding count. It does
+not add a configuration editor, QR pairing flow, reverse-service UI, or
+reverse UDP. Operators provision the canonical configuration through the
+app-private host boundary. Already-built Android binaries remain useful as
+legacy wire clients for the one-way old-client interoperability contract; that
+compatibility target is not the source contract of a freshly built app.
 
 ## User flow
 
-Pair with a running desktop peer that exposes the existing pairing wire:
+Provision the Android app with a canonical `config.toml` containing the
+remote peer's public key, its explicit `dial` or `accept` direction, and the
+service grants/bindings required by the deployment. Keep the foreground
+service running while using its configured local endpoints. Only public keys
+and policy cross the host boundary; the Android seed stays app-private.
 
-1. Open **Add device** on the desktop and scan its QR code.
-2. Confirm the candidate public-key fingerprint on the desktop.
-3. Approve the candidate. Approval changes the desktop's configured peer
-   admission but does not broaden any service allowlist.
-4. Keep the Android foreground service running while using its local service
-   listeners.
-
-A headless canonical peer cannot approve a QR interaction. Use the explicit
-   public-key workflow instead: copy the Android client public key, add it to
-   the canonical peer's `peers` list and to each intended service's immediate
-   `allow` list, then let `peer run` reload the config. Only public keys cross
-   this boundary; Android secret identity material stays app-private.
+For a desktop-managed pairing flow, use the desktop's canonical pairing
+surface or the CLI's explicit `peer pair` command to add the Android public key
+to the canonical peer list, then add that key separately to each intended
+service's immediate `allow` list. Approval never broadens service grants.
 
 The existing app presents the authenticated registry and keeps its current
 `*.localhost` service convention. For example:
@@ -48,9 +47,10 @@ outside this client boundary.
 ## Canonical configuration boundary
 
 Repository-owned bootstrap generation reads only `[network].bootstrap` from
-the canonical `peers` configuration. The Android Worklet receives bootstrap
-endpoints through its host protocol; it does not receive a publisher policy,
-another device's private seed, or a copied canonical peer directory.
+the canonical peer configuration. The Android Worklet receives its
+app-private state path, canonical config path, and bootstrap endpoints through
+its host protocol; it does not receive another device's private seed or a
+copied canonical peer directory.
 
 The canonical configuration shape is documented in
 [CLI, identity, and configuration](../cli.md). Old subscriber wire fields in
@@ -91,10 +91,11 @@ and test ports. It cannot replace or remove the installed
 
 ## Scope and evidence
 
-The peer-services implementation validates old-client → canonical-server
-pairing and service behavior with test-owned identities and HyperDHT
-testnets. Those checks are not an Android hardware run and do not claim
-reverse-service UI, Android UDP, or a live DSH/cua-driver session.
+The peer-services implementation validates canonical peer behavior and
+old-client → canonical-server interoperability with test-owned identities and
+HyperDHT testnets. Those checks are not an Android hardware run and do not
+claim reverse-service UI, Android reverse UDP, or a live DSH/cua-driver
+session.
 
 Android release packaging remains separate:
 

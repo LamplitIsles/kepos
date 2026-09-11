@@ -15,7 +15,7 @@ import type { DesktopTray } from "./tray.js";
 import { loadDesktopOptions } from "./options.js";
 import { desktopLaunchArguments } from "./process.js";
 import type { DesktopSnapshot } from "./protocol.js";
-import { isHealthyUnconfiguredSmokeSnapshot } from "./smoke.js";
+import { isHealthySmokeSnapshot } from "./smoke.js";
 
 async function main(): Promise<void> {
   const arguments_ = desktopLaunchArguments(process.argv);
@@ -118,9 +118,9 @@ async function main(): Promise<void> {
   if (smokeTest) {
     try {
       await smokeRendered;
-      if (!isHealthyUnconfiguredSmokeSnapshot(smokeSnapshot)) {
+      if (!isHealthySmokeSnapshot(smokeSnapshot)) {
         throw new Error(
-          "desktop smoke did not observe a healthy canonical peer or unconfigured subscriber snapshot",
+          "desktop smoke did not observe a healthy canonical peer snapshot",
         );
       }
       if (smokeReadyFile) {

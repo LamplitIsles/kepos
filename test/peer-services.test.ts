@@ -13,12 +13,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { loadKeposConfig, saveKeposConfig } from "../src/app-config.js";
 import { parsePeerConfig, type PeerConfig } from "../src/config.js";
 import { createDht, keyPairFromSeed, type DhtNode } from "../src/mux/hyperdht.js";
 import { startPeer, type RunningPeer } from "../src/runtime/peer.js";
-import { startSubscriber, type RunningSubscriber } from "../src/runtime/subscriber.js";
 import { loadPeerIdentity, setupPeer } from "../src/state/peer.js";
-import { setupSubscriber } from "../src/state/subscriber.js";
+import { connectFrozenLegacyClient, type FrozenLegacyClient } from "./fixtures/frozen-legacy-client.js";
 
 const require = createRequire(import.meta.url);
 const createHyperDhtTestnet = require("hyperdht/testnet") as (
@@ -152,26 +152,24 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
   }
 });
 
-test("an old subscriber pairs with the canonical accept side and keeps legacy service access", async () => {
+test("the frozen pre-change client pairs and uses catalog, HTTP, TCP, and UDP wire contracts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-legacy-"));
-  const testnet = await createHyperDhtTestnet(3);
+  const testnet = await createHyperDhtTestnet(4);
   let serverDht: DhtNode | undefined;
-  let clientDht: DhtNode | undefined;
   let peer: RunningPeer | undefined;
-  let subscriber: RunningSubscriber | undefined;
+  let legacy: FrozenLegacyClient | undefined;
   let target: Server | undefined;
   let httpTarget: Server | undefined;
+  let udpTarget: import("node:dgram").Socket | undefined;
   try {
     const serverState = path.join(root, "server", "peer");
-    const clientState = path.join(root, "client", "subscriber");
     const serverSetup = await setupPeer({ stateDir: serverState });
-    await setupSubscriber({ stateDir: clientState });
     const serverIdentity = await loadPeerIdentity(serverState);
+    let persistedConfig: PeerConfig | undefined;
     serverDht = createDht({
       bootstrap: testnet.bootstrap,
       keyPair: keyPairFromSeed(serverIdentity.seed),
     });
-    clientDht = createDht({ bootstrap: testnet.bootstrap });
     peer = await startPeer({
       stateDir: serverState,
       config: parsePeerConfig({
@@ -181,6 +179,9 @@ test("an old subscriber pairs with the canonical accept side and keeps legacy se
         bindings: [],
       }),
       dht: serverDht,
+      persistConfig: async (config) => {
+        persistedConfig = config;
+      },
     });
     const invitation = peer.createPairingInvitation();
 
@@ -206,23 +207,31 @@ test("an old subscriber pairs with the canonical accept side and keeps legacy se
     if (!httpAddress || typeof httpAddress === "string") {
       throw new Error("test legacy HTTP source did not receive an address");
     }
-    const pairingTask = startSubscriber({
-      stateDir: clientState,
-      dht: clientDht,
-      gatewayPort: 0,
-      services: [
-        { id: "legacy", localPort: 0 },
-        { id: "legacy-http", localPort: 0 },
-      ],
-      pairing: {
-        invitation: invitation.uri,
-        deviceLabel: "old-phone",
-        platform: "android",
-      },
+    const { createSocket: createUdpSocket } = await import("node:dgram");
+    udpTarget = createUdpSocket("udp4");
+    await new Promise<void>((resolve, reject) => {
+      udpTarget!.once("error", reject);
+      udpTarget!.bind(0, "127.0.0.1", resolve);
+    });
+    const udpAddress = udpTarget.address();
+    if (typeof udpAddress === "string") throw new Error("legacy UDP target has no address");
+    udpTarget.on("message", (message, remote) => {
+      udpTarget!.send(Buffer.concat([Buffer.from("legacy-udp:"), message]), remote.port, remote.address);
+    });
+
+    const clientState = path.join(root, "client", "peer");
+    const clientSetup = await setupPeer({ stateDir: clientState });
+    const legacyTask = connectFrozenLegacyClient({
+      invitation: invitation.uri,
+      seed: (await loadPeerIdentity(clientState)).seed,
+      bootstrap: testnet.bootstrap,
+      label: "old-phone",
+      platform: "android",
     });
     await waitFor(() => peer?.pairingStatus().phase === "pending");
     await peer.approvePairing();
-    subscriber = await pairingTask;
+    legacy = await legacyTask;
+    assert.equal(persistedConfig?.peers[0]?.publicKey, clientSetup.publicKey);
     await waitFor(() => peer?.status().connections[0]?.status === "connected");
     assert.equal(peer.status().connections[0]?.capability, "unsupported");
 
@@ -232,7 +241,7 @@ test("an old subscriber pairs with the canonical accept side and keeps legacy se
         peers: [
           {
             label: "old-phone",
-            publicKey: subscriber.status().subscriberKey,
+            publicKey: clientSetup.publicKey,
             connection: "accept",
           },
         ],
@@ -241,39 +250,392 @@ test("an old subscriber pairs with the canonical accept side and keeps legacy se
             id: "legacy",
             name: "Legacy service",
             source: { localPort: targetAddress.port },
-            allow: [subscriber.status().subscriberKey],
+            allow: [clientSetup.publicKey],
           },
           {
             id: "legacy-http",
             name: "Legacy HTTP service",
             kind: "http",
             source: { localPort: httpAddress.port },
-            allow: [subscriber.status().subscriberKey],
+            allow: [clientSetup.publicKey],
+          },
+          {
+            id: "legacy-udp",
+            name: "Legacy UDP",
+            kind: "udp",
+            source: { localPort: udpAddress.port },
+            allow: [clientSetup.publicKey],
           },
         ],
         bindings: [],
       }),
     );
-    const localPort = subscriber.services.find(({ id }) => id === "legacy")?.port;
-    assert.equal(typeof localPort, "number");
+    const catalog = await legacy.catalog();
+    assert.equal(catalog.publisher?.publisherKey, serverSetup.publicKey);
     assert.deepEqual(
-      await requestTcp(localPort!, Buffer.from("payload")),
-      Buffer.from("legacy:payload"),
+      catalog.services?.filter(({ id }) => id !== "home").map(({ id, kind }) => ({ id, kind })),
+      [
+        { id: "legacy", kind: "tcp" },
+        { id: "legacy-http", kind: "tcp" },
+        { id: "legacy-udp", kind: "udp" },
+      ],
     );
-    const httpPort = subscriber.services.find(({ id }) => id === "legacy-http")?.port;
-    assert.equal(typeof httpPort, "number");
-    assert.deepEqual(
-      await requestHttp(httpPort!, "/from-old-client"),
+    const tunnel = await legacy.open("legacy");
+    const tcpReply = readStream(tunnel);
+    tunnel.end(Buffer.from("payload"));
+    assert.deepEqual(await tcpReply, Buffer.from("legacy:payload"));
+    assert.equal(
+      await legacy.requestHttp("legacy-http", "/from-old-client"),
       "legacy-http:/from-old-client",
     );
-    assert.equal(authorization, `Kepos ${subscriber.status().subscriberKey}`);
+    assert.equal(authorization, `Kepos ${legacy.publicKey}`);
+    assert.equal(
+      Buffer.from(await legacy.sendUdp("legacy-udp", Buffer.from("payload"))).toString(),
+      "legacy-udp:payload",
+    );
   } finally {
-    await subscriber?.stop().catch(() => undefined);
+    await legacy?.close().catch(() => undefined);
     await peer?.stop().catch(() => undefined);
     await serverDht?.destroy({ force: true }).catch(() => undefined);
-    await clientDht?.destroy({ force: true }).catch(() => undefined);
     await closeServer(target);
     await closeServer(httpTarget);
+    await closeUdp(udpTarget);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("pair approval survives stop, config reload, and a fresh peer connection", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-pair-reload-"));
+  const testnet = await createHyperDhtTestnet(4);
+  let serverDht: DhtNode | undefined;
+  let clientDht: DhtNode | undefined;
+  let serverPeer: RunningPeer | undefined;
+  let clientPeer: RunningPeer | undefined;
+  let legacy: FrozenLegacyClient | undefined;
+  try {
+    const serverState = path.join(root, "server", "peer");
+    const clientState = path.join(root, "client", "peer");
+    const configPath = path.join(root, "server", "config.toml");
+    const serverSetup = await setupPeer({ stateDir: serverState });
+    const clientSetup = await setupPeer({ stateDir: clientState });
+    const serverIdentity = await loadPeerIdentity(serverState);
+    const initialConfig = parsePeerConfig({
+      gateway: { port: 0 },
+      peers: [],
+      services: [],
+      bindings: [],
+    });
+    await saveKeposConfig(initialConfig, configPath);
+    serverDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(serverIdentity.seed),
+    });
+    serverPeer = await startPeer({
+      stateDir: serverState,
+      config: initialConfig,
+      dht: serverDht,
+      persistConfig: (config) => saveKeposConfig(config, configPath),
+    });
+
+    const invitation = serverPeer.createPairingInvitation();
+    const legacyTask = connectFrozenLegacyClient({
+      invitation: invitation.uri,
+      seed: (await loadPeerIdentity(clientState)).seed,
+      bootstrap: testnet.bootstrap,
+      label: "old-phone",
+      platform: "android",
+    });
+    await waitFor(() => serverPeer?.pairingStatus().phase === "pending");
+    await serverPeer.approvePairing();
+    legacy = await legacyTask;
+
+    const persisted = await loadKeposConfig(configPath);
+    assert.deepEqual(persisted?.peers, [
+      {
+        label: "old-phone",
+        publicKey: clientSetup.publicKey,
+        connection: "accept",
+      },
+    ]);
+    await legacy.close();
+    legacy = undefined;
+    await serverPeer.stop();
+    serverPeer = undefined;
+    await serverDht.destroy({ force: true });
+    serverDht = undefined;
+
+    const reloaded = await loadKeposConfig(configPath);
+    assert.deepEqual(reloaded?.peers, persisted?.peers);
+    serverDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(serverIdentity.seed),
+    });
+    serverPeer = await startPeer({
+      stateDir: serverState,
+      config: reloaded!,
+      dht: serverDht,
+    });
+    const clientIdentity = await loadPeerIdentity(clientState);
+    clientDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(clientIdentity.seed),
+    });
+    clientPeer = await startPeer({
+      stateDir: clientState,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "server", publicKey: serverSetup.publicKey, connection: "dial" }],
+        services: [],
+        bindings: [],
+      }),
+      dht: clientDht,
+    });
+    await waitFor(() =>
+      serverPeer?.status().connections[0]?.status === "connected" &&
+      clientPeer?.status().connections[0]?.status === "connected" &&
+      serverPeer.status().connections[0]?.services === 1 &&
+      clientPeer.status().connections[0]?.services === 1,
+    );
+    assert.deepEqual(serverPeer.status().connections[0], {
+      label: "old-phone",
+      publicKey: clientSetup.publicKey,
+      connection: "accept",
+      status: "connected",
+      generation: 1,
+      capability: "ready",
+      services: 1,
+    });
+  } finally {
+    await legacy?.close().catch(() => undefined);
+    await clientPeer?.stop().catch(() => undefined);
+    await serverPeer?.stop().catch(() => undefined);
+    await clientDht?.destroy({ force: true }).catch(() => undefined);
+    await serverDht?.destroy({ force: true }).catch(() => undefined);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical grant revocation closes active channels and blocks new opens", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-revoke-"));
+  const testnet = await createHyperDhtTestnet(3);
+  let aDht: DhtNode | undefined;
+  let bDht: DhtNode | undefined;
+  let aPeer: RunningPeer | undefined;
+  let bPeer: RunningPeer | undefined;
+  let source: Server | undefined;
+  try {
+    const aState = path.join(root, "a", "peer");
+    const bState = path.join(root, "b", "peer");
+    const aSetup = await setupPeer({ stateDir: aState });
+    const bSetup = await setupPeer({ stateDir: bState });
+    aDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(aState)).seed),
+    });
+    bDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(bState)).seed),
+    });
+    source = createServer(() => undefined);
+    await listenTcp(source);
+    const sourceAddress = source.address();
+    if (!sourceAddress || typeof sourceAddress === "string") {
+      throw new Error("revocation source did not receive an address");
+    }
+    const allowedConfig = parsePeerConfig({
+      gateway: { port: 0 },
+      peers: [{ label: "b", publicKey: bSetup.publicKey, connection: "dial" }],
+      services: [{
+        id: "protected",
+        name: "Protected",
+        source: { localPort: sourceAddress.port },
+        allow: [bSetup.publicKey],
+      }],
+      bindings: [],
+    });
+    const bConfig = parsePeerConfig({
+      gateway: { port: 0 },
+      peers: [{ label: "a", publicKey: aSetup.publicKey, connection: "accept" }],
+      services: [],
+      bindings: [],
+    });
+    bPeer = await startPeer({ stateDir: bState, config: bConfig, dht: bDht });
+    aPeer = await startPeer({ stateDir: aState, config: allowedConfig, dht: aDht });
+    await waitFor(() =>
+      aPeer?.status().connections[0]?.status === "connected" &&
+      bPeer?.status().connections[0]?.status === "connected" &&
+      bPeer.status().connections[0]?.services === 2,
+    );
+
+    const channel = await bPeer.open(aSetup.publicKey, "protected");
+    let closed = false;
+    const closedTask = new Promise<void>((resolve) => {
+      channel.once("error", () => undefined);
+      channel.once("close", () => {
+        closed = true;
+        resolve();
+      });
+    });
+    const revokedConfig = parsePeerConfig({
+      ...allowedConfig,
+      services: [{
+        ...allowedConfig.services[0]!,
+        allow: [],
+      }],
+    });
+    assert.equal(await aPeer.applyConfig(revokedConfig), true);
+    await closedTask;
+    assert.equal(closed, true);
+    await assert.rejects(
+      bPeer.open(aSetup.publicKey, "protected"),
+      /unauthorized or unavailable/i,
+    );
+  } finally {
+    await bPeer?.stop().catch(() => undefined);
+    await aPeer?.stop().catch(() => undefined);
+    await bDht?.destroy({ force: true }).catch(() => undefined);
+    await aDht?.destroy({ force: true }).catch(() => undefined);
+    await closeServer(source);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical bindings do not replay an offline request after reconnection", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-reconnect-"));
+  const testnet = await createHyperDhtTestnet(3);
+  let aDht: DhtNode | undefined;
+  let bDht: DhtNode | undefined;
+  let aPeer: RunningPeer | undefined;
+  let bPeer: RunningPeer | undefined;
+  let source: Server | undefined;
+  let staleSocket: import("node:net").Socket | undefined;
+  try {
+    const aState = path.join(root, "a", "peer");
+    const bState = path.join(root, "b", "peer");
+    const aSetup = await setupPeer({ stateDir: aState });
+    const bSetup = await setupPeer({ stateDir: bState });
+    bDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(bState)).seed),
+    });
+    const bConfig = parsePeerConfig({
+      gateway: { port: 0 },
+      peers: [{ label: "a", publicKey: aSetup.publicKey, connection: "dial" }],
+      services: [],
+      bindings: [{ peer: "a", service: "echo", listen: { localPort: 0 } }],
+    });
+    bPeer = await startPeer({
+      stateDir: bState,
+      config: bConfig,
+      dht: bDht,
+      serviceAcquisitionTimeoutMs: 5_000,
+    });
+    const bindingPort = bPeer.status().bindings[0]?.port;
+    assert.equal(typeof bindingPort, "number");
+    await waitFor(() => bPeer?.status().connections[0]?.status !== "connected");
+
+    staleSocket = createConnection({ host: "127.0.0.1", port: bindingPort! });
+    staleSocket.on("error", () => undefined);
+    staleSocket.end(Buffer.from("stale"));
+    const staleClosed = new Promise<boolean>((resolve) => {
+      if (staleSocket?.destroyed) {
+        resolve(true);
+        return;
+      }
+      staleSocket?.once("close", () => resolve(true));
+    });
+    await Promise.race([staleClosed, delay(100)]);
+
+    const received: Buffer[] = [];
+    source = createServer((socket) => {
+      const chunks: Buffer[] = [];
+      socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+      socket.on("end", () => {
+        const payload = Buffer.concat(chunks);
+        received.push(payload);
+        socket.end(Buffer.concat([Buffer.from("echo:"), payload]));
+      });
+    });
+    await listenTcp(source);
+    const sourceAddress = source.address();
+    if (!sourceAddress || typeof sourceAddress === "string") {
+      throw new Error("reconnect source did not receive an address");
+    }
+    aDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(aState)).seed),
+    });
+    aPeer = await startPeer({
+      stateDir: aState,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "b", publicKey: bSetup.publicKey, connection: "accept" }],
+        services: [{
+          id: "echo",
+          name: "Echo",
+          source: { localPort: sourceAddress.port },
+          allow: [bSetup.publicKey],
+        }],
+        bindings: [],
+      }),
+      dht: aDht,
+    });
+    await waitFor(() =>
+      bPeer?.status().connections[0]?.status === "connected" &&
+      bPeer.status().bindings[0]?.available === true,
+    );
+    await delay(100);
+    assert.deepEqual(received, []);
+    assert.deepEqual(
+      await requestTcp(bindingPort!, Buffer.from("fresh")),
+      Buffer.from("echo:fresh"),
+    );
+    assert.deepEqual(received, [Buffer.from("fresh")]);
+
+    const firstGeneration = bPeer.status().connections[0]?.generation ?? 0;
+    await aPeer.stop();
+    aPeer = undefined;
+    await aDht.destroy({ force: true });
+    aDht = undefined;
+    await waitFor(() => bPeer?.status().connections[0]?.status !== "connected");
+
+    aDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(aState)).seed),
+    });
+    aPeer = await startPeer({
+      stateDir: aState,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "b", publicKey: bSetup.publicKey, connection: "accept" }],
+        services: [{
+          id: "echo",
+          name: "Echo",
+          source: { localPort: sourceAddress.port },
+          allow: [bSetup.publicKey],
+        }],
+        bindings: [],
+      }),
+      dht: aDht,
+    });
+    await waitFor(() =>
+      bPeer?.status().connections[0]?.status === "connected" &&
+      (bPeer.status().connections[0]?.generation ?? 0) > firstGeneration,
+    );
+    assert.deepEqual(
+      await requestTcp(bindingPort!, Buffer.from("after-reconnect")),
+      Buffer.from("echo:after-reconnect"),
+    );
+  } finally {
+    staleSocket?.destroy();
+    await bPeer?.stop().catch(() => undefined);
+    await aPeer?.stop().catch(() => undefined);
+    await bDht?.destroy({ force: true }).catch(() => undefined);
+    await aDht?.destroy({ force: true }).catch(() => undefined);
+    await closeServer(source);
     await testnet.destroy();
     await rm(root, { recursive: true, force: true });
   }
@@ -413,6 +775,136 @@ test("a canonical peer republishes an upstream service only when explicitly conf
   }
 });
 
+test("canonical UDP republication uses the authenticated upstream peer and returns replies", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-udp-republish-"));
+  const testnet = await createHyperDhtTestnet(4);
+  let macDht: DhtNode | undefined;
+  let nucDht: DhtNode | undefined;
+  let macPeer: RunningPeer | undefined;
+  let nucPeer: RunningPeer | undefined;
+  let legacy: FrozenLegacyClient | undefined;
+  let target: import("node:dgram").Socket | undefined;
+  try {
+    const macState = path.join(root, "mac", "peer");
+    const nucState = path.join(root, "nuc", "peer");
+    const clientState = path.join(root, "client", "peer");
+    const macSetup = await setupPeer({ stateDir: macState });
+    const nucSetup = await setupPeer({ stateDir: nucState });
+    const clientSetup = await setupPeer({ stateDir: clientState });
+    const macIdentity = await loadPeerIdentity(macState);
+    const nucIdentity = await loadPeerIdentity(nucState);
+    macDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(macIdentity.seed),
+    });
+    nucDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(nucIdentity.seed),
+    });
+
+    const { createSocket } = await import("node:dgram");
+    target = createSocket("udp4");
+    await new Promise<void>((resolve, reject) => {
+      target!.once("error", reject);
+      target!.bind(0, "127.0.0.1", () => {
+        target!.off("error", reject);
+        resolve();
+      });
+    });
+    target.on("message", (message, remote) => {
+      target!.send(Buffer.concat([Buffer.from("udp-upstream:"), message]), remote.port, remote.address);
+    });
+    const targetAddress = target.address();
+    if (typeof targetAddress === "string") throw new Error("UDP target has no address");
+
+    macPeer = await startPeer({
+      stateDir: macState,
+      dht: macDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "nuc", publicKey: nucSetup.publicKey, connection: "dial" }],
+        services: [{
+          id: "game",
+          name: "Game",
+          kind: "udp",
+          source: { localPort: targetAddress.port },
+          allow: [nucSetup.publicKey],
+        }],
+        bindings: [],
+      }),
+    });
+    const initialNucConfig = parsePeerConfig({
+      gateway: { port: 0 },
+      peers: [{ label: "mac", publicKey: macSetup.publicKey, connection: "accept" }],
+      services: [{
+        id: "game-republished",
+        name: "Republished game",
+        kind: "udp",
+        source: { peer: "mac", service: "game" },
+        allow: [],
+      }],
+      bindings: [],
+    });
+    nucPeer = await startPeer({
+      stateDir: nucState,
+      dht: nucDht,
+      config: initialNucConfig,
+      persistConfig: async () => undefined,
+    });
+    await waitFor(() =>
+      macPeer?.status().connections[0]?.status === "connected" &&
+      nucPeer?.status().connections[0]?.status === "connected" &&
+      nucPeer.status().services[0]?.available === true,
+    );
+
+    const invitation = nucPeer.createPairingInvitation();
+    const legacyTask = connectFrozenLegacyClient({
+      invitation: invitation.uri,
+      seed: (await loadPeerIdentity(clientState)).seed,
+      bootstrap: testnet.bootstrap,
+      label: "old-udp-client",
+      platform: "android",
+    });
+    await waitFor(() => nucPeer?.pairingStatus().phase === "pending");
+    await nucPeer.approvePairing();
+    legacy = await legacyTask;
+    const approvedConfig = parsePeerConfig({
+      ...initialNucConfig,
+      peers: [
+        ...initialNucConfig.peers,
+        { label: "old-udp-client", publicKey: clientSetup.publicKey, connection: "accept" },
+      ],
+      services: [{
+        ...initialNucConfig.services[0]!,
+        allow: [clientSetup.publicKey],
+      }],
+    });
+    await nucPeer.applyConfig(approvedConfig);
+    const catalog = await legacy.catalog();
+    assert.equal(
+      catalog.services?.find(({ id }) => id === "game-republished")?.kind,
+      "udp",
+    );
+    assert.equal(
+      Buffer.from(await legacy.sendUdp("game-republished", Buffer.from("datagram"))).toString(),
+      "udp-upstream:datagram",
+    );
+    await nucPeer.applyConfig(parsePeerConfig({
+      ...approvedConfig,
+      gateway: { port: 0, domain: "kepos.internal" },
+    }));
+  } finally {
+    await legacy?.close().catch(() => undefined);
+    await nucPeer?.stop().catch(() => undefined);
+    await macPeer?.stop().catch(() => undefined);
+    await nucDht?.destroy({ force: true }).catch(() => undefined);
+    await macDht?.destroy({ force: true }).catch(() => undefined);
+    await closeUdp(target);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("canonical peer keeps offline bindings configured and reports local source state", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-status-"));
   const stateDir = path.join(root, "peer");
@@ -514,6 +1006,87 @@ test("canonical peer keeps offline bindings configured and reports local source 
   }
 });
 
+test("canonical peer records and expires a failed local source acquisition", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-source-error-"));
+  const testnet = await createHyperDhtTestnet(3);
+  let aDht: DhtNode | undefined;
+  let bDht: DhtNode | undefined;
+  let aPeer: RunningPeer | undefined;
+  let bPeer: RunningPeer | undefined;
+  let unusedSource: Server | undefined;
+  try {
+    const aState = path.join(root, "a", "peer");
+    const bState = path.join(root, "b", "peer");
+    const aSetup = await setupPeer({ stateDir: aState });
+    const bSetup = await setupPeer({ stateDir: bState });
+    unusedSource = createServer();
+    await listenTcp(unusedSource);
+    const address = unusedSource.address();
+    if (!address || typeof address === "string") {
+      throw new Error("source-error fixture did not receive an address");
+    }
+    const closedPort = address.port;
+    await closeServer(unusedSource);
+    unusedSource = undefined;
+
+    aDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(aState)).seed),
+    });
+    bDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(bState)).seed),
+    });
+    aPeer = await startPeer({
+      stateDir: aState,
+      dht: aDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "b", publicKey: bSetup.publicKey, connection: "accept" }],
+        services: [{
+          id: "broken",
+          name: "Broken source",
+          source: { localPort: closedPort },
+          allow: [bSetup.publicKey],
+        }],
+        bindings: [],
+      }),
+    });
+    bPeer = await startPeer({
+      stateDir: bState,
+      dht: bDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "a", publicKey: aSetup.publicKey, connection: "dial" }],
+        services: [],
+        bindings: [],
+      }),
+    });
+    await waitFor(() =>
+      bPeer?.status().connections[0]?.status === "connected" &&
+      (bPeer.status().connections[0]?.services ?? 0) >= 2,
+    );
+    await assert.rejects(
+      bPeer.open(aSetup.publicKey, "broken"),
+      /refused|failed|source/i,
+    );
+    await waitFor(() => aPeer?.status().services.find(({ id }) => id === "broken")?.available === false);
+    const failed = aPeer.status().services.find(({ id }) => id === "broken");
+    assert.equal(failed?.available, false);
+    assert.match(failed?.error ?? "", /refused|connect/i);
+    await delay(1_100);
+    assert.equal(aPeer.status().services.find(({ id }) => id === "broken")?.available, true);
+  } finally {
+    await bPeer?.stop().catch(() => undefined);
+    await aPeer?.stop().catch(() => undefined);
+    await bDht?.destroy({ force: true }).catch(() => undefined);
+    await aDht?.destroy({ force: true }).catch(() => undefined);
+    await closeServer(unusedSource);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("canonical peer rejects occupied Unix bindings and disabled pairing", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-errors-"));
   const occupiedPath = path.join(root, "occupied.sock");
@@ -603,6 +1176,29 @@ async function closeServer(server: Server | undefined): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
+async function closeUdp(
+  socket: import("node:dgram").Socket | undefined,
+): Promise<void> {
+  if (!socket) return;
+  await new Promise<void>((resolve) => {
+    try {
+      socket.close(() => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
+
+function readStream(stream: import("node:stream").Duplex): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stream.on("data", (chunk: Buffer | Uint8Array) => chunks.push(Buffer.from(chunk)));
+    stream.once("error", reject);
+    stream.once("end", () => resolve(Buffer.concat(chunks)));
+    stream.once("close", () => resolve(Buffer.concat(chunks)));
+  });
+}
+
 function requestTcp(port: number, payload: Buffer): Promise<Buffer> {
   return requestSocket({ port }, payload);
 }
@@ -664,6 +1260,10 @@ async function waitFor(predicate: () => boolean, timeoutMs = 15_000): Promise<vo
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error("timed out waiting for canonical peer state");
+}
+
+function delay(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function createFakeDht(

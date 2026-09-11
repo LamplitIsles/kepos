@@ -1,10 +1,13 @@
+import * as b4a from "b4a";
+
+import type { PeerBinding, PeerServiceSource } from "../../../src/config.js";
 import {
   isDesktopDiagnosticErrorCategory,
   type DesktopDiagnosticErrorCategory,
 } from "./diagnostics-contract.js";
-import type { PublisherServiceSource } from "../../../src/config.js";
-import type { PeerBinding, PeerServiceSource } from "../../../src/config.js";
-import type { PublisherPairingSnapshot } from "../../../src/pairing/publisher.js";
+
+const maximumMessageBytes = 64 * 1024;
+const serviceIdPattern = /^[a-z][a-z0-9-]*$/u;
 
 export type DesktopConnection =
   | "unconfigured"
@@ -13,86 +16,12 @@ export type DesktopConnection =
   | "reconnecting"
   | "stopped";
 
-export interface DesktopService {
-  id: string;
-  name: string;
-  access: "http" | "ssh" | "tcp" | "udp";
-  action: "open" | "copy-command" | "copy-url" | "copy-endpoint";
-  icon:
-    | "book"
-    | "build"
-    | "dashboard"
-    | "dagger"
-    | "git"
-    | "music"
-    | "photos"
-    | "port"
-    | "proxy"
-    | "storage"
-    | "terminal"
-    | "web";
-  available: boolean;
-  error?: string;
-  copyText?: string;
-  url?: string;
-}
-
 export type RolePhase =
   | "starting"
   | "running"
   | "failed"
   | "stopping"
   | "stopped";
-
-export interface DesktopSubscriberRole {
-  phase: RolePhase;
-  connection: DesktopConnection;
-  subscriberKey?: string;
-  remotePublisher?: {
-    displayName: string;
-    publisherKey: string;
-    keyFingerprint: string;
-  };
-  gatewayPort?: number;
-  services: DesktopService[];
-  connectionHint?: "udp-firewall-vpn-tun";
-  error?: string;
-}
-
-export interface DesktopPublisherRole {
-  phase: RolePhase;
-  displayName?: string;
-  publisherKey?: string;
-  keyFingerprint?: string;
-  activeSubscribers: number;
-  activeSubscriberKeys: string[];
-  acceptedConnections: number;
-  services: Array<{
-    id: string;
-    name: string;
-    source: PublisherServiceSource;
-    available: boolean;
-    error?: string;
-    kind?: "udp";
-  }>;
-  pairing?:
-    | { phase: "idle" }
-    | {
-        phase: "inviting";
-        expiresAt: number;
-        expired: boolean;
-        qrSvg?: string;
-      }
-    | {
-        phase: "pending";
-        subscriberKey: string;
-        keyFingerprint: string;
-        label: string;
-        platform: string;
-        error?: string;
-      };
-  error?: string;
-}
 
 export interface DesktopPeerRole {
   phase: RolePhase;
@@ -124,18 +53,30 @@ export interface DesktopPeerRole {
     available: boolean;
     error?: string;
   }>;
-  pairing?: PublisherPairingSnapshot & {
-    uri?: string;
-    qrSvg?: string;
-  };
+  pairing?: DesktopPairingSnapshot;
   error?: string;
 }
+
+export type DesktopPairingSnapshot =
+  | { phase: "idle" }
+  | {
+      phase: "inviting";
+      expiresAt: number;
+      expired: boolean;
+      uri?: string;
+      qrSvg?: string;
+    }
+  | {
+      phase: "pending";
+      peerKey: string;
+      keyFingerprint: string;
+      label: string;
+      platform: string;
+    };
 
 export interface DesktopSnapshot {
   type: "snapshot";
   appPhase: "starting" | "running" | "stopping" | "stopped";
-  subscriber?: DesktopSubscriberRole;
-  publisher?: DesktopPublisherRole;
   peer?: DesktopPeerRole;
 }
 
@@ -147,7 +88,6 @@ export type DesktopCommand =
   | { type: "cancelPairing" }
   | { type: "approvePairing" }
   | { type: "denyPairing" }
-  | { type: "setSubscriberPublisher"; publisherKey: string }
   | { type: "quit" };
 
 export type DesktopDiagnosticsResult =
@@ -182,17 +122,6 @@ export function parseDesktopCommand(source: string): DesktopCommand {
       throw new Error("desktop command service id is invalid");
     }
     return { type: "openService", serviceId: value.serviceId };
-  }
-
-  if (value.type === "setSubscriberPublisher") {
-    rejectUnknownFields(value, ["type", "publisherKey"]);
-    if (
-      typeof value.publisherKey !== "string" ||
-      !publisherKeyPattern.test(value.publisherKey)
-    ) {
-      throw new Error("desktop command publisher key is invalid");
-    }
-    return { type: "setSubscriberPublisher", publisherKey: value.publisherKey };
   }
 
   if (
@@ -256,8 +185,3 @@ function rejectUnknownFields(
   const unknown = Object.keys(value).find((field) => !allowedFields.has(field));
   if (unknown) throw new Error(`desktop command has unknown field: ${unknown}`);
 }
-import * as b4a from "b4a";
-
-const maximumMessageBytes = 64 * 1024;
-const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
-const publisherKeyPattern = /^[0-9a-f]{64}$/;
