@@ -33,6 +33,7 @@ import {
 } from "../runtime/peer.js";
 import type { Observation, Observe } from "../mux/observability.js";
 import { waitForSignal } from "./signals.js";
+import { parseMetricsListenValue } from "./options.js";
 
 export interface CliDependencies {
   stdout: (line: string) => void;
@@ -211,6 +212,7 @@ async function peerPairCommand(
   const next = parsePeerConfig({
     ...(existing?.network ? { network: existing.network } : {}),
     ...(existing?.gateway ? { gateway: existing.gateway } : {}),
+    ...(existing?.metrics ? { metrics: existing.metrics } : {}),
     peers: [
       ...(existing?.peers ?? []).filter(
         (peer) => peer.publicKey !== publicKey && peer.label !== label,
@@ -245,7 +247,12 @@ async function peerRunCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
 ): Promise<void> {
-  const options = parseArguments(arguments_, ["--state", "--config", "--observations"]);
+  const options = parseArguments(arguments_, [
+    "--state",
+    "--config",
+    "--observations",
+    "--metrics-listen",
+  ]);
   const mode = options.get("--observations") ?? "human";
   if (mode !== "human" && mode !== "ndjson") {
     throw new Error("--observations must be human or ndjson");
@@ -257,6 +264,7 @@ async function peerRunCommand(
     options.get("--state") ?? defaultKeposPeerStatePath(),
   );
   const config = requireConfig(await dependencies.loadConfig(configPath));
+  const metricsListen = options.get("--metrics-listen");
   const lock = await dependencies.acquirePeerRuntimeLock(stateDir);
   let cancelReload: (() => void) | undefined;
   let reloadTask = Promise.resolve();
@@ -267,6 +275,9 @@ async function peerRunCommand(
       config,
       persistConfig: (nextConfig) => dependencies.saveConfig(nextConfig, configPath),
       observe: observationWriter(mode, dependencies),
+      ...(metricsListen === undefined
+        ? {}
+        : { metricsListen: parseMetricsListenValue(metricsListen) }),
     });
     running = started;
     const writeStatus = (line: string): void => {

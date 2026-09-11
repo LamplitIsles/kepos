@@ -13,13 +13,19 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 import io.github.ttalab.kepos.ui.KeposScreen
@@ -27,22 +33,32 @@ import io.github.ttalab.kepos.ui.KeposScreen
 class MainActivity : ComponentActivity() {
   private var snapshot by mutableStateOf(RuntimeSnapshot(RuntimeState.STOPPED))
   private var subscription: AutoCloseable? = null
+  private var service: KeposForegroundService.LocalBinder? = null
   private var bound = false
+  private val pairingInvitation by viewModels<PairingInvitationViewModel>()
   private val runtimeStartPreference by lazy { RuntimeStartPreference(this) }
   private val requestNotificationPermission = registerForActivityResult(
-    androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ActivityResultContracts.RequestPermission(),
   ) {
     KeposForegroundService.start(this)
+  }
+  private val scanPairingInvitation = registerForActivityResult(ScanContract()) { result ->
+    result.contents?.let(::queuePairingInvitation)
   }
   private val connection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName, service: IBinder) {
       val binder = service as KeposForegroundService.LocalBinder
-      subscription = binder.observe { snapshot = it }
+      this@MainActivity.service = binder
+      subscription = binder.observe {
+        snapshot = it
+        dispatchPendingPairing()
+      }
     }
 
     override fun onServiceDisconnected(name: ComponentName) {
       subscription?.close()
       subscription = null
+      service = null
       snapshot = RuntimeSnapshot(RuntimeState.STOPPED)
     }
   }
@@ -58,10 +74,17 @@ class MainActivity : ComponentActivity() {
         snapshot = snapshot,
         onStart = { startRuntime() },
         onStop = { KeposForegroundService.stop(this) },
+        onConfigure = { publicKey ->
+          service?.configurePeer(publicKey, "publisher", "dial")?.whenComplete { _, error ->
+            if (error != null) showError(error, "Configuration failed")
+          }
+        },
+        onScanPairing = { scanPairingInvitation.launch(pairingScanOptions()) },
         onCopyText = { text -> copyText(text) },
         onOpenUrl = { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
       )
     }
+    acceptDeepLink(intent)
   }
 
   override fun onStart() {
@@ -77,6 +100,7 @@ class MainActivity : ComponentActivity() {
   override fun onStop() {
     subscription?.close()
     subscription = null
+    service = null
     if (bound) unbindService(connection)
     bound = false
     super.onStop()
@@ -98,4 +122,63 @@ class MainActivity : ComponentActivity() {
       ClipData.newPlainText("Kepos peer value", text),
     )
   }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    acceptDeepLink(intent)
+    setIntent(intent)
+  }
+
+  private fun acceptDeepLink(intent: Intent?) {
+    val invitation = intent?.data?.toString() ?: return
+    intent.data = null
+    val uri = Uri.parse(invitation)
+    if (uri.scheme == "kepos" && uri.host == "pair") {
+      queuePairingInvitation(invitation)
+    }
+  }
+
+  private fun queuePairingInvitation(invitation: String) {
+    pairingInvitation.queue(invitation)
+    startRuntime()
+    dispatchPendingPairing()
+  }
+
+  private fun dispatchPendingPairing() {
+    val invitation = pairingInvitation.peek() ?: return
+    if (snapshot.state != RuntimeState.RUNNING) return
+    val binder = service ?: return
+    pairingInvitation.take()
+    binder.pairPeer(invitation, Build.MODEL, "android").whenComplete { _, error ->
+      if (error != null) showError(error, "Pairing failed")
+    }
+  }
+
+  private fun pairingScanOptions() = ScanOptions()
+    .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+    .setPrompt("Scan a Kepos invitation")
+    .setBeepEnabled(false)
+    .setOrientationLocked(false)
+
+  private fun showError(error: Throwable, prefix: String) {
+    runOnUiThread {
+      Toast.makeText(
+        applicationContext,
+        "$prefix: ${error.cause?.message ?: error.message ?: "unknown error"}",
+        Toast.LENGTH_LONG,
+      ).show()
+    }
+  }
+}
+
+internal class PairingInvitationViewModel : ViewModel() {
+  private var pending: String? = null
+
+  fun queue(invitation: String) {
+    pending = invitation
+  }
+
+  fun peek(): String? = pending
+
+  fun take(): String? = pending.also { pending = null }
 }

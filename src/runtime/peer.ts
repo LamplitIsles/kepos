@@ -55,6 +55,8 @@ import {
   PublisherPairing,
   type PublisherPairingSnapshot,
 } from "../pairing/publisher.js";
+import { parsePairingInvitation } from "../pairing/invitation.js";
+import type { PairingRequest } from "../pairing/protocol.js";
 import type {
   PeerBinding,
   PeerConfig,
@@ -62,6 +64,26 @@ import type {
   PeerService,
   PeerServiceSource,
 } from "../config.js";
+import { peerBindingKind } from "../config.js";
+import {
+  createServicePresentation,
+  type LocalServiceMapping,
+  type ServicePresentation,
+} from "../services/presentation.js";
+import {
+  createPeerMetricsRecorder,
+  peerMetricsPolicy,
+  type PeerMetricsRecorder,
+} from "../metrics/peer.js";
+import {
+  startMetricsServer,
+  type MetricsListenAddress,
+  type RunningMetricsServer,
+} from "../metrics/server.js";
+import {
+  listenPeerUdpBinding,
+  type RunningPeerUdpBinding,
+} from "./udp-binding.js";
 import { loadPeerIdentity } from "../state/peer.js";
 import {
   CancellationController,
@@ -100,6 +122,12 @@ export interface PeerRuntimeServiceStatus {
   kind: PeerService["kind"];
   source: PeerServiceSource;
   available: boolean;
+  access: ServicePresentation["access"];
+  action: ServicePresentation["action"];
+  icon: ServicePresentation["icon"];
+  url?: string;
+  copyText?: string;
+  peer?: string;
   error?: string;
 }
 
@@ -107,6 +135,7 @@ export interface PeerRuntimeBindingStatus {
   peer: string;
   service: string;
   listen: PeerBinding["listen"];
+  kind: "tcp" | "udp";
   port?: number;
   available: boolean;
   error?: string;
@@ -123,6 +152,11 @@ export interface PeerRuntimeStatus {
   connections: PeerRuntimeConnectionStatus[];
   services: PeerRuntimeServiceStatus[];
   bindings: PeerRuntimeBindingStatus[];
+  metrics?: {
+    host: string;
+    port: number;
+    url: string;
+  };
   pairing: PublisherPairingSnapshot;
 }
 
@@ -138,6 +172,7 @@ export interface StartPeerOptions {
   connectTimeoutMs?: number;
   capabilityTimeoutMs?: number;
   serviceAcquisitionTimeoutMs?: number;
+  metricsListen?: MetricsListenAddress;
   /** Persist the complete canonical config before pairing is authorized. */
   persistConfig?: (config: PeerConfig) => Promise<void>;
   pairing?: {
@@ -161,6 +196,11 @@ export interface RunningPeer {
   approvePairing: () => Promise<void>;
   denyPairing: () => void;
   cancelPairing: () => void;
+  pair: (
+    invitation: string,
+    deviceLabel: string,
+    platform: string,
+  ) => Promise<PeerRuntimeStatus>;
   stop: () => Promise<void>;
 }
 
@@ -185,6 +225,9 @@ interface PeerEntry {
   reconnectTask?: Promise<void>;
   stopped: boolean;
   error?: string;
+  /** Last authenticated catalog, retained to report known services offline. */
+  lastCatalog?: HomeRegistry;
+  pairingRequest?: PairingRequest;
 }
 
 interface CanonicalUdpMapping {
@@ -348,7 +391,9 @@ class CanonicalUdpRemote implements UdpPublisherRemote {
 
 interface BindingRuntime {
   binding: PeerBinding;
-  server: Server;
+  kind: "tcp" | "udp";
+  server?: Server;
+  udp?: RunningPeerUdpBinding;
   port?: number;
   unixOwnership?: {
     path: string;
@@ -389,7 +434,12 @@ export async function startPeer(
   const bindings = new Map<string, PeerBinding>();
   const homeServers = new Map<string, Promise<import("../home/server.js").RunningHomeServer>>();
   const bindingRuntimes = new Map<string, BindingRuntime>();
+  const metricsRecorder: PeerMetricsRecorder = createPeerMetricsRecorder(
+    peerMetricsPolicy(activeConfig),
+    now,
+  );
   let gateway: RunningHttpGateway;
+  let metricsServer: RunningMetricsServer | undefined;
   let server: ReturnType<DhtNode["createServer"]>;
   let stopped = false;
   let gatewayStopping: Promise<void> | undefined;
@@ -397,6 +447,10 @@ export async function startPeer(
   let configTask: Promise<void> = Promise.resolve();
   const pairingCandidates = new Set<string>();
   const canonicalUdpRemotes = new Set<CanonicalUdpRemote>();
+  const pendingPeerPairings = new Map<
+    string,
+    { resolve: () => void; reject: (error: Error) => void }
+  >();
   let pendingPairingAdmissions = 0;
   let cancelPairingExpiry: (() => void) | undefined;
 
@@ -516,6 +570,13 @@ export async function startPeer(
 
   try {
     await server.listen(keyPair);
+    const metricsListen = metricsListenFor(activeConfig);
+    if (metricsListen) {
+      metricsServer = await startMetricsServer({
+        listen: metricsListen,
+        render: () => metricsRecorder.render(),
+      });
+    }
     gateway = await startHttpGateway({
       port: activeConfig.gateway?.port ?? DEFAULT_GATEWAY_PORT,
       host: activeConfig.gateway?.host,
@@ -573,6 +634,73 @@ export async function startPeer(
     closePairingCandidates();
   }
 
+  async function pairPeer(
+    invitationUri: string,
+    deviceLabel: string,
+    platform: string,
+  ): Promise<PeerRuntimeStatus> {
+    if (stopped) throw new Error("Peer runtime is stopped");
+    const invitation = parsePairingInvitation(invitationUri, { now });
+    if (
+      deviceLabel.length === 0 ||
+      deviceLabel.trim() !== deviceLabel ||
+      b4a.byteLength(deviceLabel, "utf8") > 128 ||
+      /[\u0000-\u001f\u007f]/u.test(deviceLabel) ||
+      !/^[a-z0-9][a-z0-9_-]{0,31}$/u.test(platform)
+    ) {
+      throw new Error("pairing device details are invalid");
+    }
+    if (activeConfig.peers.some(({ publicKey }) => publicKey === invitation.publisherKey)) {
+      throw new Error("peer is already configured");
+    }
+    if (pendingPeerPairings.has(invitation.publisherKey)) {
+      throw new Error("peer pairing is already in progress");
+    }
+    const entry: PeerEntry = {
+      definition: {
+        label: invitation.displayName,
+        publicKey: invitation.publisherKey,
+        connection: "dial",
+      },
+      generation: 0,
+      stopped: false,
+      pairingRequest: {
+        token: invitation.token,
+        label: deviceLabel,
+        platform,
+      },
+    };
+    peerEntries.set(invitation.publisherKey, entry);
+    const approved = new Promise<void>((resolve, reject) => {
+      pendingPeerPairings.set(invitation.publisherKey, {
+        resolve,
+        reject: (error) => reject(error),
+      });
+    });
+    const expiry = setTimeout(() => {
+      pendingPeerPairings.get(invitation.publisherKey)?.reject(
+        new Error("Pairing invitation has expired"),
+      );
+      entry.current?.mux.close();
+    }, Math.max(0, invitation.expiresAt - now()));
+    expiry.unref?.();
+    try {
+      startDialing(entry);
+      await approved;
+      return runtimeStatus();
+    } finally {
+      clearTimeout(expiry);
+      pendingPeerPairings.delete(invitation.publisherKey);
+      if (!activeConfig.peers.some(({ publicKey }) => publicKey === invitation.publisherKey)) {
+        entry.stopped = true;
+        entry.current?.mux.close();
+        if (peerEntries.get(invitation.publisherKey) === entry) {
+          peerEntries.delete(invitation.publisherKey);
+        }
+      }
+    }
+  }
+
   options.log?.(`Peer ready: ${peerKey}`);
   return {
     peerKey,
@@ -585,6 +713,7 @@ export async function startPeer(
     approvePairing: () => pairing.approve(),
     denyPairing: cancelPairing,
     cancelPairing,
+    pair: pairPeer,
     stop: () => stop(),
   };
 
@@ -612,6 +741,7 @@ export async function startPeer(
         entry.current?.mux.close();
         entry.current = undefined;
         entry.error = undefined;
+        entry.lastCatalog = undefined;
       }
       entry.definition = definition;
       entry.stopped = false;
@@ -639,6 +769,7 @@ export async function startPeer(
       localSourceErrors.clear();
       activeConfig = nextConfig;
       installConfig(nextConfig);
+      metricsRecorder.applyPolicy(peerMetricsPolicy(nextConfig));
       for (const [serviceId, current] of serviceRateLimiters) {
         const nextRateBps = services.get(serviceId)?.maxPublisherToSubscriberBps;
         if (nextRateBps !== current.rateBps) serviceRateLimiters.delete(serviceId);
@@ -669,6 +800,13 @@ export async function startPeer(
       ) {
         await restartGateway();
       }
+      if (
+        JSON.stringify(previous.metrics) !== JSON.stringify(nextConfig.metrics) &&
+        options.metricsListen === undefined
+      ) {
+        await restartMetrics();
+      }
+      updateUdpBindings();
       return true;
     });
     configTask = result.then(() => undefined, () => undefined);
@@ -786,7 +924,14 @@ export async function startPeer(
     mode: "accepted" | "dialed",
     existingObserve?: ReturnType<typeof createObservationEmitter>,
     authorized = true,
-    peerOptions: Pick<MuxPeerOptions, "onPairingRequest"> = {},
+    peerOptions: Pick<
+      MuxPeerOptions,
+      | "onPairingRequest"
+      | "pairingRequest"
+      | "onPairingPending"
+      | "onPairingApproved"
+      | "onPairingFailed"
+    > = {},
   ): Promise<void> {
     const generation = ++entry.generation;
     const outerId = existingObserve ? undefined : createObservationId("outer");
@@ -810,15 +955,21 @@ export async function startPeer(
     };
     const previous = entry.current;
     entry.current = connection;
+    entry.error = undefined;
     previous?.mux.close();
     observe(mode === "accepted" ? "outer.accepted" : "outer.connected", {
       remotePublicKey: outer.remotePublicKey,
       transport: dhtStreamSnapshot(outer),
     });
+    const metricsContext = {
+      subscriberKey: entry.definition.publicKey,
+      connectionId: `${entry.definition.publicKey}:${generation}`,
+    };
     let mux: RunningMuxPeer;
     try {
+      const pairingRequest = entry.pairingRequest;
       mux = createMuxPeer(outer, {
-        authorized,
+        authorized: pairingRequest === undefined && authorized,
         accept: (serviceId) => acceptService(connection, serviceId),
         capabilityTimeoutMs: options.capabilityTimeoutMs,
         heartbeat: {},
@@ -867,6 +1018,35 @@ export async function startPeer(
           ),
         transportSnapshot: () => dhtStreamSnapshot(outer),
         publisherToSubscriberRateLimiter,
+        metrics: metricsRecorder,
+        metricsContext,
+        ...(pairingRequest
+          ? {
+              pairingRequest,
+              onPairingPending: () => {
+                options.log?.(`Pairing request pending for ${entry.definition.label}`);
+                peerOptions.onPairingPending?.();
+              },
+              onPairingApproved: async () => {
+                if (!options.persistConfig) {
+                  throw new Error("peer pairing config persistence is unavailable");
+                }
+                const nextConfig: PeerConfig = {
+                  ...activeConfig,
+                  peers: [...activeConfig.peers, entry.definition],
+                };
+                await options.persistConfig(nextConfig);
+                entry.pairingRequest = undefined;
+                await applyConfig(nextConfig);
+                pendingPeerPairings.get(entry.definition.publicKey)?.resolve();
+                await peerOptions.onPairingApproved?.();
+              },
+              onPairingFailed: (error: Error) => {
+                pendingPeerPairings.get(entry.definition.publicKey)?.reject(error);
+                peerOptions.onPairingFailed?.(error);
+              },
+            }
+          : {}),
         ...peerOptions,
       });
     } catch (error) {
@@ -878,6 +1058,7 @@ export async function startPeer(
       throw error;
     }
     connection.mux = mux;
+    metricsRecorder.connectionActivated(metricsContext);
     mux.udp.onMessage((message) => {
       receiveCanonicalUdp(connection, message);
     });
@@ -891,6 +1072,7 @@ export async function startPeer(
         void refreshCatalog(connection);
         scheduleCatalogRefresh(connection);
       }
+      updateUdpBindings();
     });
     let streamError: string | undefined;
     outer.once("error", (error) => {
@@ -904,6 +1086,8 @@ export async function startPeer(
       }
       clearCanonicalUdpMappings(connection);
       for (const remote of canonicalUdpRemotes) remote.clearConnection(connection);
+      metricsRecorder.connectionClosed(metricsContext);
+      updateUdpBindings();
       if (entry.current !== connection) return;
       entry.current = undefined;
       entry.error = streamError;
@@ -920,6 +1104,19 @@ export async function startPeer(
         )
       ) {
         pairingCandidates.delete(entry.definition.publicKey);
+        peerEntries.delete(entry.definition.publicKey);
+      }
+      if (
+        entry.pairingRequest !== undefined &&
+        !activeConfig.peers.some(
+          (peer) => peer.publicKey === entry.definition.publicKey,
+        )
+      ) {
+        pendingPeerPairings.get(entry.definition.publicKey)?.reject(
+          new Error("Peer pairing connection closed"),
+        );
+        pendingPeerPairings.delete(entry.definition.publicKey);
+        entry.stopped = true;
         peerEntries.delete(entry.definition.publicKey);
       }
       if (!stopped && !entry.stopped && entry.definition.connection === "dial") {
@@ -943,11 +1140,14 @@ export async function startPeer(
         }
         if (connection.entry.current !== connection) return;
         connection.catalog = registry;
+        connection.entry.lastCatalog = registry;
         connection.error = undefined;
+        updateUdpBindings();
         updateHomeServers();
       } catch (error) {
         connection.error = errorMessage(error);
         connection.catalog = undefined;
+        updateUdpBindings();
         updateHomeServers();
       } finally {
         connection.catalogTask = undefined;
@@ -1234,13 +1434,7 @@ export async function startPeer(
     return starting;
   }
 
-  function registryServicesFor(entry: PeerEntry): Array<{
-    id: string;
-    name: string;
-    kind: "tcp" | "udp";
-    available?: boolean;
-    error?: string;
-  }> {
+  function registryServicesFor(entry: PeerEntry): HomeRegistry["services"] {
     return [...services.values()]
       .filter((service) => serviceAllowed(service.id, entry.definition.publicKey))
       .map((service) => {
@@ -1249,6 +1443,7 @@ export async function startPeer(
           id: service.id,
           name: service.name,
           kind: service.kind === "udp" ? "udp" : "tcp",
+          ...(service.kind === "http" ? { access: "http" as const } : {}),
           ...(status.available
             ? {}
             : { available: false, ...(status.error ? { error: status.error } : {}) }),
@@ -1273,8 +1468,27 @@ export async function startPeer(
   }
 
   async function startBinding(binding: PeerBinding): Promise<void> {
+    const kind = peerBindingKind(binding);
     if ("unixSocket" in binding.listen && process.platform === "win32") {
       throw new Error("Unix socket bindings are unsupported on Windows");
+    }
+    if (kind === "udp") {
+      if (!("localPort" in binding.listen)) {
+        throw new Error("UDP bindings require a localPort endpoint");
+      }
+      const bindingKeyValue = bindingKey(binding, resolvePeerKey);
+      if (bindingRuntimes.has(bindingKeyValue)) return;
+      const udp = await listenPeerUdpBinding(binding.service, binding.listen.localPort, {
+        onError: (message) => options.log?.(`UDP binding ${binding.service}: ${message}`),
+      });
+      bindingRuntimes.set(bindingKeyValue, {
+        binding,
+        kind,
+        udp,
+        port: udp.port,
+      });
+      updateUdpBindings();
+      return;
     }
     const bindingKeyValue = bindingKey(binding, resolvePeerKey);
     if (bindingRuntimes.has(bindingKeyValue)) return;
@@ -1302,6 +1516,7 @@ export async function startPeer(
       }
       bindingRuntimes.set(bindingKeyValue, {
         binding,
+        kind,
         server: listener,
         ...(port === undefined ? {} : { port }),
         ...(unixOwnership ? { unixOwnership } : {}),
@@ -1353,9 +1568,39 @@ export async function startPeer(
   }
 
   async function closeBinding(runtime: BindingRuntime): Promise<void> {
-    await closeServer(runtime.server).catch(() => undefined);
+    await runtime.udp?.close().catch(() => undefined);
+    if (runtime.server) await closeServer(runtime.server).catch(() => undefined);
     if (runtime.unixOwnership) {
       await unlinkOwnedSocket(runtime.unixOwnership.path, runtime.unixOwnership).catch(() => undefined);
+    }
+  }
+
+  function updateUdpBindings(): void {
+    for (const runtime of bindingRuntimes.values()) {
+      if (runtime.kind !== "udp" || !runtime.udp) continue;
+      let entry: PeerEntry | undefined;
+      try {
+        entry = peerEntries.get(resolvePeerKey(runtime.binding.peer));
+      } catch {
+        runtime.udp.setConnection(undefined);
+        continue;
+      }
+      const connection = entry?.current;
+      const remote = connection?.catalog?.services.find(
+        ({ id }) => id === runtime.binding.service,
+      );
+      const usable = Boolean(
+        connection &&
+          !connection.closed &&
+          connection.capability === "ready" &&
+          connection.mux.udp.available() &&
+          remote?.kind === "udp" &&
+          remote.available !== false,
+      );
+      runtime.udp.setConnection(
+        usable ? connection!.mux.udp : undefined,
+        connection?.generation ?? entry?.generation ?? 0,
+      );
     }
   }
 
@@ -1373,6 +1618,27 @@ export async function startPeer(
     })();
     await gatewayStopping;
     gatewayStopping = undefined;
+  }
+
+  function metricsListenFor(config: PeerConfig): MetricsListenAddress | undefined {
+    if (options.metricsListen) return { ...options.metricsListen };
+    if (!config.metrics) return undefined;
+    return {
+      host: config.metrics.host ?? "127.0.0.1",
+      port: config.metrics.port,
+    };
+  }
+
+  async function restartMetrics(): Promise<void> {
+    await metricsServer?.close().catch(() => undefined);
+    metricsServer = undefined;
+    const listen = metricsListenFor(activeConfig);
+    if (listen) {
+      metricsServer = await startMetricsServer({
+        listen,
+        render: () => metricsRecorder.render(),
+      });
+    }
   }
 
   function receiveCanonicalUdp(
@@ -1459,7 +1725,106 @@ export async function startPeer(
     return { available: true };
   }
 
+  function serviceMappingFor(service: PeerService): LocalServiceMapping | undefined {
+    if ("localPort" in service.source) {
+      return {
+        kind: service.kind === "udp" ? "udp" : "tcp",
+        port: service.source.localPort,
+      };
+    }
+    if ("unixSocket" in service.source) {
+      return { kind: "tcp", endpoint: `unix://${service.source.unixSocket}` };
+    }
+    return undefined;
+  }
+
+  function presentationFor(
+    service: Pick<PeerService, "id" | "name" | "kind"> &
+      Pick<HomeRegistry["services"][number], "access">,
+    mapping?: LocalServiceMapping,
+  ): ServicePresentation {
+    return createServicePresentation(service, gateway.port, mapping) ?? {
+      id: service.id,
+      name: service.name,
+      access: service.access ?? (service.kind === "udp" ? "udp" : "tcp"),
+      action: "copy-endpoint",
+      icon: "port",
+    };
+  }
+
+  function remoteServiceStatuses(): PeerRuntimeServiceStatus[] {
+    const statuses: PeerRuntimeServiceStatus[] = [];
+    const entries = [...peerEntries.values()].sort((left, right) =>
+      left.definition.label.localeCompare(right.definition.label) ||
+      left.definition.publicKey.localeCompare(right.definition.publicKey),
+    );
+    for (const entry of entries) {
+      const catalog = entry.current?.catalog ?? entry.lastCatalog;
+      const catalogAvailable = entry.current?.catalog !== undefined;
+      for (const remote of catalog?.services ?? []) {
+        if (remote.id === "home") continue;
+        const presentation = presentationFor(
+          remote,
+          remoteBindingMappingFor(entry, remote.id),
+        );
+        const available = catalogAvailable && remote.available !== false;
+        statuses.push({
+          kind: remote.kind,
+          source: { peer: entry.definition.label, service: remote.id },
+          peer: entry.definition.label,
+          available,
+          ...presentation,
+          ...(available
+            ? {}
+            : {
+                error: remote.available === false
+                  ? remote.error ?? "Service is unavailable"
+                  : entry.current
+                    ? entry.error ?? "Peer service catalog is unavailable"
+                    : "Peer is offline",
+              }),
+        });
+      }
+    }
+    return statuses;
+  }
+
+  function remoteBindingMappingFor(
+    entry: PeerEntry,
+    serviceId: string,
+  ): LocalServiceMapping | undefined {
+    const binding = [...bindings.values()].find((candidate) => {
+      try {
+        return (
+          candidate.service === serviceId &&
+          resolvePeerKey(candidate.peer) === entry.definition.publicKey
+        );
+      } catch {
+        return false;
+      }
+    });
+    if (!binding) return undefined;
+    const runtime = bindingRuntimes.get(bindingKey(binding, resolvePeerKey));
+    if (runtime?.kind === "udp") {
+      return { kind: "udp", ...(runtime.port === undefined ? {} : { port: runtime.port }) };
+    }
+    if ("unixSocket" in binding.listen) {
+      return { kind: "tcp", endpoint: `unix://${binding.listen.unixSocket}` };
+    }
+    const port = runtime?.port ?? binding.listen.localPort;
+    return { kind: "tcp", ...(port === undefined ? {} : { port }) };
+  }
+
   function runtimeStatus(): PeerRuntimeStatus {
+    const localServices = [...services.values()].map((service) => {
+      const serviceStatus = serviceStatusFor(service);
+      return {
+        kind: service.kind,
+        source: { ...service.source },
+        ...serviceStatus,
+        ...presentationFor(service, serviceMappingFor(service)),
+      };
+    });
     return {
       role: "peer",
       state: stopped ? "stopped" : "running",
@@ -1480,40 +1845,52 @@ export async function startPeer(
                 : "offline",
           generation: entry.generation,
           capability: entry.current?.capability ?? "pending",
-          services: entry.current?.catalog?.services.length ?? 0,
+          services:
+            entry.current?.catalog?.services.length ??
+            entry.lastCatalog?.services.length ??
+            0,
           ...(entry.error ? { error: entry.error } : {}),
         })),
-      services: [...services.values()].map((service) => ({
-        id: service.id,
-        name: service.name,
-        kind: service.kind,
-        source: { ...service.source },
-        ...serviceStatusFor(service),
-      })),
+      services: [...localServices, ...remoteServiceStatuses()],
       bindings: [...bindings.values()].map((binding) => {
         const runtime = bindingRuntimes.get(bindingKey(binding, resolvePeerKey));
         const entry = peerEntries.get(resolvePeerKey(binding.peer));
         const remote = entry?.current?.catalog?.services.find(
           ({ id }) => id === binding.service,
         );
+        const kind = peerBindingKind(binding);
         const unavailable = !entry?.current
           ? "Peer is offline"
           : !remote
             ? "Service is unauthorized or unavailable"
-            : remote.kind === "udp"
-              ? "Reverse UDP service channels are unsupported"
-              : remote.available === false
-                ? remote.error ?? "Service is unavailable"
-                : undefined;
+            : remote.available === false
+              ? remote.error ?? "Service is unavailable"
+              : kind === "udp" && remote.kind !== "udp"
+                ? "Binding transport kind is incompatible with the remote service"
+                : kind === "tcp" && remote.kind === "udp"
+                  ? "Reverse UDP service channels are unsupported"
+                  : kind === "udp" && runtime?.udp === undefined
+                    ? "UDP binding is unavailable"
+                    : undefined;
         return {
           peer: binding.peer,
           service: binding.service,
           listen: { ...binding.listen },
+          kind,
           ...(runtime?.port === undefined ? {} : { port: runtime.port }),
           available: unavailable === undefined,
           ...(unavailable ? { error: unavailable } : {}),
         };
       }),
+      ...(metricsServer
+        ? {
+            metrics: {
+              host: metricsServer.host,
+              port: metricsServer.port,
+              url: metricsServer.url,
+            },
+          }
+        : {}),
       pairing: pairing.snapshot(),
     };
   }
@@ -1530,6 +1907,10 @@ export async function startPeer(
         // closing the candidate below still prevents new channel use.
       }
       closePairingCandidates();
+      for (const [publicKey, pending] of pendingPeerPairings) {
+        pending.reject(new Error("Peer runtime stopped during pairing"));
+        pendingPeerPairings.delete(publicKey);
+      }
       for (const timer of localSourceErrorTimers.values()) clearTimeout(timer);
       localSourceErrorTimers.clear();
       localSourceErrors.clear();
@@ -1546,6 +1927,7 @@ export async function startPeer(
     await cleanupAll([
       () => server.close(),
       () => closeServer(gateway?.server),
+      () => metricsServer?.close(),
       ...[...bindingRuntimes.values()].map((runtime) => () => closeBinding(runtime)),
       ...[...homeServers.values()].map(
         (starting) => async () => (await starting).close(),
@@ -1553,6 +1935,7 @@ export async function startPeer(
       ...(ownsDht ? [() => dht.destroy({ force: true })] : []),
     ]);
     bindingRuntimes.clear();
+    metricsServer = undefined;
     homeServers.clear();
   }
 

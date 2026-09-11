@@ -79,9 +79,13 @@ Canonical service sources are exactly one of:
 - fixed absolute `unix_socket` for a byte stream;
 - an explicit `peer` plus upstream `service` ID.
 
-Bindings own a local loopback TCP port or Unix socket for one remote peer and
-service. The endpoint is selected locally; remote messages cannot choose it.
-An imported service is not published merely because it has a binding.
+Bindings own a local loopback TCP/UDP port or Unix socket for one remote peer
+and service. Set the binding kind to `udp` for a forward datagram listener;
+UDP bindings require a loopback port and use the authenticated connection's
+existing bounded UDP envelopes. A byte-stream binding is the default and Unix
+endpoints remain byte-stream only. The endpoint is selected locally; remote
+messages cannot choose it. An imported service is not published merely because
+it has a binding.
 
 Republication is a new local service entry:
 
@@ -184,7 +188,17 @@ optional configured domain adds another suffix but does not replace
 `.localhost` or install DNS. When multiple current catalogs offer the same
 TCP/HTTP service ID, the gateway reports an ambiguity until one explicit
 binding selects a peer. It never chooses by timing, insertion order, or
-reconnect order. UDP services are endpoints to copy/use, not browser actions.
+reconnect order. The registry keeps its legacy `tcp`/`udp` kind values and may
+add `access = "http"` metadata so newer clients retain the canonical HTTP
+action without changing the established wire kind. UDP services are endpoints
+to copy/use, not browser actions.
+
+The canonical peer runtime can expose the existing Prometheus contract through
+an optional read-only `/metrics` listener configured by `[metrics]` or the
+`peer run --metrics-listen host:port` override. The purpose-named peer collector
+keeps the established `kepos_publisher_*` names, immediate-peer labels,
+authorization gauges, active-channel gauges, and traffic counters; the
+publisher runtime and shipped dashboard are not reintroduced or redesigned.
 
 ## Legacy-client compatibility
 

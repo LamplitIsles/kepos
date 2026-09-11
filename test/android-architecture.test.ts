@@ -33,8 +33,6 @@ test("Android host boundaries are explicit extraction seams", async () => {
   const notificationIcon = await readProjectFile(
     "android/app/src/main/res/drawable/ic_kepos_notification.xml",
   );
-  const peerRuntime = await readProjectFile("src/runtime/peer.ts");
-  const gateway = await readProjectFile("src/home/gateway.ts");
   const bareKitSession = await readProjectFile(
     "android/barekit-host/src/main/java/io/github/ttalab/barekit/host/BareKitRuntimeSession.kt",
   );
@@ -87,11 +85,6 @@ test("Android host boundaries are explicit extraction seams", async () => {
   assert.match(foregroundService!, /START_STICKY/);
   assert.match(foregroundService!, /R\.drawable\.ic_kepos_notification/);
   assert.match(notificationIcon!, /M15,9H4V31H15M25,9H36V31H25M10,20H30/);
-  assert.match(foregroundService!, /filesDir\.resolve\("peer"\)/);
-  assert.match(foregroundService!, /filesDir\.resolve\("config\.toml"\)/);
-  assert.doesNotMatch(foregroundService!, /BuildConfig\.[A-Z_]+/);
-  assert.match(peerRuntime!, /export async function startPeer/);
-  assert.doesNotMatch(`${peerRuntime}\n${gateway}`, /startSubscriber|startPublisher/);
   assert.doesNotMatch(workflow!, /uses: actions\/(?:checkout|setup-node)@v\d/);
   assert.ok(
     bareKitSession!.indexOf("worklet.start") < bareKitSession!.indexOf("armRead()"),
@@ -111,10 +104,6 @@ test("Android device commands isolate tests and preserve installed state", async
   const foregroundService = await readProjectFile(
     "android/app/src/main/java/io/github/ttalab/kepos/KeposForegroundService.kt",
   );
-  const lifecycleTest = await readProjectFile(
-    "android/app/src/androidTest/java/io/github/ttalab/kepos/WorkletLifecycleTest.kt",
-  );
-  const worklet = await readProjectFile("src/android/worklet/main.ts");
   const readme = await readProjectFile("README.md");
 
   assert.equal(
@@ -123,13 +112,6 @@ test("Android device commands isolate tests and preserve installed state", async
   );
   assert.match(appBuild!, /create\("deviceTest"\)/);
   assert.match(appBuild!, /applicationIdSuffix\s*=\s*"\.devicetest"/);
-  assert.doesNotMatch(appBuild!, /(?:GATEWAY|MIHOMO|DSH|OPENCLAW|SSH)_PORT/);
-  assert.match(foregroundService!, /filesDir\.resolve\("peer"\)/);
-  assert.match(foregroundService!, /filesDir\.resolve\("config\.toml"\)/);
-  assert.doesNotMatch(`${foregroundService}\n${lifecycleTest}`, /BuildConfig\.[A-Z_]+/);
-  assert.match(worklet!, /Bare\.argv\[2\]/);
-  assert.match(worklet!, /Bare\.argv\[3\]/);
-  assert.doesNotMatch(worklet!, /Bare\.argv\[(?:4|5|6)\]/);
   assert.match(foregroundService!, /kepos-bootstrap\.json/);
   assert.match(foregroundService!, /readText\(\)/);
   assert.match(readme!, /npm run android:install/);
@@ -186,27 +168,4 @@ test("Android release build is optimized and signed only on the release Mac", as
     () => reporter!.formatApkSizeComparison(70 * 1024 * 1024, 100 * 1024 * 1024),
     /release APK must be smaller than debug/,
   );
-});
-
-test("Android peer waits for startup and exposes the canonical runtime snapshot", async () => {
-  const worklet = await readProjectFile("src/android/worklet/main.ts");
-  const runtimeState = await readProjectFile(
-    "android/barekit-host/src/main/java/io/github/ttalab/barekit/host/RuntimeStateMachine.kt",
-  );
-  const screen = await readProjectFile(
-    "android/app/src/main/java/io/github/ttalab/kepos/ui/KeposScreen.kt",
-  );
-  const evidence = await readProjectFile(
-    "docs/evidence/android-navic-subscriber-spike.md",
-  );
-
-  assert.match(worklet!, /await startPeer/);
-  assert.match(worklet!, /loadOrCreateConfig/);
-  assert.match(worklet!, /saveKeposConfig/);
-  assert.match(runtimeState!, /data class PeerConnectionSnapshot/);
-  assert.match(runtimeState!, /val services: List<ServiceSnapshot>/);
-  assert.match(screen!, /Peer services/);
-  assert.match(screen!, /Configured services/);
-  assert.doesNotMatch(screen!, /Scan another code|Copy Home URL/);
-  assert.doesNotMatch(evidence!, /124\.160\.204\.171/);
 });

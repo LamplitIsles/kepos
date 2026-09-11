@@ -121,6 +121,32 @@ test("canonical config keeps endpoint variants exclusive and bounded", () => {
     () => parsePeerConfig({ ...minimal, bindings: [{ peer: peerKey, service: "ssh", listen: { localPort: 65_536 } }] }),
     /localPort/i,
   );
+  assert.deepEqual(
+    parsePeerConfig({
+      peers: [{ label: "phone", publicKey: peerKey, connection: "accept" }],
+      services: [],
+      bindings: [{
+        peer: peerKey,
+        service: "ssh",
+        kind: "udp",
+        listen: { localPort: 0 },
+      }],
+    }).bindings[0],
+    {
+      peer: peerKey,
+      service: "ssh",
+      kind: "udp",
+      listen: { localPort: 0 },
+    },
+  );
+  assert.throws(
+    () => parsePeerConfig({ ...minimal, bindings: [{ peer: peerKey, service: "ssh", kind: "other", listen: { localPort: 0 } }] }),
+    /kind/i,
+  );
+  assert.throws(
+    () => parsePeerConfig({ ...minimal, bindings: [{ peer: peerKey, service: "ssh", kind: "udp", listen: { unixSocket: "/tmp/udp.sock" } }] }),
+    /UDP|Unix/i,
+  );
   assert.throws(
     () => parsePeerConfig({ ...minimal, services: [{ id: "ssh", name: "SSH", kind: "udp", source: { unixSocket: "/tmp/udp.sock" } }] }),
     /UDP|Unix/i,

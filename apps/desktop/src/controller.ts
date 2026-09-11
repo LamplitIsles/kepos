@@ -91,24 +91,21 @@ export function createDesktopController(
     }
 
     const peer = current.peer;
-    if (peer) {
-      const peerBindings = peer.bindings.filter(
-        ({ service, available }) => service === command.serviceId && available,
+    const services = peer?.services.filter(({ id }) => id === command.serviceId) ?? [];
+    const available = services.filter(({ available: isAvailable }) => isAvailable);
+    if (available.length > 1) {
+      throw new Error(
+        `${command.serviceId} is ambiguous; configure one explicit binding`,
       );
-      if (peerBindings.length > 1) {
-        throw new Error(
-          `${command.serviceId} is ambiguous; configure one explicit binding`,
-        );
-      }
-      if (peerBindings.length === 1 && peer.gatewayPort !== undefined) {
-        await options.openService(
-          `http://${command.serviceId}.localhost:${peer.gatewayPort}/`,
-        );
-        return;
-      }
     }
-
-    throw new Error(`${command.serviceId} is not an available peer binding`);
+    const service = available[0];
+    if (!service) {
+      throw new Error(`${command.serviceId} is not available`);
+    }
+    if (service.action !== "open" || !service.url) {
+      throw new Error(`${command.serviceId} does not provide an open action`);
+    }
+    await options.openService(service.url);
   }
 
   return {

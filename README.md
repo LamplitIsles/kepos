@@ -15,9 +15,11 @@ The canonical configuration keeps those concerns separate:
 
 - `peers` names authenticated peers and says whether this runtime dials or
   accepts each relationship;
-- `services` publishes a fixed loopback TCP port, Unix socket, or explicitly
+- `services` publishes a fixed loopback TCP/UDP port, Unix socket, or explicitly
   selected peer/service source with an immediate-peer `allow` list;
-- `bindings` owns local TCP or Unix entry points for services on another peer.
+- `bindings` owns local TCP/UDP or Unix entry points for services on another
+  peer. Set `kind = "udp"` for a datagram binding; its listener is always a
+  local loopback port.
 
 Service republication is explicit. A peer/service source gets a new local
 service ID and its own downstream allowlist. A binding by itself never
@@ -110,6 +112,13 @@ The gateway retains the unqualified service convention:
 the same HTTP service ID, Kepos reports an ambiguity; configure one explicit
 binding instead of relying on timing or peer order.
 
+The canonical runtime also preserves the existing Prometheus series and
+service-action mapping. Add `[metrics] host = "127.0.0.1"` and a `port` to the
+config, or pass `--metrics-listen host:port` to `peer run`; the read-only
+endpoint is reported in peer status. HTTP services open their unqualified
+`.localhost` URL, while raw TCP, Unix, and UDP services expose a copyable
+endpoint or platform-specific action. Reverse UDP remains unsupported.
+
 ## Identity and cutover
 
 Peer state is one private, owner-only `peer.json` containing a seed. Startup
@@ -136,7 +145,7 @@ operation. This repository has not converted real NUC or Mac state.
 
 | Surface | Canonical boundary |
 | --- | --- |
-| Android | One canonical peer runtime in the foreground service; canonical config/state and status UI, no reverse-service UI or reverse UDP |
+| Android | One canonical peer runtime in the foreground service; key/QR/deep-link onboarding, canonical config/state, supported service actions, no reverse-service UI or reverse UDP |
 | macOS | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix byte-stream endpoints |
 | Windows | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix sockets fail clearly |
 | Headless CLI | Node.js 24 `peer` setup/key/status/pair/convert/run commands, gateway, TCP/HTTP/UDP service paths |

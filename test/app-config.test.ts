@@ -31,6 +31,10 @@ port = 17480
 host = "127.0.0.1"
 domain = "kepos.internal"
 
+[metrics]
+host = "127.0.0.1"
+port = 0
+
 [[peers]]
 label = "nuc"
 public_key = "${peerKey}"
@@ -76,6 +80,12 @@ listen = { unix_socket = "/tmp/nuc-cua.sock" }
 peer = "phone"
 service = "forgejo"
 listen = { local_port = 0 }
+
+[[bindings]]
+peer = "nuc"
+service = "game"
+kind = "udp"
+listen = { local_port = 0 }
 `),
     {
       network: {
@@ -90,6 +100,7 @@ listen = { local_port = 0 }
         host: "127.0.0.1",
         domain: "kepos.internal",
       },
+      metrics: { host: "127.0.0.1", port: 0 },
       peers: [
         { label: "nuc", publicKey: peerKey, connection: "dial" },
         { label: "phone", publicKey: otherPeerKey, connection: "accept" },
@@ -134,6 +145,12 @@ listen = { local_port = 0 }
         {
           peer: "phone",
           service: "forgejo",
+          listen: { localPort: 0 },
+        },
+        {
+          peer: "nuc",
+          service: "game",
+          kind: "udp",
           listen: { localPort: 0 },
         },
       ],
@@ -207,6 +224,30 @@ test("canonical serializer emits every source and binding variant", () => {
   assert.match(source, /peer = "mac"/);
   assert.match(source, /max_publisher_to_subscriber_bps = 1000/);
   assert.match(source, /local_port = 0/);
+  assert.deepEqual(parseKeposConfig(source), config);
+});
+
+test("canonical serializer carries metrics and forward UDP binding settings", () => {
+  const config: PeerConfig = {
+    metrics: { host: "127.0.0.1", port: 0 },
+    peers: [{ label: "nuc", publicKey: peerKey, connection: "accept" }],
+    services: [{
+      id: "game",
+      name: "Game",
+      kind: "udp",
+      source: { localPort: 24_642 },
+      allow: [peerKey],
+    }],
+    bindings: [{
+      peer: "nuc",
+      service: "game",
+      kind: "udp",
+      listen: { localPort: 0 },
+    }],
+  };
+  const source = serializeKeposConfig(config);
+  assert.match(source, /\[metrics\]/);
+  assert.match(source, /kind = "udp"/);
   assert.deepEqual(parseKeposConfig(source), config);
 });
 

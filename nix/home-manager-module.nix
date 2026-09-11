@@ -28,7 +28,7 @@
       localPort = lib.mkOption {
         type = lib.types.nullOr (lib.types.ints.between 1 65535);
         default = null;
-        description = "Fixed loopback TCP service source port.";
+        description = "Fixed loopback TCP or UDP service source port.";
       };
       unixSocket = lib.mkOption {
         type = endpointPathType;
@@ -87,10 +87,15 @@
         type = lib.types.strMatching serviceIdPattern;
         description = "Remote service ID selected for this binding.";
       };
+      kind = lib.mkOption {
+        type = lib.types.enum ["tcp" "udp"];
+        default = "tcp";
+        description = "Transport kind consumed by this local binding.";
+      };
       localPort = lib.mkOption {
         type = lib.types.nullOr (lib.types.ints.between 0 65535);
         default = null;
-        description = "Loopback TCP port to own for the binding.";
+        description = "Loopback TCP or UDP port to own for the binding.";
       };
       unixSocket = lib.mkOption {
         type = endpointPathType;
@@ -130,7 +135,7 @@
   bindingEntries = map (binding: {
     inherit (binding) peer service;
     listen = bindingListen binding;
-  }) cfg.bindings;
+  } // lib.optionalAttrs (binding.kind != "tcp") { inherit (binding) kind; }) cfg.bindings;
 
   configValue = {
     network.bootstrap = cfg.bootstrap;
@@ -141,6 +146,11 @@
       port = cfg.gateway.port;
       host = cfg.gateway.host;
     } // lib.optionalAttrs (cfg.gateway.domain != null) { domain = cfg.gateway.domain; };
+  } // lib.optionalAttrs cfg.metrics.enable {
+    metrics = {
+      host = cfg.metrics.host;
+      port = cfg.metrics.port;
+    };
   };
   configFile = toml.generate "kepos-config.toml" configValue;
   initialize = pkgs.writeShellApplication {
@@ -189,7 +199,21 @@ in {
     bindings = lib.mkOption {
       type = lib.types.listOf bindingType;
       default = [];
-      description = "Locally owned TCP or Unix bindings for remote services.";
+      description = "Locally owned TCP, UDP, or Unix bindings for remote services.";
+    };
+
+    metrics = {
+      enable = lib.mkEnableOption "the Prometheus metrics listener";
+      host = lib.mkOption {
+        type = lib.types.nonEmptyStr;
+        default = "127.0.0.1";
+        description = "Prometheus metrics listener bind host.";
+      };
+      port = lib.mkOption {
+        type = lib.types.ints.between 0 65535;
+        default = 17481;
+        description = "Prometheus metrics listener port; zero selects an ephemeral port.";
+      };
     };
 
     gateway = {
@@ -242,6 +266,11 @@ in {
         message = "services.kepos.peer Unix socket sources must be absolute and at most 103 characters";
       }
       {
+        assertion = lib.all (service:
+          service.kind != "udp" || service.source.unixSocket == null) (lib.attrValues cfg.services);
+        message = "services.kepos.peer UDP services require a localPort or peer/service source";
+      }
+      {
         assertion = lib.all (binding:
           lib.length (lib.filter (selected: selected) [
             (binding.localPort != null)
@@ -249,6 +278,11 @@ in {
           ]) == 1
           && (binding.unixSocket == null || (lib.hasPrefix "/" binding.unixSocket && builtins.stringLength binding.unixSocket <= 103))) cfg.bindings;
         message = "services.kepos.peer bindings must select one valid local endpoint";
+      }
+      {
+        assertion = lib.all (binding:
+          binding.kind != "udp" || binding.localPort != null) cfg.bindings;
+        message = "services.kepos.peer UDP bindings require a localPort endpoint";
       }
     ];
 

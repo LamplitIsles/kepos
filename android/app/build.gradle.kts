@@ -72,10 +72,13 @@ dependencies {
   implementation(project(":barekit-host"))
   implementation(platform("androidx.compose:compose-bom:2024.09.03"))
   implementation("androidx.activity:activity-compose:1.9.2")
+  implementation("androidx.activity:activity-ktx:1.9.2")
   implementation("androidx.compose.material3:material3")
   implementation("androidx.compose.ui:ui")
   implementation("androidx.compose.ui:ui-tooling-preview")
   implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
+  implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.6")
+  implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
   debugImplementation("androidx.compose.ui:ui-tooling")
   testImplementation("junit:junit:4.13.2")

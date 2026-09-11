@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { promisify } from "node:util";
 
 const read = (path: string) => readFile(path, "utf8");
 
@@ -25,28 +27,18 @@ test("Nix package carries its own Node runtime", async () => {
   assert.doesNotMatch(packageSource, /\.\.\/home|cp -r home/);
 });
 
-test("Home Manager module owns policy and initializes identity-only state", async () => {
-  const moduleSource = await read("nix/home-manager-module.nix");
-
-  for (const option of [
-    "stateDir",
-    "bootstrap",
-    "peers",
-    "services",
-    "bindings",
-    "publicKey",
-    "connection",
-  ]) {
-    assert.match(moduleSource, new RegExp(option));
-  }
-  assert.match(moduleSource, /formats\.toml/);
-  assert.match(moduleSource, /systemd\.user\.services/);
-  assert.match(moduleSource, /strMatching keyPattern/);
-  assert.match(moduleSource, /ints\.between 1 65535/);
-  assert.match(moduleSource, /serviceIdPattern/);
-  assert.match(moduleSource, /id != "home"/);
-  assert.match(moduleSource, /Restart/);
-  assert.doesNotMatch(moduleSource, /seed\s*=|privateKey\s*=/);
+test("Home Manager module evaluates its generated config and service", async () => {
+  const { stdout } = await promisify(execFile)(
+    "nix",
+    [
+      "build",
+      "--no-link",
+      "--print-out-paths",
+      ".#checks.x86_64-linux.home-manager-module",
+    ],
+    { cwd: process.cwd(), maxBuffer: 64 * 1024 },
+  );
+  assert.match(stdout, /\/nix\/store\/[a-z0-9]+-kepos-home-manager-module-check/);
 });
 
 test("CI builds the Nix flake", async () => {

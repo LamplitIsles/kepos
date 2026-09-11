@@ -43,8 +43,12 @@
   compatibility adapters.
 - A peer has one seed-only `peer.json` identity. Keep service grants explicit
   for the authenticated immediate peer. A `bindings` entry consumes a remote
-  service and never republishes it; republication requires a separate local
-  service with an explicit peer/service source and allowlist.
+  service and never republishes it; its default `kind` is a TCP/byte-stream
+  listener and `kind = "udp"` owns a forward loopback datagram listener.
+  Republication requires a separate local service with an explicit
+  peer/service source and allowlist. The optional `metrics` table and
+  `--metrics-listen` override expose the existing read-only Prometheus
+  contract from the canonical peer runtime.
 - Tests for peer state, sockets, locks, and runtimes must use test-owned
   temporary paths, generated keys, fakes, or local HyperDHT testnets. Never
   inspect or mutate live Kepos/DSH state, credentials, installed binaries, or
@@ -52,4 +56,6 @@
 - The canonical runtime preserves old-client-to-new-server wire operations,
   but does not promise new-client-to-old-server operation or reverse UDP.
   Keep compatibility code at the wire boundary and document unsupported
-  capabilities truthfully.
+  capabilities truthfully. Android onboarding uses the canonical host IPC
+  `configure`/`pair` methods and app-private peer state; it must not
+  reintroduce subscriber state or a second runtime.

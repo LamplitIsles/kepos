@@ -10,6 +10,8 @@ class RequestTracker {
     require(
       method == "ping" ||
         method == "status" ||
+        method == "configure" ||
+        method == "pair" ||
         method == "stop"
     ) {
       "unsupported control request method"

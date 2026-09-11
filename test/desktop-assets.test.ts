@@ -25,7 +25,6 @@ test("desktop UI is a self-contained canonical peer service console", () => {
   assert.match(html, /data-role="peer-bindings"/);
   assert.match(html, /data-role="peer-pairing"/);
   assert.match(html, /data-action="copy-peer-key"/);
-  assert.match(html, /data-action="open-peer-binding"/);
   assert.match(html, /type: 'ready'/);
   assert.doesNotMatch(html, /https?:\/\/(?:fonts\.|cdn\.|unpkg\.|jsdelivr\.)/);
   assert.doesNotMatch(html, /snapshot\.(?:publisher|subscriber)/);

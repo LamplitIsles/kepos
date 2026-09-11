@@ -56,11 +56,23 @@ canonical state with `setup peer`, and supervises one user service.
         service = "cua";
         unixSocket = "/run/user/1000/kepos-cua.sock";
       }
+      {
+        peer = "phone";
+        service = "game";
+        kind = "udp";
+        localPort = 0;
+      }
     ];
 
     gateway = {
       port = 17480;
       host = "127.0.0.1";
+    };
+
+    metrics = {
+      enable = true;
+      host = "127.0.0.1";
+      port = 17481;
     };
   };
 }
@@ -71,8 +83,11 @@ The `peers` attribute name becomes the local peer label. Each `publicKey` is a
 Service sources select one of `localPort`, `unixSocket`, or a complete
 `peer`/`service` pair. Service `allow` values are immediate peer public keys;
 the default empty list denies access. Bindings select one `localPort` (zero is
-ephemeral) or `unixSocket`. A binding consumes a remote service; it does not
-publish it.
+ephemeral) or `unixSocket`; set `kind = "udp"` for a forward UDP binding,
+which requires a local port. A binding consumes a remote service; it does not
+publish it. `metrics.enable` adds the read-only Prometheus `/metrics` listener
+with the configured host and port; port `0` is allowed for an ephemeral
+listener.
 
 The module's generated TOML is written into the Nix store, but `peer.json`
 is created at `stateDir` by `ExecStartPre` with `0700/0600` permissions. The
@@ -83,8 +98,9 @@ kepos peer run --state <stateDir> --config <generated-config> --observations ndj
 ```
 
 Changes to Home Manager options produce a new complete config and the running
-peer reloads it. Changed grants, sources, directions, and bindings close
-affected channels/flows; they do not replay old bytes. The unit uses
+peer reloads it. Changed grants, sources, directions, bindings, and metrics
+settings close or restart only the affected canonical surfaces; they do not
+replay old bytes. The unit uses
 `Restart=always`, `KillMode=mixed`, `UMask=0077`, `NoNewPrivileges=true`, and
 `PrivateTmp=true`. The package does not install firewall rules, DHT bootstrap
 servers, or a public gateway.

@@ -8,7 +8,7 @@ import type { DhtAddress } from "../../mux/hyperdht.js";
 import { startPeer, type RunningPeer } from "../../runtime/peer.js";
 import { ensurePeer } from "../../state/peer.js";
 import { parseAndroidBootstrapAsset } from "../bootstrap.js";
-import type { PeerConfig } from "../../config.js";
+import { parsePeerConfig, type PeerConfig } from "../../config.js";
 
 const runtimeId = Bare.argv[0] ?? "runtime-unknown";
 const stateDir = Bare.argv[1];
@@ -18,19 +18,44 @@ if (!stateDir || !configPath) {
 }
 
 const bootstrap = parseAndroidBootstrapAsset(Bare.argv[3] ?? "null");
-const config = await loadOrCreateConfig(configPath, bootstrap);
+let config = await loadOrCreateConfig(configPath, bootstrap);
 await ensurePeer({ stateDir });
+
+const persistConfig = async (nextConfig: PeerConfig): Promise<void> => {
+  await saveKeposConfig(nextConfig, configPath);
+  config = nextConfig;
+};
 
 let running: RunningPeer | undefined = await startPeer({
   stateDir,
   config,
-  persistConfig: (nextConfig) => saveKeposConfig(nextConfig, configPath),
+  persistConfig,
 });
 let statusTimer: ReturnType<typeof setInterval> | undefined;
+let pairingConnection: "pairing-connecting" | "awaiting-approval" | undefined;
 
 const status = (): Record<string, unknown> => {
   const current = running?.status();
-  return current ? { ...current } : { state: "stopped" };
+  if (!current) return { state: "stopped" };
+  const configuredPeer = config.peers[0];
+  const connection = current.connections.find(
+    ({ publicKey }) => publicKey === configuredPeer?.publicKey,
+  );
+  return {
+    ...current,
+    configured: configuredPeer !== undefined,
+    subscriberPublicKey: current.peerKey,
+    connection: pairingConnection ?? connection?.status ?? "offline",
+    ...(configuredPeer
+      ? {
+          publisher: {
+            displayName: configuredPeer.label,
+            publisherKey: configuredPeer.publicKey,
+          },
+        }
+      : {}),
+    ...(connection?.error ? { error: connection.error } : {}),
+  };
 };
 
 const controller = new WorkletController({
@@ -40,6 +65,37 @@ const controller = new WorkletController({
     BareKit.IPC.write(frame);
   },
   status,
+  async configurePeer(publicKey, label, connection) {
+    const nextConfig = parsePeerConfig({
+      ...config,
+      peers: [{ label, publicKey, connection }],
+      // Selecting a trusted peer must not silently retarget old forwarding
+      // policy. Those services and bindings are operator-owned config.
+      services: [],
+      bindings: [],
+    });
+    if (!running) throw new Error("peer runtime is unavailable");
+    pairingConnection = undefined;
+    await persistConfig(nextConfig);
+    await running.applyConfig(nextConfig);
+    controller.publishStatus();
+    return status();
+  },
+  async pairPeer(invitation, deviceLabel, platform) {
+    if (!running) throw new Error("peer runtime is unavailable");
+    pairingConnection = "pairing-connecting";
+    controller.publishStatus();
+    try {
+      const result = await running.pair(invitation, deviceLabel, platform);
+      pairingConnection = undefined;
+      controller.publishStatus();
+      return result;
+    } catch (error) {
+      pairingConnection = undefined;
+      controller.publishStatus();
+      throw error;
+    }
+  },
   async stopEcho() {
     if (statusTimer !== undefined) {
       clearInterval(statusTimer);
@@ -47,6 +103,7 @@ const controller = new WorkletController({
     }
     const peer = running;
     running = undefined;
+    pairingConnection = undefined;
     await peer?.stop();
   },
 });

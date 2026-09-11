@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import io.github.ttalab.barekit.host.BindingSnapshot
 import io.github.ttalab.barekit.host.PeerConnectionSnapshot
+import io.github.ttalab.barekit.host.PublisherSnapshot
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 import io.github.ttalab.barekit.host.ServiceSnapshot
@@ -70,9 +71,30 @@ class KeposScreenTest {
     compose.onNodeWithText("Retry").assertIsDisplayed()
   }
 
+  @Test
+  fun peerHomeDispatchesCanonicalOpenActionsToTheHost() {
+    var opened: String? = null
+    compose.setContent {
+      KeposScreen(
+        snapshot = connectedSnapshot(),
+        onStart = {},
+        onStop = {},
+        onCopyText = {},
+        onOpenUrl = { opened = it },
+      )
+    }
+
+    compose.onNodeWithText("Open").performClick()
+
+    assertEquals("http://web.localhost:17480/", opened)
+  }
+
   private fun connectedSnapshot() = RuntimeSnapshot(
     state = RuntimeState.RUNNING,
     peerKey = "ab".repeat(32),
+    configured = true,
+    connection = "connected",
+    publisher = PublisherSnapshot("desktop", "cd".repeat(32)),
     connections = listOf(
       PeerConnectionSnapshot(
         label = "desktop",
@@ -81,12 +103,20 @@ class KeposScreenTest {
         status = "connected",
         generation = 1,
         capability = "ready",
-        services = 2,
+        services = 3,
       ),
     ),
     services = listOf(
       ServiceSnapshot("ssh", "SSH", "tcp", true),
       ServiceSnapshot("photos", "Photos", "http", false, "offline"),
+      ServiceSnapshot(
+        "web",
+        "Web",
+        "http",
+        true,
+        action = "open",
+        url = "http://web.localhost:17480/",
+      ),
     ),
     bindings = listOf(
       BindingSnapshot("desktop", "ssh", "127.0.0.1", 2200, true),

@@ -101,6 +101,28 @@ test("Home Registry rejects duplicate, reserved, or malformed public services", 
   );
 });
 
+test("Home Registry preserves additive HTTP access metadata without changing wire kinds", () => {
+  assert.deepEqual(
+    createHomeRegistry({
+      publisherKey,
+      displayName: "access metadata",
+      services: [{ id: "custom-web", name: "Custom web", kind: "tcp", access: "http" }],
+    }).services,
+    [
+      { id: "home", name: "Home", kind: "tcp" },
+      { id: "custom-web", name: "Custom web", kind: "tcp", access: "http" },
+    ],
+  );
+  assert.throws(
+    () => createHomeRegistry({
+      publisherKey,
+      displayName: "invalid access",
+      services: [{ id: "game", name: "Game", kind: "udp", access: "tcp" }],
+    }),
+    /UDP.*access/i,
+  );
+});
+
 test("Home server exposes the configured Registry", async () => {
   const home = await startHomeServer({
     publisherKey,

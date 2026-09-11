@@ -68,6 +68,10 @@ port = 17480
 # host = "127.0.0.1"
 # domain = "kepos.internal"
 
+[metrics]
+host = "127.0.0.1"
+port = 17481
+
 [[peers]]
 label = "mac"
 public_key = "<mac-peer-public-key>"
@@ -125,8 +129,11 @@ denies the service. A source is exactly one of:
 
 Service ports are fixed positive ports. Unix paths are absolute and bounded by
 the host socket limit. A Unix source cannot provide a UDP service. A binding
-owns a local loopback TCP port or Unix socket; `local_port = 0` asks the OS for
-an ephemeral port. Remote peers cannot choose a local path, port, or target.
+owns a local loopback TCP port, local loopback UDP port, or Unix socket;
+`local_port = 0` asks the OS for an ephemeral port. Omit `kind` for the
+byte-stream/TCP default and use `kind = "udp"` for a forward UDP binding.
+Remote peers cannot choose a local path, port, or target. Reverse UDP is not a
+byte-stream capability.
 
 An upstream service is not imported merely because a binding names it. To
 republish it, create a new `[[services]]` entry with a peer/service source,
@@ -168,6 +175,17 @@ authorizes the authenticated connection, but it does not broaden any service
 allowlist. Denial or expiry closes the candidate. Pairing is disabled by
 configuration only when the host explicitly disables the desktop pairing
 surface.
+
+On a fresh Android install, select `Connect with key` and enter the other
+peer's public key, or select `Scan invitation` for the QR invitation created by
+the desktop/CLI pairing surface. Android also consumes a `kepos://pair?...`
+deep link. The foreground Worklet writes the selected peer into its app-private
+canonical `config.toml` and keeps the seed in app-private `peer.json`; the
+host IPC uses `configure` for key entry and `pair` for an invitation. Admission
+still does not add service grants, so the provider must list the Android public
+key in each intended service's `allow` list. Android renders the canonical
+service action metadata and opens supported HTTP actions or copies supported
+endpoints; it does not expose a general config editor or reverse-service UI.
 
 ## Identity and deliberate cutover
 
@@ -230,7 +248,8 @@ lock file should be manually deleted while a runtime may be alive.
 npm run kepos -- peer run \
   --state ~/.local/state/kepos-neo/peer \
   --config ~/.config/kepos/config.toml \
-  --observations ndjson
+  --observations ndjson \
+  --metrics-listen 127.0.0.1:17481
 ```
 
 `--observations` is `human` by default or `ndjson`. The runtime acquires the
@@ -245,6 +264,13 @@ them unavailable. A later connection can serve new requests after capability
 and grant checks. A local Unix binding is removed only when its socket is
 still the socket created by this runtime; an occupied or replaced foreign path
 is preserved. Unix endpoints fail clearly on Windows.
+
+`[metrics]` enables the existing Prometheus series on a separate
+read-only `/metrics` listener. `--metrics-listen host:port` overrides the
+configured listener for that process; port `0` selects an ephemeral port and
+the effective URL appears in runtime status. The collector retains the
+established `kepos_publisher_*` names and immediate-peer labels used by the
+shipped Grafana artifact.
 
 `peer status` is a stopped inspection of identity and configuration:
 
@@ -282,6 +308,22 @@ peer = "nuc"
 service = "ssh"
 listen = { local_port = 2222 }
 ```
+
+Forward UDP services use an explicit UDP binding. This opens a local loopback
+datagram listener and maps each local flow to the authenticated remote service:
+
+```toml
+[[bindings]]
+peer = "nuc"
+service = "game"
+kind = "udp"
+listen = { local_port = 0 }
+```
+
+The selected local port is included in status. Flow limits, datagram/fragment
+limits, authorization, revocation, source outage, and reconnect are handled by
+the same canonical runtime; bytes or replies from an old generation are not
+replayed. Reverse UDP remains explicitly unsupported.
 
 HTTP services use the existing HTTP/1.1 adapter only when `kind = "http"`.
 Every request has caller-supplied `Authorization` fields removed and exactly

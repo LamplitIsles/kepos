@@ -158,6 +158,16 @@ function fakeRunningPeer(events: string[]): RunningPeer {
     approvePairing: async () => undefined,
     denyPairing: () => undefined,
     cancelPairing: () => undefined,
+    pair: async () => ({
+      role: "peer" as const,
+      state: "running" as const,
+      peerKey,
+      gateway: { port: 17_480, url: "http://home.localhost:17480" },
+      connections: [],
+      services: [],
+      bindings: [],
+      pairing: { phase: "idle" as const },
+    }),
     stop: async () => {
       events.push("stop");
     },

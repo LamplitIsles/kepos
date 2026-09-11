@@ -14,6 +14,7 @@ import {
   type PeerBinding,
   type PeerConfig,
   type PeerGatewayConfig,
+  type PeerMetricsConfig,
   type PeerNetworkConfig,
   type PeerService,
 } from "./config.js";
@@ -87,6 +88,7 @@ export function parseKeposConfig(source: string): KeposConfig {
   rejectUnknownFields(root, "config", [
     "network",
     "gateway",
+    "metrics",
     "peers",
     "services",
     "bindings",
@@ -138,11 +140,13 @@ export function parseKeposConfig(source: string): KeposConfig {
       "peer",
       "service",
       "listen",
+      "kind",
     ]);
     return {
       peer: binding.peer,
       service: binding.service,
       listen: parseTomlListen(binding.listen, `bindings[${index}].listen`),
+      ...(binding.kind === undefined ? {} : { kind: binding.kind }),
     };
   });
 
@@ -153,6 +157,9 @@ export function parseKeposConfig(source: string): KeposConfig {
     ...(root.gateway === undefined
       ? {}
       : { gateway: parseTomlGateway(root.gateway) }),
+    ...(root.metrics === undefined
+      ? {}
+      : { metrics: parseTomlMetrics(root.metrics) }),
     peers: rawPeers,
     services: rawServices,
     bindings: rawBindings,
@@ -168,10 +175,11 @@ export function serializeKeposConfig(config: KeposConfig): string {
       connection,
     })),
     services: parsed.services.map(serializeService),
-    bindings: parsed.bindings.map(({ peer, service, listen }) => ({
+    bindings: parsed.bindings.map(({ peer, service, listen, kind }) => ({
       peer,
       service,
       listen: serializeListen(listen),
+      ...(kind === undefined || kind === "tcp" ? {} : { kind }),
     })),
   };
   if (parsed.network) {
@@ -195,6 +203,12 @@ export function serializeKeposConfig(config: KeposConfig): string {
       ...(parsed.gateway.domain === undefined
         ? {}
         : { domain: parsed.gateway.domain }),
+    };
+  }
+  if (parsed.metrics) {
+    value.metrics = {
+      ...(parsed.metrics.host === undefined ? {} : { host: parsed.metrics.host }),
+      port: parsed.metrics.port,
     };
   }
   const source = stringify(value);
@@ -265,6 +279,15 @@ function parseTomlListen(value: unknown, field: string): PeerBinding["listen"] {
     raw.unixSocket = listen.unix_socket;
   }
   return raw as unknown as PeerBinding["listen"];
+}
+
+function parseTomlMetrics(value: unknown): PeerMetricsConfig {
+  const metrics = requireTable(value, "metrics");
+  rejectUnknownFields(metrics, "metrics", ["host", "port"]);
+  return {
+    ...(metrics.host === undefined ? {} : { host: metrics.host as string }),
+    port: metrics.port as number,
+  };
 }
 
 function parseTomlNetwork(value: unknown): PeerNetworkConfig {

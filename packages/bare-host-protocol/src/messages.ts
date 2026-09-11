@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1;
 
-export type HostMethod = "ping" | "status" | "stop";
+export type HostMethod = "ping" | "status" | "configure" | "pair" | "stop";
 export type HostEvent = "runtime.stateChanged";
 
 export interface RequestEnvelope {
@@ -93,6 +93,8 @@ function parseRequest(value: Record<string, unknown>): RequestEnvelope {
   if (
     value.method !== "ping" &&
     value.method !== "status" &&
+    value.method !== "configure" &&
+    value.method !== "pair" &&
     value.method !== "stop"
   ) {
     throw new Error("unsupported control request method");

@@ -6,6 +6,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { createSocket, type Socket } from "node:dgram";
 import { createConnection, createServer, type Server } from "node:net";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -16,7 +17,13 @@ import { test } from "node:test";
 import { loadKeposConfig, saveKeposConfig } from "../src/app-config.js";
 import { parsePeerConfig, type PeerConfig } from "../src/config.js";
 import { createDht, keyPairFromSeed, type DhtNode } from "../src/mux/hyperdht.js";
+import {
+  decodeUdpEnvelope,
+  encodeUdpEnvelope,
+  type SubscriberDatagramConnection,
+} from "../src/mux/udp.js";
 import { startPeer, type RunningPeer } from "../src/runtime/peer.js";
+import { listenPeerUdpBinding } from "../src/runtime/udp-binding.js";
 import { loadPeerIdentity, setupPeer } from "../src/state/peer.js";
 import { connectFrozenLegacyClient, type FrozenLegacyClient } from "./fixtures/frozen-legacy-client.js";
 
@@ -106,6 +113,13 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
           source: { localPort: bSourceAddress.port },
           allow: [aSetup.publicKey],
         },
+        {
+          id: "b-web",
+          name: "B web",
+          kind: "http",
+          source: { localPort: bSourceAddress.port },
+          allow: [aSetup.publicKey],
+        },
       ],
       bindings: [
         {
@@ -136,6 +150,42 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
       await requestUnix(bBindingPath, Buffer.from('ndjson:{"image":"inline"}')),
       Buffer.from('cua-reply:ndjson:{"image":"inline"}'),
     );
+    await waitFor(() =>
+      aPeer?.status().services.some(
+        (service) => service.id === "b-web" && service.available,
+      ) === true,
+    );
+    assert.deepEqual(
+      aPeer.status().services.find(({ id }) => id === "b-web"),
+      {
+        id: "b-web",
+        name: "B web",
+        kind: "tcp",
+        source: { peer: "nuc", service: "b-web" },
+        available: true,
+        access: "http",
+        action: "open",
+        icon: "web",
+        url: `http://b-web.localhost:${aPeer.gateway.port}/`,
+        peer: "nuc",
+      },
+    );
+
+    await waitFor(() =>
+      bPeer?.status().services.some(
+        (service) => service.id === "cua" && service.available,
+      ) === true,
+    );
+    await aPeer.stop();
+    await waitFor(() =>
+      bPeer?.status().services.some(
+        (service) => service.id === "cua" && !service.available,
+      ) === true,
+    );
+    assert.match(
+      bPeer.status().services.find(({ id }) => id === "cua")?.error ?? "",
+      /offline|unavailable|catalog/i,
+    );
 
     const activeConfig = bPeer.status();
     assert.equal(activeConfig.connections.length, 1);
@@ -149,6 +199,247 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
     await closeServer(bSource);
     await testnet.destroy();
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical UDP bindings round-trip through a dial connection and recover after revocation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-udp-binding-"));
+  const testnet = await createHyperDhtTestnet(3);
+  let providerDht: DhtNode | undefined;
+  let consumerDht: DhtNode | undefined;
+  let provider: RunningPeer | undefined;
+  let consumer: RunningPeer | undefined;
+  let target: Socket | undefined;
+  let local: Socket | undefined;
+  try {
+    const providerState = path.join(root, "provider", "peer");
+    const consumerState = path.join(root, "consumer", "peer");
+    const providerSetup = await setupPeer({ stateDir: providerState });
+    const consumerSetup = await setupPeer({ stateDir: consumerState });
+    const providerIdentity = await loadPeerIdentity(providerState);
+    const consumerIdentity = await loadPeerIdentity(consumerState);
+    providerDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(providerIdentity.seed),
+    });
+    consumerDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(consumerIdentity.seed),
+    });
+
+    target = createSocket("udp4");
+    await bindUdpSocket(target);
+    target.on("message", (message, remote) => {
+      target!.send(Buffer.concat([Buffer.from("udp-binding:"), message]), remote.port, remote.address);
+    });
+    const targetAddress = target.address();
+    if (!targetAddress || typeof targetAddress === "string") {
+      throw new Error("UDP binding target did not receive an address");
+    }
+
+    const providerConfig = (allow: string[]) => parsePeerConfig({
+      metrics: { host: "127.0.0.1", port: 0 },
+      gateway: { port: 0 },
+      peers: [{ label: "consumer", publicKey: consumerSetup.publicKey, connection: "accept" }],
+      services: [{
+        id: "game",
+        name: "Game",
+        kind: "udp",
+        source: { localPort: targetAddress.port },
+        allow,
+      }],
+      bindings: [],
+    });
+    provider = await startPeer({
+      stateDir: providerState,
+      config: providerConfig([consumerSetup.publicKey]),
+      dht: providerDht,
+    });
+    consumer = await startPeer({
+      stateDir: consumerState,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "provider", publicKey: providerSetup.publicKey, connection: "dial" }],
+        services: [],
+        bindings: [{
+          peer: "provider",
+          service: "game",
+          kind: "udp",
+          listen: { localPort: 0 },
+        }],
+      }),
+      dht: consumerDht,
+    });
+    await waitFor(() =>
+      provider?.status().connections[0]?.status === "connected" &&
+      consumer?.status().bindings[0]?.available === true,
+    );
+    assert.equal(provider.status().metrics?.url.startsWith("http://127.0.0.1:"), true);
+    const metricsResponse = await fetch(provider.status().metrics!.url);
+    assert.equal(metricsResponse.status, 200);
+    assert.match(await metricsResponse.text(), /kepos_publisher_subscriber_connected/);
+
+    local = createSocket("udp4");
+    await bindUdpSocket(local);
+    const bindingPort = consumer.status().bindings[0]?.port;
+    assert.equal(typeof bindingPort, "number");
+    assert.equal(
+      (await sendUdpDatagram(local, bindingPort!, Buffer.from("hello"))).toString(),
+      "udp-binding:hello",
+    );
+    const metricsAfterDatagram = await fetch(provider.status().metrics!.url).then(
+      (response) => response.text(),
+    );
+    assert.match(
+      metricsAfterDatagram,
+      /service_bytes_total\{direction="subscriber_to_publisher",service="game"[^}]+\} 5/,
+    );
+    assert.match(
+      metricsAfterDatagram,
+      /service_bytes_total\{direction="publisher_to_subscriber",service="game"[^}]+\} 17/,
+    );
+
+    await provider.applyConfig(providerConfig([]));
+    await waitFor(() => consumer?.status().bindings[0]?.available === false);
+    assert.match(consumer.status().bindings[0]?.error ?? "", /unauthorized|unavailable/i);
+    await assert.rejects(
+      sendUdpDatagram(local, bindingPort!, Buffer.from("revoked"), 250),
+      /timed out|closed|refused/i,
+    );
+
+    await provider.applyConfig(providerConfig([consumerSetup.publicKey]));
+    await waitFor(() => consumer?.status().bindings[0]?.available === true);
+    assert.equal(
+      (await sendUdpDatagram(local, bindingPort!, Buffer.from("reconnected"))).toString(),
+      "udp-binding:reconnected",
+    );
+  } finally {
+    await consumer?.stop().catch(() => undefined);
+    await provider?.stop().catch(() => undefined);
+    await consumerDht?.destroy({ force: true }).catch(() => undefined);
+    await providerDht?.destroy({ force: true }).catch(() => undefined);
+    await closeUdp(local);
+    await closeUdp(target);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical local UDP bindings isolate carrier generations and flow state", async () => {
+  const sent: Uint8Array[] = [];
+  const errors: string[] = [];
+  const drops: string[] = [];
+  const messageListeners = new Set<(message: Uint8Array) => void>();
+  const resetListeners = new Set<() => void>();
+  let available = true;
+  let sendResult: { ok: boolean; error?: string } = { ok: true };
+  const carrier: SubscriberDatagramConnection = {
+    available: () => available,
+    send: async (message) => {
+      sent.push(Buffer.from(message));
+      return sendResult;
+    },
+    onError: () => () => undefined,
+    onMessage: (listener) => {
+      messageListeners.add(listener);
+      return () => messageListeners.delete(listener);
+    },
+    onReset: (listener) => {
+      resetListeners.add(listener);
+      return () => resetListeners.delete(listener);
+    },
+  };
+  const binding = await listenPeerUdpBinding("game", 0, {
+    idleTimeoutMs: 100,
+    maxFlows: 1,
+    onError: (error) => errors.push(error),
+    onDrop: (reason) => drops.push(reason),
+  });
+  let local: Socket | undefined;
+  try {
+    local = createSocket("udp4");
+    await bindUdpSocket(local);
+    binding.setConnection(carrier, 1);
+    binding.setConnection(carrier, 1);
+
+    const reply = sendUdpDatagram(local, binding.port, Buffer.from("hello"));
+    await waitFor(() => sent.length === 1);
+    const outbound = decodeUdpEnvelope(sent.shift()!);
+    assert.equal(outbound.type, "data");
+    assert.equal(outbound.serviceId, "game");
+    for (const listener of messageListeners) {
+      listener(encodeUdpEnvelope({
+        type: "data",
+        serviceId: "game",
+        flowId: outbound.flowId,
+        payload: Buffer.from("reply"),
+      }));
+    }
+    assert.equal((await reply).toString(), "reply");
+
+    for (const listener of messageListeners) {
+      listener(Uint8Array.of(1));
+      listener(encodeUdpEnvelope({
+        type: "data",
+        serviceId: "other",
+        flowId: outbound.flowId,
+        payload: Buffer.from("wrong"),
+      }));
+      listener(encodeUdpEnvelope({
+        type: "data",
+        serviceId: "game",
+        flowId: new Uint8Array(16).fill(7),
+        payload: Buffer.from("unknown"),
+      }));
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.ok(drops.includes("malformed-envelope"));
+    assert.ok(drops.includes("wrong-service"));
+    assert.ok(drops.includes("unknown-flow"));
+
+    available = false;
+    await assert.rejects(
+      sendUdpDatagram(local, binding.port, Buffer.from("offline"), 30),
+      /timed out/i,
+    );
+    assert.ok(errors.some((error) => /unavailable/i.test(error)));
+    available = true;
+
+    for (const listener of resetListeners) listener();
+    assert.ok(errors.some((error) => /reset/i.test(error)));
+    sendResult = { ok: false, error: "carrier denied" };
+    const denied = sendUdpDatagram(local, binding.port, Buffer.from("denied"), 30);
+    await waitFor(() => sent.length === 1);
+    assert.equal(decodeUdpEnvelope(sent.shift()!).type, "data");
+    await assert.rejects(denied, /timed out/i);
+    assert.ok(errors.some((error) => /carrier denied/i.test(error)));
+
+    sendResult = { ok: true };
+    const expired = sendUdpDatagram(local, binding.port, Buffer.from("expire"), 30);
+    await waitFor(() => sent.length === 1);
+    const expiredEnvelope = decodeUdpEnvelope(sent.shift()!);
+    await assert.rejects(expired, /timed out/i);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    for (const listener of messageListeners) {
+      listener(encodeUdpEnvelope({
+        type: "close",
+        serviceId: "game",
+        flowId: expiredEnvelope.flowId,
+        payload: new Uint8Array(),
+      }));
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.ok(drops.includes("unknown-flow"));
+
+    binding.setConnection(undefined, 2);
+    await assert.rejects(
+      sendUdpDatagram(local, binding.port, Buffer.from("no-carrier"), 30),
+      /timed out/i,
+    );
+  } finally {
+    await binding.close();
+    await binding.close();
+    await closeUdp(local);
   }
 });
 
@@ -966,6 +1257,9 @@ test("canonical peer keeps offline bindings configured and reports local source 
         source: { peer: "remote", service: "remote-service" },
         available: false,
         error: "Upstream peer is offline",
+        access: "tcp",
+        action: "copy-endpoint",
+        icon: "port",
       },
     );
     const bindingPort = status.bindings[0]?.port;
@@ -1186,6 +1480,47 @@ async function closeUdp(
     } catch {
       resolve();
     }
+  });
+}
+
+async function bindUdpSocket(socket: Socket): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error): void => {
+      socket.off("listening", onListening);
+      reject(error);
+    };
+    const onListening = (): void => {
+      socket.off("error", onError);
+      resolve();
+    };
+    socket.once("error", onError);
+    socket.once("listening", onListening);
+    socket.bind(0, "127.0.0.1");
+  });
+}
+
+function sendUdpDatagram(
+  socket: Socket,
+  port: number,
+  payload: Uint8Array,
+  timeoutMs = 2_000,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off("message", onMessage);
+      reject(new Error("UDP datagram exchange timed out"));
+    }, timeoutMs);
+    const onMessage = (message: Buffer): void => {
+      clearTimeout(timer);
+      resolve(message);
+    };
+    socket.once("message", onMessage);
+    socket.send(payload, port, "127.0.0.1", (error) => {
+      if (!error) return;
+      clearTimeout(timer);
+      socket.off("message", onMessage);
+      reject(error);
+    });
   });
 }
 

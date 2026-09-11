@@ -148,18 +148,77 @@ test("Android Worklet closes the canonical peer before acknowledging stop", asyn
   ]);
 });
 
-test("Android Worklet exposes no role configuration or pairing control method", async () => {
+test("Android Worklet forwards canonical configuration and pairing operations", async () => {
+  const output: HostEnvelope[] = [];
+  const decoder = new FrameDecoder();
+  const configured: unknown[] = [];
+  const paired: unknown[] = [];
   const controller = new WorkletController({
     runtimeId: "runtime-1",
     echoUrl: "http://127.0.0.1:17482/",
-    write() {},
+    write(frame) {
+      output.push(...decoder.push(frame));
+    },
+    async configurePeer(publicKey, label, connection) {
+      configured.push({ publicKey, label, connection });
+      return { configured: true };
+    },
+    async pairPeer(invitation, deviceLabel, platform) {
+      paired.push({ invitation, deviceLabel, platform });
+      return { paired: true };
+    },
     async stopEcho() {},
   });
   controller.start();
-  for (const method of ["configure", "pair"] as const) {
-    assert.throws(
-      () => encodeFrame({ version: 1, kind: "request", id: 9, method: method as never }),
-      /unsupported control request method/i,
-    );
-  }
+  output.length = 0;
+  await controller.receive(encodeFrame({
+    version: 1,
+    kind: "request",
+    id: 9,
+    method: "configure",
+    params: {
+      publicKey: "ab".repeat(32),
+      label: "phone",
+      connection: "dial",
+    },
+  }));
+  await controller.receive(encodeFrame({
+    version: 1,
+    kind: "request",
+    id: 10,
+    method: "pair",
+    params: {
+      invitation: "kepos://pair?v=1",
+      deviceLabel: "Pixel",
+      platform: "android",
+    },
+  }));
+
+  assert.deepEqual(configured, [{
+    publicKey: "ab".repeat(32),
+    label: "phone",
+    connection: "dial",
+  }]);
+  assert.deepEqual(paired, [{
+    invitation: "kepos://pair?v=1",
+    deviceLabel: "Pixel",
+    platform: "android",
+  }]);
+  assert.deepEqual(
+    output.filter((envelope) => envelope.kind === "response"),
+    [
+      {
+        version: 1,
+        kind: "response",
+        id: 9,
+        result: { configured: true },
+      },
+      {
+        version: 1,
+        kind: "response",
+        id: 10,
+        result: { paired: true },
+      },
+    ],
+  );
 });

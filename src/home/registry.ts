@@ -2,6 +2,8 @@ export interface HomeRegistryService {
   id: string;
   name: string;
   kind: "tcp" | "udp";
+  /** Optional access metadata for new clients; legacy clients ignore it. */
+  access?: "http" | "tcp";
   available?: boolean;
   error?: string;
 }
@@ -62,6 +64,12 @@ export function createHomeRegistry(
       if (service.kind !== "tcp" && service.kind !== "udp") {
         throw new Error(`service ${index} kind must be tcp or udp`);
       }
+      if (service.access !== undefined && service.access !== "http" && service.access !== "tcp") {
+        throw new Error(`service ${index} access must be http or tcp`);
+      }
+      if (service.kind === "udp" && service.access !== undefined) {
+        throw new Error(`service ${index} UDP entries cannot define access metadata`);
+      }
       if (service.available !== undefined && typeof service.available !== "boolean") {
         throw new Error(`service ${index} availability must be true or false`);
       }
@@ -79,6 +87,7 @@ export function createHomeRegistry(
         id: service.id,
         name: service.name,
         kind: service.kind,
+        ...(service.access === undefined ? {} : { access: service.access }),
         ...(service.available === false ? { available: false } : {}),
         ...(service.error === undefined ? {} : { error: service.error }),
       };

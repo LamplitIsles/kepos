@@ -30,6 +30,7 @@ import {
   type SubscriberDatagramConnection,
   type UdpEnvelope,
 } from "./udp.js";
+import type { PeerMetricsContext, PeerMetricsHooks } from "../metrics/peer.js";
 
 const Protomux = ProtomuxModule as ProtomuxConstructor;
 const compact = compactModule as CompactEncoding;
@@ -250,6 +251,14 @@ export interface MuxPeerOptions {
     onReply: (flowId: Uint8Array, payload: Uint8Array) => void,
   ) => import("./udp.js").UdpPublisherRemote | undefined;
   udpIgnoreIncoming?: (envelope: UdpEnvelope) => boolean;
+  /** Canonical peer observability; this does not alter the legacy adapter. */
+  metrics?: PeerMetricsHooks;
+  metricsContext?: PeerMetricsContext;
+  /** Start the existing pairing protocol on this otherwise unauthorized peer. */
+  pairingRequest?: PairingRequest;
+  onPairingPending?: () => void;
+  onPairingApproved?: () => void | Promise<void>;
+  onPairingFailed?: (error: Error) => void;
   onPairingRequest?: (
     request: PairingRequest,
     decision: PairingDecision,
@@ -266,6 +275,7 @@ export interface RunningMuxPeer {
   close: () => void;
   closeServiceChannels: (serviceId?: string) => void;
   closeUdpFlows: (serviceId?: string) => void;
+  pairing?: Promise<void>;
 }
 
 export type ControlNegotiation = "disabled" | "legacy" | "ready";
@@ -1467,6 +1477,7 @@ export function createMuxPeer(
   const controlChannels = new Set<MuxChannel>();
   const capabilityChannels = new Set<MuxChannel>();
   let pairingChannel: MuxChannel | undefined;
+  let outgoingPairingChannel: MuxChannel | undefined;
   let pairingOpened = false;
 
   let capabilitySettled = false;
@@ -1600,6 +1611,15 @@ export function createMuxPeer(
       options.publisherToSubscriberRateLimiter,
     now,
     ignoreIncoming: options.udpIgnoreIncoming,
+    onServiceBytes: (serviceId, direction, bytes) => {
+      if (!options.metrics || !options.metricsContext) return;
+      options.metrics.serviceBytes(
+        options.metricsContext,
+        serviceId,
+        metricsDirection(direction),
+        bytes,
+      );
+    },
   });
 
   if (options.onPairingRequest) {
@@ -1668,6 +1688,70 @@ export function createMuxPeer(
     });
   }
 
+  let pairingTask: Promise<void> | undefined;
+  if (options.pairingRequest) {
+    pairingTask = new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const channel = mux.createChannel({
+        protocol: pairingProtocol,
+        id: crypto.randomBytes(16),
+        handshake: compact.string,
+        onopen: () => {
+          requestMessage.send(options.pairingRequest!);
+        },
+        onclose: () => {
+          outgoingPairingChannel = undefined;
+          if (settled) return;
+          settled = true;
+          reject(new Error("Pairing channel closed before approval"));
+        },
+      });
+      if (!channel) {
+        reject(new Error("Pairing channel could not be created"));
+        return;
+      }
+      const requestMessage = channel.addMessage({
+        encoding: pairingRequestEncoding,
+        onmessage: () => undefined,
+      });
+      channel.addMessage({
+        encoding: pairingResponseEncoding,
+        onmessage: (response) => {
+          if (settled) return;
+          if (response.status === "pending") {
+            options.onPairingPending?.();
+            return;
+          }
+          settled = true;
+          if (response.status === "approved") {
+            Promise.resolve(options.onPairingApproved?.()).then(
+              () => {
+                authorize();
+                resolve();
+              },
+              (error: unknown) => {
+                const failure = error instanceof Error ? error : new Error(String(error));
+                options.onPairingFailed?.(failure);
+                reject(failure);
+              },
+            );
+            return;
+          }
+          const failure = new TerminalPairingError(
+            response.status === "denied" ? "denied" : response.code,
+          );
+          options.onPairingFailed?.(failure);
+          reject(failure);
+        },
+      });
+      outgoingPairingChannel = channel;
+      channel.open("");
+    });
+    void pairingTask.catch((error: unknown) => {
+      if (!closed) outer.destroy(error instanceof Error ? error : new Error(String(error)));
+    });
+  }
+
   mux.pair({ protocol }, (id) => {
     let serviceId: string | undefined;
     const emitBase = createObservationEmitter({
@@ -1683,13 +1767,14 @@ export function createMuxPeer(
         ...fields,
       });
     let tunnel: { channel: MuxChannel; messages: TunnelMessages; stream: MuxTunnel };
+    let metricsOpened = false;
     try {
       tunnel = createTunnel(
         mux,
         id,
         "publisher",
         emit,
-        options.observe !== undefined,
+        options.observe !== undefined || options.metrics !== undefined,
         now,
         transportSnapshot,
         (status) => {
@@ -1734,6 +1819,13 @@ export function createMuxPeer(
             }
             tunnel.stream.accept();
             tunnel.messages.status.send("");
+            if (options.metrics && options.metricsContext && !metricsOpened) {
+              metricsOpened = true;
+              options.metrics.serviceChannelOpened(options.metricsContext, openedServiceId);
+              tunnel.stream.once("close", () => {
+                options.metrics?.serviceChannelClosed(options.metricsContext!, openedServiceId);
+              });
+            }
             emit("channel.open-ok", transportFields(transportSnapshot));
             if (kind === "http") {
               const identity = options.httpRemotePublicKey ?? options.remotePublicKey;
@@ -1751,6 +1843,16 @@ export function createMuxPeer(
               ...transportFields(transportSnapshot),
             });
             queueMicrotask(() => tunnel.channel.close());
+          }
+        },
+        (direction, bytes) => {
+          if (options.metrics && options.metricsContext && serviceId) {
+            options.metrics.serviceBytes(
+              options.metricsContext,
+              serviceId,
+              metricsDirection(direction),
+              bytes,
+            );
           }
         },
       );
@@ -1791,17 +1893,25 @@ export function createMuxPeer(
         serviceId,
         now,
       });
+      let metricsOpened = false;
       const tunnel = createTunnel(
         mux,
         id,
         "subscriber",
         emit,
-        options.observe !== undefined,
+        options.observe !== undefined || options.metrics !== undefined,
         now,
         transportSnapshot,
         (status) => {
           if (status === "") {
             tunnel.stream.accept();
+            if (options.metrics && options.metricsContext && !metricsOpened) {
+              metricsOpened = true;
+              options.metrics.serviceChannelOpened(options.metricsContext, serviceId);
+              tunnel.stream.once("close", () => {
+                options.metrics?.serviceChannelClosed(options.metricsContext!, serviceId);
+              });
+            }
             emit("channel.open-ok", transportFields(transportSnapshot));
           } else {
             emit("channel.open-error", {
@@ -1809,6 +1919,17 @@ export function createMuxPeer(
               ...transportFields(transportSnapshot),
             });
             tunnel.stream.reject(status);
+          }
+        },
+        undefined,
+        (direction, bytes) => {
+          if (options.metrics && options.metricsContext) {
+            options.metrics.serviceBytes(
+              options.metricsContext,
+              serviceId,
+              metricsDirection(direction),
+              bytes,
+            );
           }
         },
       );
@@ -1834,6 +1955,7 @@ export function createMuxPeer(
       mux.unpair({ protocol: controlProtocol });
       subscriberControl?.close();
       pairingChannel?.close();
+      outgoingPairingChannel?.close();
       for (const channel of controlChannels) channel.close();
       for (const channel of capabilityChannels) channel.close();
       controlChannels.clear();
@@ -1853,6 +1975,7 @@ export function createMuxPeer(
       }
     },
     closeUdpFlows: (serviceId?: string): void => udp.closeFlows(serviceId),
+    ...(pairingTask ? { pairing: pairingTask } : {}),
   };
 
   function settleCapability(result: PeerCapability): void {

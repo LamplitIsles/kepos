@@ -76,6 +76,12 @@ export interface PeerBinding {
   peer: string;
   service: string;
   listen: PeerListenEndpoint;
+  /** The established binding transport. Omitted means the historical TCP default. */
+  kind?: "tcp" | "udp";
+}
+
+export function peerBindingKind(binding: PeerBinding): "tcp" | "udp" {
+  return binding.kind ?? "tcp";
 }
 
 export interface PeerNetworkConfig {
@@ -89,9 +95,15 @@ export interface PeerGatewayConfig {
   domain?: string;
 }
 
+export interface PeerMetricsConfig {
+  host?: string;
+  port: number;
+}
+
 export interface PeerConfig {
   network?: PeerNetworkConfig;
   gateway?: PeerGatewayConfig;
+  metrics?: PeerMetricsConfig;
   peers: PeerDefinition[];
   services: PeerService[];
   bindings: PeerBinding[];
@@ -264,11 +276,20 @@ function parsePeerService(value: unknown, field: string): PeerService {
 
 function parsePeerBinding(value: unknown, field: string): PeerBinding {
   if (!isRecord(value)) throw new Error(`${field} must be an object`);
-  rejectUnknownFields(value, ["peer", "service", "listen"], field);
+  rejectUnknownFields(value, ["peer", "service", "listen", "kind"], field);
+  const kind = value.kind === undefined ? undefined : value.kind;
+  if (kind !== undefined && kind !== "tcp" && kind !== "udp") {
+    throw new Error(`${field}.kind must be tcp or udp`);
+  }
+  const listen = parsePeerEndpoint(value.listen, `${field}.listen`, true);
+  if (kind === "udp" && "unixSocket" in listen) {
+    throw new Error(`${field}.listen Unix sockets cannot provide UDP bindings`);
+  }
   return {
     peer: parsePeerReference(value.peer, `${field}.peer`),
     service: parseServiceIdentifier(value.service, `${field}.service`),
-    listen: parsePeerEndpoint(value.listen, `${field}.listen`, true),
+    listen,
+    ...(kind === undefined ? {} : { kind }),
   };
 }
 
@@ -291,7 +312,11 @@ function resolvePeerReference(
 /** Parse the strict peer-oriented in-memory configuration shape. */
 export function parsePeerConfig(value: unknown): PeerConfig {
   if (!isRecord(value)) throw new Error("peer config must be an object");
-  rejectUnknownFields(value, ["network", "gateway", "peers", "services", "bindings"], "peer config");
+  rejectUnknownFields(
+    value,
+    ["network", "gateway", "metrics", "peers", "services", "bindings"],
+    "peer config",
+  );
   if (!Array.isArray(value.peers)) throw new Error("peers must be an array");
   if (!Array.isArray(value.services)) throw new Error("services must be an array");
   if (!Array.isArray(value.bindings)) throw new Error("bindings must be an array");
@@ -330,9 +355,22 @@ export function parsePeerConfig(value: unknown): PeerConfig {
   return {
     ...(value.network === undefined ? {} : { network: parsePeerNetwork(value.network) }),
     ...(value.gateway === undefined ? {} : { gateway: parsePeerGateway(value.gateway) }),
+    ...(value.metrics === undefined ? {} : { metrics: parsePeerMetrics(value.metrics) }),
     peers,
     services,
     bindings,
+  };
+}
+
+function parsePeerMetrics(value: unknown): PeerMetricsConfig {
+  if (!isRecord(value)) throw new Error("metrics must be an object");
+  rejectUnknownFields(value, ["host", "port"], "metrics");
+  if (value.port === undefined) throw new Error("metrics.port is required");
+  return {
+    port: parsePeerPort(value.port, "metrics.port", true),
+    ...(value.host === undefined
+      ? {}
+      : { host: parseNonEmptyString(value.host, "metrics.host") }),
   };
 }
 

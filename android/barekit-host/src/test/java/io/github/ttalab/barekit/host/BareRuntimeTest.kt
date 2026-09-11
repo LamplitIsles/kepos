@@ -140,6 +140,58 @@ class BareRuntimeTest {
   }
 
   @Test
+  fun canonicalOnboardingActionsUseHostProtocolAndWaitForResponses() {
+    val session = FakeRuntimeSession()
+    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
+    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
+    session.emit(runningEvent())
+
+    val configured = runtime.configurePeer("ab".repeat(32), "phone", "dial")
+    val configureRequest = session.writes.single() as RequestEnvelope
+    assertEquals("configure", configureRequest.method)
+    assertEquals(
+      buildJsonObject {
+        put("publicKey", "ab".repeat(32))
+        put("label", "phone")
+        put("connection", "dial")
+      },
+      configureRequest.params,
+    )
+    assertFalse(configured.isDone)
+    session.emit(
+      ResponseEnvelope(
+        1,
+        "response",
+        configureRequest.id,
+        buildJsonObject { put("configured", true) },
+      ),
+    )
+    assertEquals(RuntimeState.RUNNING, configured.get(1, TimeUnit.SECONDS).state)
+
+    val paired = runtime.pairPeer("kepos://pair?v=1", "Pixel", "android")
+    val pairRequest = session.writes.last() as RequestEnvelope
+    assertEquals("pair", pairRequest.method)
+    assertEquals(
+      buildJsonObject {
+        put("invitation", "kepos://pair?v=1")
+        put("deviceLabel", "Pixel")
+        put("platform", "android")
+      },
+      pairRequest.params,
+    )
+    assertFalse(paired.isDone)
+    session.emit(
+      ResponseEnvelope(
+        1,
+        "response",
+        pairRequest.id,
+        buildJsonObject { put("paired", true) },
+      ),
+    )
+    assertEquals(RuntimeState.RUNNING, paired.get(1, TimeUnit.SECONDS).state)
+  }
+
+  @Test
   fun failedRuntimeCanBeStoppedIdempotently() {
     val session = FakeRuntimeSession()
     val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())

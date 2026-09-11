@@ -112,11 +112,19 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
       return '<li><div class="row"><strong>' + escapeHtml(connection.label) + '</strong><span class="badge">' + escapeHtml(connection.status) + '</span></div><div class="mono muted">' + escapeHtml(fingerprint(connection.publicKey)) + '</div></li>';
     }), 'No configured peers.');
     list(servicesNode, peer.services.map(function (service) {
-      return '<li><div class="row"><strong>' + escapeHtml(service.name) + '</strong><span class="badge">' + escapeHtml(service.available ? 'available' : 'unavailable') + '</span></div><div class="muted">' + escapeHtml(service.id + ' · ' + service.kind) + (service.error ? ' · ' + escapeHtml(service.error) : '') + '</div></li>';
+      var action = service.action;
+      var actionLabel = action === 'open' ? 'Open' : action === 'copy-command' ? 'Copy command' : action === 'copy-url' ? 'Copy URL' : action === 'copy-endpoint' ? 'Copy endpoint' : null;
+      var actionName = action === 'open' ? 'open-peer-service' : action && service.copyText ? 'copy-peer-service' : null;
+      var actionValue = actionName ? ' data-action="' + actionName + '" data-service="' + escapeHtml(service.id) + '"' : '';
+      var disabled = !service.available || (action !== 'open' && !service.copyText) || (action === 'open' && !service.url);
+      var button = actionLabel ? '<button class="btn" type="button"' + actionValue + (disabled ? ' disabled' : '') + '>' + actionLabel + '</button>' : '';
+      var hint = !service.available ? (service.error || 'unavailable') : (!actionName ? 'Configure a local endpoint' : '');
+      return '<li><div class="row"><strong>' + escapeHtml(service.name) + '</strong>' + button + '</div><div class="muted">' + escapeHtml(service.id + ' · ' + (service.access || service.kind)) + (hint ? ' · ' + escapeHtml(hint) : '') + '</div></li>';
     }), 'No services configured.');
     list(bindingsNode, peer.bindings.map(function (binding) {
-      var button = '<button class="btn" type="button" data-action="open-peer-binding" data-service="' + escapeHtml(binding.service) + '"' + (binding.available ? '' : ' disabled') + '>Open</button>';
-      return '<li><div class="row"><strong>' + escapeHtml(binding.service) + '</strong>' + button + '</div><div class="muted">' + escapeHtml(fingerprint(binding.peer)) + '</div></li>';
+      var endpoint = binding.port ? '127.0.0.1:' + binding.port : binding.listen && binding.listen.unixSocket ? 'unix://' + binding.listen.unixSocket : null;
+      var button = endpoint ? '<button class="btn" type="button" data-action="copy-peer-binding" data-endpoint="' + escapeHtml(endpoint) + '"' + (binding.available ? '' : ' disabled') + '>Copy endpoint</button>' : '';
+      return '<li><div class="row"><strong>' + escapeHtml(binding.service) + '</strong>' + button + '</div><div class="muted">' + escapeHtml(fingerprint(binding.peer) + ' · ' + (binding.kind || 'tcp')) + (binding.error ? ' · ' + escapeHtml(binding.error) : '') + '</div></li>';
     }), 'No local bindings.');
     renderPairing(peer);
 ${smokeScript}
@@ -131,8 +139,11 @@ ${smokeScript}
       if (diagnosticsButton.disabled) return;
       diagnosticsButton.disabled = true;
       post({ type: 'copyDiagnostics' });
-    } else if (action === 'open-peer-binding') {
+    } else if (action === 'open-peer-service') {
       post({ type: 'openService', serviceId: target.dataset.service });
+    } else if (action === 'copy-peer-service' || action === 'copy-peer-binding') {
+      var text = action === 'copy-peer-binding' ? target.dataset.endpoint : (lastSnapshot && lastSnapshot.peer && lastSnapshot.peer.services.filter(function (service) { return service.id === target.dataset.service; })[0] || {}).copyText;
+      if (text && navigator.clipboard) navigator.clipboard.writeText(text);
     } else if (action === 'create-peer-pairing') post({ type: 'createPairingInvitation' });
     else if (action === 'cancel-peer-pairing') post({ type: 'cancelPairing' });
     else if (action === 'approve-peer-pairing') post({ type: 'approvePairing' });

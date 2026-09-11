@@ -154,6 +154,18 @@ class KeposForegroundService : Service() {
 
     fun ping(): CompletableFuture<RuntimeSnapshot> = runtime.ping()
 
+    fun configurePeer(
+      publicKey: String,
+      label: String,
+      connection: String = "dial",
+    ): CompletableFuture<RuntimeSnapshot> = runtime.configurePeer(publicKey, label, connection)
+
+    fun pairPeer(
+      invitation: String,
+      deviceLabel: String,
+      platform: String,
+    ): CompletableFuture<RuntimeSnapshot> = runtime.pairPeer(invitation, deviceLabel, platform)
+
     fun observe(listener: (RuntimeSnapshot) -> Unit): AutoCloseable {
       listeners += listener
       listener(runtime.snapshot())

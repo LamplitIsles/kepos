@@ -103,6 +103,8 @@ private fun validateEnvelope(envelope: HostEnvelope) {
       require(
           envelope.method == "ping" ||
           envelope.method == "status" ||
+          envelope.method == "configure" ||
+          envelope.method == "pair" ||
           envelope.method == "stop"
       ) {
         "unsupported control request method"

@@ -10,11 +10,13 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 
 interface RuntimeSession : AutoCloseable {
   fun start(
@@ -45,6 +47,7 @@ class BareRuntime(
   private var stopFuture: CompletableFuture<RuntimeSnapshot>? = null
   private var stopTimeout: AutoCloseable? = null
   private val pingFutures = mutableMapOf<Long, CompletableFuture<RuntimeSnapshot>>()
+  private val actionFutures = mutableMapOf<Long, CompletableFuture<RuntimeSnapshot>>()
   private val observers = linkedSetOf<(RuntimeSnapshot) -> Unit>()
 
   fun snapshot(): RuntimeSnapshot = state.snapshot()
@@ -103,6 +106,34 @@ class BareRuntime(
     checkNotNull(session).write(codec.encode(request)) { error -> fail(runtimeId, error) }
     return future
   }
+
+  @Synchronized
+  fun configurePeer(
+    publicKey: String,
+    label: String,
+    connection: String = "dial",
+  ): CompletableFuture<RuntimeSnapshot> = requestSnapshotAction(
+    "configure",
+    buildJsonObject {
+      put("publicKey", publicKey)
+      put("label", label)
+      put("connection", connection)
+    },
+  )
+
+  @Synchronized
+  fun pairPeer(
+    invitation: String,
+    deviceLabel: String,
+    platform: String,
+  ): CompletableFuture<RuntimeSnapshot> = requestSnapshotAction(
+    "pair",
+    buildJsonObject {
+      put("invitation", invitation)
+      put("deviceLabel", deviceLabel)
+      put("platform", platform)
+    },
+  )
 
   @Synchronized
   fun stop(timeoutMillis: Long = 2_000): CompletableFuture<RuntimeSnapshot> {
@@ -180,6 +211,15 @@ class BareRuntime(
       services = data["services"]?.jsonArray?.map { parseService(it.jsonObject) } ?: emptyList(),
       bindings = data["bindings"]?.jsonArray?.map { parseBinding(it.jsonObject) } ?: emptyList(),
       error = data["error"]?.jsonPrimitive?.content,
+      configured = data["configured"]?.jsonPrimitive?.booleanOrNull ?: false,
+      subscriberPublicKey = data["subscriberPublicKey"]?.jsonPrimitive?.content,
+      connection = data["connection"]?.jsonPrimitive?.content,
+      publisher = data["publisher"]?.jsonObject?.let { publisher ->
+        io.github.ttalab.barekit.host.PublisherSnapshot(
+          displayName = publisher.getValue("displayName").jsonPrimitive.content,
+          publisherKey = publisher.getValue("publisherKey").jsonPrimitive.content,
+        )
+      },
     )
     notifyObservers()
   }
@@ -201,6 +241,11 @@ class BareRuntime(
     kind = data.getValue("kind").jsonPrimitive.content,
     available = data["available"]?.jsonPrimitive?.booleanOrNull ?: false,
     error = data["error"]?.jsonPrimitive?.content,
+    access = data["access"]?.jsonPrimitive?.content ?: data.getValue("kind").jsonPrimitive.content,
+    action = data["action"]?.jsonPrimitive?.content ?: "copy-endpoint",
+    icon = data["icon"]?.jsonPrimitive?.content ?: "port",
+    url = data["url"]?.jsonPrimitive?.content,
+    copyText = data["copyText"]?.jsonPrimitive?.content,
   )
 
   private fun parseBinding(data: JsonObject): BindingSnapshot = BindingSnapshot(
@@ -214,12 +259,14 @@ class BareRuntime(
     port = data["port"]?.jsonPrimitive?.intOrNull,
     available = data["available"]?.jsonPrimitive?.booleanOrNull ?: false,
     error = data["error"]?.jsonPrimitive?.content,
+    kind = data["kind"]?.jsonPrimitive?.content ?: "tcp",
   )
 
   @Synchronized
   private fun receiveResponse(runtimeId: String, response: ResponseEnvelope) {
     requests.accept(response)
     pingFutures.remove(response.id)?.complete(state.snapshot())
+    actionFutures.remove(response.id)?.complete(state.snapshot())
     if (response.id == stopRequestId) finishStop(runtimeId)
   }
 
@@ -228,6 +275,7 @@ class BareRuntime(
     requests.accept(error)
     val failure = IllegalStateException("${error.error.code}: ${error.error.message}")
     if (pingFutures.remove(error.id)?.let { it.completeExceptionally(failure); true } == true) return
+    if (actionFutures.remove(error.id)?.let { it.completeExceptionally(failure); true } == true) return
     fail(runtimeId, failure)
   }
 
@@ -263,6 +311,28 @@ class BareRuntime(
   private fun rejectPings(error: Throwable) {
     pingFutures.values.forEach { it.completeExceptionally(error) }
     pingFutures.clear()
+    actionFutures.values.forEach { it.completeExceptionally(error) }
+    actionFutures.clear()
+  }
+
+  @Synchronized
+  private fun requestSnapshotAction(
+    method: String,
+    params: JsonObject,
+  ): CompletableFuture<RuntimeSnapshot> {
+    val current = state.snapshot()
+    check(current.state == RuntimeState.RUNNING) {
+      "cannot request $method from ${current.state}"
+    }
+    val runtimeId = checkNotNull(current.runtimeId)
+    val request = requests.request(method, params)
+    val future = CompletableFuture<RuntimeSnapshot>()
+    actionFutures[request.id] = future
+    checkNotNull(session).write(codec.encode(request)) { error ->
+      actionFutures.remove(request.id)?.completeExceptionally(error)
+      fail(runtimeId, error)
+    }
+    return future
   }
 
   private fun cancelRequests() {

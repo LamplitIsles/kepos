@@ -1,6 +1,10 @@
 import * as b4a from "b4a";
 
 import type { PeerBinding, PeerServiceSource } from "../../../src/config.js";
+import type {
+  ServiceAction,
+  ServiceIcon,
+} from "../../../src/services/presentation.js";
 import {
   isDesktopDiagnosticErrorCategory,
   type DesktopDiagnosticErrorCategory,
@@ -43,12 +47,19 @@ export interface DesktopPeerRole {
     kind: "tcp" | "http" | "udp";
     source: PeerServiceSource;
     available: boolean;
+    access?: "http" | "ssh" | "tcp" | "udp";
+    action?: ServiceAction;
+    icon?: ServiceIcon;
+    url?: string;
+    copyText?: string;
+    peer?: string;
     error?: string;
   }>;
   bindings: Array<{
     peer: string;
     service: string;
     listen: PeerBinding["listen"];
+    kind?: "tcp" | "udp";
     port?: number;
     available: boolean;
     error?: string;

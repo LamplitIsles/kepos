@@ -44,8 +44,10 @@ The fixed local endpoint or authorized upstream published service that supplies
 a published service.
 
 **Service Binding**:
-A locally owned entry point for consuming one named service from one peer.
-Creating a binding does not publish that service to other peers.
+A locally owned TCP, UDP, or Unix entry point for consuming one named service
+from one peer. UDP bindings are forward datagram listeners over the
+authenticated connection and require a local loopback port. Creating a binding
+does not publish that service to other peers.
 
 **Upstream Service Provider**:
 A peer whose service another service provider consumes as a service source.
@@ -83,14 +85,25 @@ _Avoid_: Active service
 An active service channel initiated by the accepting peer over a connection
 established by the dialing peer. It does not require a new reverse connection.
 
+**Service Presentation**:
+The canonical action, icon, access, URL, and copy-text contract for a catalog
+entry. Desktop and Android render this metadata; they do not infer actions from
+service IDs.
+
+**Peer Metrics**:
+The canonical runtime's existing Prometheus series for authenticated peer
+connection state, authorization, active channels, and traffic. The collector
+keeps the established `kepos_publisher_*` names for the shipped dashboard and
+scrapers without requiring a publisher runtime.
+
 ## Implemented contract
 
 The canonical TOML names these concepts as `peers`, `services`, and
 `bindings`. A peer entry supplies a public key and this runtime's `dial` or
 `accept` direction. A service source is one fixed loopback port, fixed Unix
 socket, or explicit peer/service source; a binding owns a local TCP or Unix
-endpoint. Missing or empty service grants deny access, and a binding never
-republishes its target.
+endpoint, or a local UDP port when `kind = "udp"`. Missing or empty service
+grants deny access, and a binding never republishes its target.
 
 The runtime stores one seed-only `peer.json` and never probes legacy role state
 at startup. The existing old-client-to-new-server Home/TCP/HTTP/UDP wire

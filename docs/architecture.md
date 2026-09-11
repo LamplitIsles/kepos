@@ -74,8 +74,8 @@ implemented.
 ## Configuration and ownership
 
 `src/config.ts` is the strict in-memory schema and `src/app-config.ts` is the
-snake_case TOML boundary. The root has only optional `network`/`gateway` and
-required `peers`, `services`, and `bindings` arrays.
+snake_case TOML boundary. The root has only optional `network`/`gateway`/
+`metrics` and required `peers`, `services`, and `bindings` arrays.
 
 ```text
 peers       authenticated remote identity + local dial/accept direction
@@ -83,6 +83,7 @@ services    published source + kind + immediate-peer allowlist
 bindings    locally owned endpoint for one remote peer/service
 network     DHT bootstrap and route preference
 gateway     local HTTP host/port/domain
+metrics     optional Prometheus host/port listener
 ```
 
 A service source is exactly one fixed loopback port, fixed Unix socket, or
@@ -127,7 +128,9 @@ reconnect never replays bytes or application actions.
 ## Local endpoint behavior
 
 TCP and Unix byte streams share the same `Duplex` bridge and half-close
-semantics. Local bindings are created even when their peer is offline and are
+semantics. A UDP binding owns a local loopback datagram listener and maps each
+local flow to the existing bounded forward UDP envelopes on the authenticated
+connection. Local bindings are created even when their peer is offline and are
 reported unavailable until the remote catalog and grant are current. A client
 connection is paused while it waits for acquisition and is destroyed on
 timeout, cancellation, revocation, or source failure.
@@ -154,7 +157,17 @@ same authenticated connection, supports local and explicit upstream UDP
 sources, and enforces flow, rate, fragment, idle, and ACL limits. Application
 datagrams are capped at 1,200 bytes and carrier fragments at 1,000 bytes.
 Reverse UDP requested through a byte-stream binding returns an explicit
-unsupported error.
+unsupported error. UDP bindings are a forward consumer operation only; they do
+not make a service a reverse-open capability.
+
+The canonical `src/services/presentation.ts` module owns service actions,
+icons, access labels, URLs, and copy text. Desktop and Android consume that
+metadata from runtime status rather than inferring behavior from service IDs.
+The peer runtime also owns the purpose-named metrics collector and optional
+read-only `/metrics` listener. It emits the existing
+`kepos_publisher_*` series, with authenticated immediate-peer labels and
+current-connection gauges, so the shipped Grafana artifact and existing
+scrapers keep their contract without a second publisher runtime.
 
 ## Host boundaries
 
@@ -179,10 +192,14 @@ persists the public key as an `accept` peer but does not add service grants.
 The Android foreground service owns one persistent Bare Worklet. The Worklet
 loads the canonical peer identity/configuration and starts the same `startPeer`
 runtime used by the repository-owned hosts. Shared bootstrap/config generation
-reads the canonical `[network]` settings. The UI remains a status/service
-console and does not grow a configuration editor, reverse-service UI, or
-reverse UDP interface in this change. Previously built Android binaries are
-the frozen legacy-client interoperability targets; they are not a second
+reads the canonical `[network]` settings. A fresh install can enter a peer
+public key or consume a `kepos://pair?...` invitation from the QR scanner or a
+deep link; the Worklet persists the resulting canonical peer policy and
+reconnects it through the host IPC. Admission and service grants remain
+separate. The UI is a status/service console with the canonical action metadata
+for supported services; it does not grow a general configuration editor,
+reverse-service UI, or reverse UDP interface. Previously built Android binaries
+are the frozen legacy-client interoperability targets; they are not a second
 fresh-build runtime or configuration source. The Bare host protocol remains
 the lifecycle boundary between Kotlin and the Worklet.
 
@@ -191,8 +208,8 @@ the lifecycle boundary between Kotlin and the Worklet.
 `services.kepos.peer` generates the canonical TOML, keeps `peer.json` in a
 mutable state directory outside the Nix store, runs `setup peer` as
 `ExecStartPre`, and supervises `peer run` as a user service. Generated public
-keys, directions, sources, grants, bindings, and gateway settings are parsed
-by the same runtime schema. Private seeds never enter the store.
+keys, directions, sources, grants, bindings, gateway, and metrics settings are
+parsed by the same runtime schema. Private seeds never enter the store.
 
 ## State and lifecycle
 

@@ -247,8 +247,40 @@ test("Bare host protocol rejects invalid request ids and methods", () => {
   );
 });
 
-test("Bare host protocol exposes only canonical peer lifecycle methods", () => {
-  for (const method of ["configure", "pair", "eval"]) {
+test("Bare host protocol accepts canonical onboarding methods and rejects eval", () => {
+  for (const method of ["configure", "pair"]) {
+    assert.doesNotThrow(() =>
+      parseEnvelope({ version: 1, kind: "request", id: 11, method }),
+    );
+  }
+  assert.throws(
+    () =>
+      parseEnvelope({ version: 1, kind: "request", id: 11, method: "eval" }),
+    /method/i,
+  );
+});
+
+test("Bare host request tracker allocates onboarding methods in the same sequence", () => {
+  const tracker = new RequestTracker();
+  const configure = tracker.request("configure");
+  const pair = tracker.request("pair");
+  assert.deepEqual([configure.id, pair.id], [1, 2]);
+  assert.doesNotThrow(() => tracker.accept({
+    version: 1,
+    kind: "response",
+    id: configure.id,
+    result: { configured: true },
+  }));
+  assert.doesNotThrow(() => tracker.accept({
+    version: 1,
+    kind: "response",
+    id: pair.id,
+    result: { paired: true },
+  }));
+});
+
+test("Bare host protocol still rejects unsupported request methods", () => {
+  for (const method of ["eval"]) {
     assert.throws(
       () => parseEnvelope({ version: 1, kind: "request", id: 11, method }),
       /method/i,

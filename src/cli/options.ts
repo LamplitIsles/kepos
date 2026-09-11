@@ -6,6 +6,7 @@ import {
   parseGatewayDomain,
   parseGatewayHost,
 } from "../home/gateway-options.js";
+import type { MetricsListenAddress } from "../metrics/server.js";
 
 export type ParsedOptions = ReadonlyMap<string, readonly string[]>;
 
@@ -92,6 +93,35 @@ export function parseGatewayDomainOption(
   return value === undefined
     ? undefined
     : parseGatewayDomain(value, "--gateway-domain");
+}
+
+export function parseMetricsListenOption(
+  options: ParsedOptions,
+): MetricsListenAddress | undefined {
+  const value = singleOption(options, "--metrics-listen");
+  if (value === undefined) return undefined;
+  return parseMetricsListenValue(value);
+}
+
+export function parseMetricsListenValue(value: string): MetricsListenAddress {
+  let host: string;
+  let portText: string;
+  if (value.startsWith("[")) {
+    const closing = value.indexOf("]:");
+    if (closing < 0) throw new Error("--metrics-listen must use host:port");
+    host = value.slice(1, closing);
+    portText = value.slice(closing + 2);
+  } else {
+    const separator = value.lastIndexOf(":");
+    if (separator <= 0) throw new Error("--metrics-listen must use host:port");
+    host = value.slice(0, separator);
+    portText = value.slice(separator + 1);
+    if (host.includes(":")) {
+      throw new Error("IPv6 metrics hosts must be enclosed in brackets");
+    }
+  }
+  if (!host || !portText) throw new Error("--metrics-listen must use host:port");
+  return { host, port: parseTcpPort(portText, "--metrics-listen", true) };
 }
 
 export function parseBootstrapOptions(

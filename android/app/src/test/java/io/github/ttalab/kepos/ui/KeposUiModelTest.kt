@@ -2,6 +2,7 @@ package io.github.ttalab.kepos.ui
 
 import io.github.ttalab.barekit.host.BindingSnapshot
 import io.github.ttalab.barekit.host.PeerConnectionSnapshot
+import io.github.ttalab.barekit.host.PublisherSnapshot
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 import io.github.ttalab.barekit.host.ServiceSnapshot
@@ -32,6 +33,9 @@ class KeposUiModelTest {
       RuntimeSnapshot(
         state = RuntimeState.RUNNING,
         peerKey = "ab".repeat(32),
+        configured = true,
+        connection = "connected",
+        publisher = PublisherSnapshot("desktop", "cd".repeat(32)),
         connections = listOf(
           PeerConnectionSnapshot(
             label = "desktop",
@@ -44,8 +48,8 @@ class KeposUiModelTest {
           ),
         ),
         services = listOf(
-          ServiceSnapshot("ssh", "SSH", "tcp", true),
-          ServiceSnapshot("photos", "Photos", "http", false, "offline"),
+          ServiceSnapshot("ssh", "SSH", "tcp", true, action = "copy-command", copyText = "ssh"),
+          ServiceSnapshot("photos", "Photos", "http", false, "offline", action = "open", url = "http://photos.localhost/"),
         ),
         bindings = listOf(
           BindingSnapshot("desktop", "ssh", "127.0.0.1", 2200, true),
@@ -71,5 +75,29 @@ class KeposUiModelTest {
 
     assertEquals(KeposDestination.FAILED, model.destination)
     assertEquals("peer stopped", model.error)
+  }
+
+  @Test
+  fun unsupportedAndroidUdpCatalogEntriesAreNotActionable() {
+    val model = KeposUiModel.from(
+      RuntimeSnapshot(
+        state = RuntimeState.RUNNING,
+        configured = true,
+        connection = "connected",
+        publisher = PublisherSnapshot("desktop", "cd".repeat(32)),
+        services = listOf(
+          ServiceSnapshot(
+            "game",
+            "Game",
+            "udp",
+            true,
+            action = "copy-endpoint",
+            copyText = "127.0.0.1:9000",
+          ),
+        ),
+      ),
+    )
+
+    assertTrue(model.services.isEmpty())
   }
 }

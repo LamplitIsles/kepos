@@ -15,12 +15,19 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.ttalab.barekit.host.RuntimeSnapshot
@@ -33,10 +40,19 @@ fun KeposScreen(
   onStop: () -> Unit,
   onCopyText: (String) -> Unit,
   onOpenUrl: (String) -> Unit,
+  onConfigure: (String) -> Unit = {},
+  onScanPairing: () -> Unit = {},
 ) {
+  val model = KeposUiModel.from(snapshot)
   KeposTheme {
     Surface(modifier = Modifier.fillMaxSize(), color = KeposPalette.Ink) {
-      when (KeposUiModel.from(snapshot).destination) {
+      when (model.destination) {
+        KeposDestination.SETUP -> SetupScreen(
+          snapshot = snapshot,
+          onConfigure = onConfigure,
+          onScanPairing = onScanPairing,
+          onCopyText = onCopyText,
+        )
         KeposDestination.STOPPED -> StateScreen(
           title = "Kepos is off",
           detail = "Start the peer network to use configured services.",
@@ -107,6 +123,9 @@ private fun PeerHome(
       Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Column {
           Text("Peer services", style = MaterialTheme.typography.headlineMedium)
+          snapshot.publisher?.displayName?.let {
+            Text("Publisher: $it", style = MaterialTheme.typography.bodyMedium)
+          }
           Text(snapshot.connectionsSummary(), style = MaterialTheme.typography.bodyMedium)
         }
         OutlinedButton(onClick = onStop) { Text("Stop") }
@@ -131,7 +150,7 @@ private fun PeerHome(
     if (model.services.isEmpty()) {
       item { Text("No services configured.", style = MaterialTheme.typography.bodyMedium) }
     } else {
-      items(model.services, key = { it.id }) { service ->
+      items(model.services) { service ->
         Column(modifier = Modifier.fillMaxWidth()) {
           Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(service.name, fontWeight = FontWeight.SemiBold)
@@ -139,12 +158,93 @@ private fun PeerHome(
           }
           Text("${service.id} · ${service.kind}", style = MaterialTheme.typography.bodySmall)
           service.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+          val canAct = service.available && (
+            service.action == ServiceAction.OPEN && service.url != null ||
+              service.action != ServiceAction.OPEN && service.copyText != null
+            )
+          when (service.action) {
+            ServiceAction.OPEN -> OutlinedButton(
+              onClick = { service.url?.let(onOpenUrl) },
+              enabled = canAct,
+            ) { Text("Open") }
+            ServiceAction.COPY_URL -> OutlinedButton(
+              onClick = { service.copyText?.let(onCopyText) },
+              enabled = canAct,
+            ) { Text("Copy URL") }
+            ServiceAction.COPY_COMMAND -> OutlinedButton(
+              onClick = { service.copyText?.let(onCopyText) },
+              enabled = canAct,
+            ) { Text("Copy command") }
+            ServiceAction.COPY_ENDPOINT -> OutlinedButton(
+              onClick = { service.copyText?.let(onCopyText) },
+              enabled = canAct,
+            ) { Text("Copy endpoint") }
+          }
         }
       }
     }
     item {
       Text("Local bindings: ${model.bindings}", style = MaterialTheme.typography.bodyMedium)
     }
+  }
+}
+
+@Composable
+private fun SetupScreen(
+  snapshot: RuntimeSnapshot,
+  onConfigure: (String) -> Unit,
+  onScanPairing: () -> Unit,
+  onCopyText: (String) -> Unit,
+) {
+  var publisherKey by rememberSaveable { mutableStateOf("") }
+  Column(
+    modifier = Modifier.fillMaxSize().padding(28.dp),
+    verticalArrangement = Arrangement.Center,
+  ) {
+    Text("KEPOS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(18.dp))
+    Text("Connect this device", style = MaterialTheme.typography.headlineMedium)
+    Spacer(Modifier.height(8.dp))
+    Text(
+      snapshot.error ?: "Choose a trusted peer by scanning its invitation or entering its public key.",
+      style = MaterialTheme.typography.bodyLarge,
+    )
+    snapshot.subscriberPublicKey?.let { key ->
+      Spacer(Modifier.height(18.dp))
+      Text("Your peer key", style = MaterialTheme.typography.labelMedium)
+      Text(
+        key,
+        fontFamily = FontFamily.Monospace,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+      )
+      OutlinedButton(onClick = { onCopyText(key) }) { Text("Copy key") }
+    }
+    Spacer(Modifier.height(18.dp))
+    Button(onClick = onScanPairing, modifier = Modifier.fillMaxWidth()) {
+      Text("Scan invitation")
+    }
+    Spacer(Modifier.height(12.dp))
+    OutlinedTextField(
+      value = publisherKey,
+      onValueChange = { value ->
+        publisherKey = value.lowercase()
+          .filter { character -> character in '0'..'9' || character in 'a'..'f' }
+          .take(64)
+      },
+      modifier = Modifier.fillMaxWidth(),
+      label = { Text("Peer public key") },
+      keyboardOptions = KeyboardOptions(
+        autoCorrectEnabled = false,
+        keyboardType = KeyboardType.Ascii,
+      ),
+      singleLine = true,
+    )
+    Button(
+      onClick = { onConfigure(publisherKey) },
+      enabled = publisherKey.length == 64,
+      modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+    ) { Text("Connect with key") }
   }
 }
 

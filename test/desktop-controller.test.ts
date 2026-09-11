@@ -19,6 +19,10 @@ const initial: DesktopSnapshot = {
         kind: "http",
         source: { localPort: 8080 },
         available: true,
+        access: "http",
+        action: "open",
+        icon: "git",
+        url: "http://forgejo.localhost:17480/",
       },
       {
         id: "ssh",
@@ -92,7 +96,7 @@ test("desktop controller sends the latest canonical snapshot after page readines
   assert.equal(sent.length, 2);
 });
 
-test("desktop controller opens only an available explicit peer binding", async () => {
+test("desktop controller opens only an available canonical HTTP service", async () => {
   const opened: string[] = [];
   const controller = createDesktopController({
     initialSnapshot: initial,
@@ -103,8 +107,8 @@ test("desktop controller opens only an available explicit peer binding", async (
   });
   await controller.receive('{"type":"openService","serviceId":"forgejo"}');
   assert.deepEqual(opened, ["http://forgejo.localhost:17480/"]);
-  await assert.rejects(controller.receive('{"type":"openService","serviceId":"ssh"}'), /not an available peer binding/);
-  await assert.rejects(controller.receive('{"type":"openService","serviceId":"missing"}'), /not an available peer binding/);
+  await assert.rejects(controller.receive('{"type":"openService","serviceId":"ssh"}'), /does not provide an open action/);
+  await assert.rejects(controller.receive('{"type":"openService","serviceId":"missing"}'), /not available/);
 });
 
 test("desktop controller serializes commands and quits once", async () => {

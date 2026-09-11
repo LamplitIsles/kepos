@@ -12,28 +12,43 @@ and keeps the runtime and its local endpoints alive when the Activity closes.
 It stops only after an explicit service stop.
 
 The current UI is a status and service console: it shows the canonical peer
-identity, connections, service availability, and local binding count. It does
-not add a configuration editor, QR pairing flow, reverse-service UI, or
-reverse UDP. Operators provision the canonical configuration through the
-app-private host boundary. Already-built Android binaries remain useful as
-legacy wire clients for the one-way old-client interoperability contract; that
-compatibility target is not the source contract of a freshly built app.
+identity, connections, service availability, and local binding count. A fresh
+install can enter a peer public key, scan a QR invitation, or consume a
+`kepos://pair?...` deep link. The host IPC writes the selected relationship
+to the app-private canonical configuration and retains the seed in the
+app-private identity file. It does not add a general configuration editor,
+reverse-service UI, or reverse UDP. Already-built Android binaries remain
+useful as legacy wire clients for the one-way old-client interoperability
+contract; that compatibility target is not the source contract of a freshly
+built app.
 
 ## User flow
 
-Provision the Android app with a canonical `config.toml` containing the
-remote peer's public key, its explicit `dial` or `accept` direction, and the
-service grants/bindings required by the deployment. Keep the foreground
-service running while using its configured local endpoints. Only public keys
-and policy cross the host boundary; the Android seed stays app-private.
+On a fresh install, tap `Connect with key` and enter the trusted peer's
+64-character public key, or tap `Scan invitation` and scan the invitation
+shown by the desktop pairing surface. Opening a `kepos://pair?...` link also
+queues the same invitation flow. Key entry sends the canonical `configure`
+host request; an invitation sends `pair`. The Worklet persists the
+canonical `config.toml` under app-private storage and keeps the one
+seed-only `peer.json` identity there. It then starts/reconnects the same
+canonical peer runtime.
+
+Admission is separate from service authorization. The peer that publishes a
+service must add the Android public key to that service's immediate `allow`
+list; selecting or approving the peer does not broaden grants. Keep the
+foreground service running while using configured local endpoints. Only public
+keys and policy cross the host boundary; the Android seed stays app-private.
 
 For a desktop-managed pairing flow, use the desktop's canonical pairing
 surface or the CLI's explicit `peer pair` command to add the Android public key
 to the canonical peer list, then add that key separately to each intended
 service's immediate `allow` list. Approval never broadens service grants.
 
-The existing app presents the authenticated registry and keeps its current
-`*.localhost` service convention. For example:
+The app presents the authenticated catalog and keeps its current
+`*.localhost` service convention. Canonical presentation metadata supplies
+the action and URL/copy value: supported HTTP actions open their unqualified
+URL, while supported raw TCP/Unix actions copy their endpoint or command. For
+example:
 
 ```text
 http://navidrome.localhost:17480/
@@ -42,7 +57,8 @@ http://navidrome.localhost:17480/
 The built-in mappings continue to use loopback TCP/HTTP listeners for dsh,
 Navidrome, SSH, and other supported services. UDP entries are filtered from
 the Android service directory; SOCKS5 UDP ASSOCIATE and game UDP operation are
-outside this client boundary.
+outside this client boundary. No Android Unix-socket or reverse-service
+configuration UI is implied by the catalog.
 
 ## Canonical configuration boundary
 

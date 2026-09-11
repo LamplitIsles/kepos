@@ -4,15 +4,42 @@ import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 
 enum class KeposDestination {
+  SETUP,
   STOPPED,
   CONNECTING,
   SERVICES,
   FAILED,
 }
 
+enum class ServiceAction {
+  OPEN,
+  COPY_URL,
+  COPY_COMMAND,
+  COPY_ENDPOINT,
+}
+
+enum class ServiceIcon {
+  BOOK,
+  MUSIC,
+  TERMINAL,
+  GIT,
+  BUILD,
+  PHOTOS,
+  STORAGE,
+  PROXY,
+  DASHBOARD,
+  WEB,
+  PORT,
+}
+
 data class ServiceUiModel(
   val id: String,
   val name: String,
+  val access: String,
+  val url: String?,
+  val copyText: String?,
+  val action: ServiceAction,
+  val icon: ServiceIcon,
   val kind: String,
   val available: Boolean,
   val error: String?,
@@ -20,6 +47,7 @@ data class ServiceUiModel(
 
 data class KeposUiModel(
   val destination: KeposDestination,
+  val publisherName: String? = null,
   val peerKey: String? = null,
   val connection: String? = null,
   val services: List<ServiceUiModel> = emptyList(),
@@ -38,23 +66,70 @@ data class KeposUiModel(
       if (snapshot.state != RuntimeState.RUNNING) {
         return KeposUiModel(destination = KeposDestination.CONNECTING)
       }
+      if (!snapshot.configured) {
+        return KeposUiModel(
+          destination = KeposDestination.SETUP,
+          peerKey = snapshot.subscriberPublicKey ?: snapshot.peerKey,
+          error = snapshot.error,
+        )
+      }
+      val publisher = snapshot.publisher
+        ?: return KeposUiModel(
+          destination = KeposDestination.CONNECTING,
+          peerKey = snapshot.subscriberPublicKey ?: snapshot.peerKey,
+          connection = snapshot.connection,
+          error = snapshot.error,
+        )
       return KeposUiModel(
         destination = KeposDestination.SERVICES,
-        peerKey = snapshot.peerKey,
-        connection = snapshot.connections.firstOrNull { it.status == "connected" }?.status
+        publisherName = publisher.displayName,
+        peerKey = snapshot.subscriberPublicKey ?: snapshot.peerKey,
+        connection = snapshot.connection
+          ?: snapshot.connections.firstOrNull { it.status == "connected" }?.status
           ?: snapshot.connections.firstOrNull()?.status,
-        services = snapshot.services.map { service ->
-          ServiceUiModel(
-            id = service.id,
-            name = service.name,
-            kind = service.kind,
-            available = service.available,
-            error = service.error,
-          )
-        },
+        services = snapshot.services.mapNotNull(::serviceUiModel),
         bindings = snapshot.bindings.size,
-        available = snapshot.services.any { it.available },
+        available = snapshot.connection == "connected" && snapshot.services.any { it.available },
         error = snapshot.error,
+      )
+    }
+
+    private fun serviceUiModel(service: io.github.ttalab.barekit.host.ServiceSnapshot): ServiceUiModel? {
+      // Android keeps the shipped subscriber boundary: it has no local UDP
+      // operation, so a canonical UDP catalog entry is not presented as an
+      // action the host cannot complete.
+      if (service.kind == "udp") return null
+      val action = when (service.action) {
+        "open" -> ServiceAction.OPEN
+        "copy-url" -> ServiceAction.COPY_URL
+        "copy-command" -> ServiceAction.COPY_COMMAND
+        "copy-endpoint" -> ServiceAction.COPY_ENDPOINT
+        else -> return null
+      }
+      val icon = when (service.icon) {
+        "book" -> ServiceIcon.BOOK
+        "music" -> ServiceIcon.MUSIC
+        "terminal" -> ServiceIcon.TERMINAL
+        "git" -> ServiceIcon.GIT
+        "build" -> ServiceIcon.BUILD
+        "photos" -> ServiceIcon.PHOTOS
+        "storage" -> ServiceIcon.STORAGE
+        "proxy" -> ServiceIcon.PROXY
+        "dashboard" -> ServiceIcon.DASHBOARD
+        "web" -> ServiceIcon.WEB
+        else -> ServiceIcon.PORT
+      }
+      return ServiceUiModel(
+        id = service.id,
+        name = service.name,
+        access = service.access,
+        url = service.url,
+        copyText = service.copyText,
+        action = action,
+        icon = icon,
+        kind = service.kind,
+        available = service.available,
+        error = service.error,
       )
     }
   }
