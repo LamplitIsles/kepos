@@ -1,33 +1,32 @@
 # macOS desktop
 
-For end-user installation and pairing, start with the [public Kepos guide](https://kepos.guion.io/docs/). This page keeps the macOS operator and contributor details.
+For end-user installation and troubleshooting, start with the
+[public Kepos guide](https://kepos.guion.io/docs/). This page keeps macOS
+operator and contributor detail.
 
-The native Apple Silicon app runs the real publisher, subscriber, or both roles
-inside one Bare process. Enabled roles share one device-owned HyperDHT node and
-one preferred DHT candidate listener while retaining separate role identities
-and state. HyperDHT still uses an ephemeral DHT client socket and ephemeral UDX
-connection sockets. Kepos starts no Node or Electron child process.
+The native Apple Silicon app owns one canonical peer runtime inside one Bare
+process. That runtime owns one HyperDHT identity/node, the gateway, service
+bindings, pairing, config reload, diagnostics, and shutdown. The app does not
+start a Node or Electron child process.
 
-The window groups each connection as a publisher relationship. A remote
-relationship shows the publisher this Mac trusts and this Mac's subscriber
-identity. A hosted relationship shows this Mac's publisher identity and its
-currently connected subscribers. Every displayed fingerprint has a copy action
-for the complete public key; private identity material never enters the UI
-snapshot.
+The peer UI shows the local public-key fingerprint, configured peer labels and
+dial/accept directions, capability/connection state, published services,
+bindings, gateway, and pairing phase. It never displays the private seed.
 
-The shared Kepos TOML decides which roles start. Their identities stay under
-`$XDG_STATE_HOME` when it is set:
+## Paths and first launch
+
+The desktop reads the canonical config and peer state:
 
 ```text
-$XDG_STATE_HOME/kepos-neo/publisher
-$XDG_STATE_HOME/kepos-neo/subscriber
+$XDG_CONFIG_HOME/kepos/config.toml
+$XDG_STATE_HOME/kepos-neo/peer/peer.json
 ```
 
-Without `XDG_STATE_HOME`, the paths fall back to
-`~/.local/state/kepos-neo/{publisher,subscriber}`.
-
-Desktop and CLI cannot own the same role state at the same time. Only one
-desktop instance may run on a Mac.
+Without the XDG overrides, these are `~/.config/kepos/config.toml` and
+`~/.local/state/kepos-neo/peer/peer.json`. First launch creates an empty
+canonical config and seed-only peer state. It never creates or probes old
+publisher/subscriber state. Desktop and CLI use the same canonical peer lock;
+only one desktop instance may run.
 
 ## Build and install
 
@@ -38,94 +37,94 @@ npm run desktop:install
 ```
 
 This replaces `~/Applications/Kepos.app` and launches it. Run without
-installing:
+installing with:
 
 ```sh
 npm run desktop:run
 ```
 
-The build compiles the pinned Bare AppKit and WebKit forks, packages
-`dist/desktop/Kepos.app`, and links the required native frameworks.
-
-Run the portable desktop checks and native lifecycle gate with:
+Portable host checks and the native lifecycle gate are:
 
 ```sh
 npm run desktop:check
 npm run desktop:native-check
 ```
 
-## Roles and configuration
+The release ZIP is ad-hoc signed and not notarized. Developer ID signing,
+App Store packaging, updater, and pre-login service operation are not claimed.
 
-An absent role table, or one with `enabled = false`, is not auto-started by the
-desktop. Explicit CLI run commands still start the requested role.
+## Canonical configuration
+
+Use the same TOML as the headless CLI; desktop role flags are removed:
 
 ```toml
 [network]
 bootstrap = ["bootstrap.example:49737"]
 
-[publisher]
-enabled = true
-display_name = "kosmos"
-subscribers = []
-services = []
+[gateway]
+port = 17480
 
-[subscriber]
-enabled = true
-gateway_port = 17480
-route = "auto"
+[[peers]]
+label = "nuc"
+public_key = "<nuc-peer-public-key>"
+connection = "dial"
 
-[[subscriber.services]]
-id = "ssh"
-local_port = 2222
+[[services]]
+id = "cua"
+name = "CUA driver"
+source = { unix_socket = "/run/user/1000/cua-driver.sock" }
+allow = ["<nuc-peer-public-key>"]
 
-[[subscriber.services]]
-id = "stardew"
-kind = "udp"
-local_port = 24642
+[[bindings]]
+peer = "nuc"
+service = "ssh"
+listen = { local_port = 2222 }
 ```
 
-Use `--config <path>` for an isolated configuration. Publisher startup requires
-that file (or the default) to contain a complete `[publisher]` table; state
-flags alone cannot supply publisher policy. Bootstrap is device-wide. A
-publisher policy or subscriber binding change restarts only that role and
-preserves the shared node; a bootstrap change replaces the node and restarts
-every enabled role.
-One role's startup failure remains visible without stopping a healthy sibling.
+`peers`, `services`, and `bindings` are required arrays. Service source and
+binding endpoint variants are fixed by the strict parser. Empty/missing
+service grants deny access. Use [CLI, identity, and configuration](../cli.md)
+for the full schema and identity conversion order.
 
-## Native surface
+Once a configured peer connects, either side can open an explicitly granted
+byte-stream service over that one outer connection. A peer that only supports
+the old wire is still able to consume established server-side services; the
+desktop reports reverse capability as unsupported instead of dialing a second
+connection.
 
-The tray is the lifecycle and status surface. The app shows remote services
-from the subscriber registry and a separate **Services published here** section
-for the local publisher.
+## Pairing and service actions
 
-- HTTP actions open the macOS default browser.
-- Navidrome copies its canonical `*.localhost` URL for Navic.
-- SSH copies a loopback command.
-- Dagger copies an environment variable that points the CLI at the remote
-  engine.
-- Fixed-target UDP services copy a loopback `127.0.0.1:port` endpoint; they do
-  not open a browser URL. The current application-datagram cap is 1,200 bytes;
-  carrier fragments are bounded. Windows Bare transport is verified, while the
-  Stardew Valley direct-IP path's real-game acceptance is explicitly deferred
-  and the native Windows result does not claim macOS execution.
-- **Add device** creates a two-minute QR for an Android subscriber and shows the
-  authenticated candidate fingerprint before approval. Desktop subscribers use
-  the manual public-key flow in the [public guide](https://kepos.guion.io/docs/).
+**Add peer** creates a short-lived invitation. The candidate's authenticated
+public-key fingerprint is shown before **Approve** or **Deny**. Approval adds
+the key as an `accept` peer and authorizes its current connection; it does not
+add the key to a service `allow` list. Operators must grant each service
+explicitly. Expiry and denial close the candidate and do not leave a live
+binding.
 
-Allow writes the configured TOML subscriber-device policy atomically, updates
-the live publisher, and promotes the same peer connection. Unknown candidates
-cannot read the registry or open services. A publisher can expose the optional
-Prometheus endpoint with `--metrics-listen host:port`; the listener stops with
-the publisher.
+HTTP services retain `http://<service-id>.localhost:17480/`. Raw TCP services
+and Unix bindings expose their configured local endpoint. If several peers
+offer the same HTTP service ID, the UI/runtime reports an ambiguity and the
+operator must configure an explicit binding; it never selects by reconnect
+order. UDP service cards copy a loopback endpoint and do not open a browser.
+Those cards are actionable only for forward bindings targeting a dial-side
+peer; accept-side UDP bindings remain unavailable.
 
-The release ZIP is an ad-hoc-signed Apple Silicon build and is not notarized.
-Developer ID signing, a Mac App Store package, an updater, and pre-login service
-operation are not claimed. Windows is a separately supported desktop target;
-see [Windows desktop](windows.md) for its packaging and prerequisite boundary.
+For the DSH use case, the canonical Mac service can publish the cua-driver Unix
+socket. A NUC-side binding to that service carries the NDJSON byte stream and
+inline image bytes transparently. The automated repository test uses a
+temporary Unix socket and HyperDHT testnet; it is not a live CUA driver or GUI
+trial.
 
-Lifecycle and pairing decisions are documented in
-[ADR 0004](../adr/0004-two-level-subscriber-runtime-locking.md),
-[ADR 0006](../adr/0006-desktop-dual-role-runtime-ownership.md),
-[ADR 0007](../adr/0007-pair-on-the-final-publisher-connection.md), and
-[ADR 0008](../adr/0008-share-one-hyperdht-node-per-device-runtime.md), and
-[ADR 0010](../adr/0010-publisher-identity-state-and-toml-policy.md).
+## Lifecycle and cutover
+
+Closing the main window hides it. **Open Kepos** restores it; **Quit Kepos**
+stops pairing candidates, service channels, bindings, gateway, WebView, tray,
+and the peer runtime through one idempotent shutdown path. A binding remains
+configured and reports offline while its target peer is disconnected. Existing
+streams fail on disconnect and are not replayed.
+
+For a later identity-preserving cutover, select Mac's active old subscriber
+public key as this peer's identity, back up state outside the active path, stop
+the old runtime, run `peer convert` with the required expected public key,
+rewrite canonical peer/allow entries, then start only the canonical peer
+runtime. This implementation run did not inspect or convert real Mac state.

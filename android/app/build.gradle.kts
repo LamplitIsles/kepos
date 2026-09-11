@@ -16,11 +16,6 @@ android {
     targetSdk = 35
     versionCode = keposVersionCode.getOrElse(1)
     versionName = keposVersionName.getOrElse("0.1.0")
-    buildConfigField("int", "GATEWAY_PORT", "17480")
-    buildConfigField("int", "MIHOMO_PORT", "17890")
-    buildConfigField("int", "DSH_PORT", "13080")
-    buildConfigField("int", "OPENCLAW_PORT", "18789")
-    buildConfigField("int", "SSH_PORT", "2222")
 
     ndk {
       abiFilters += "arm64-v8a"
@@ -43,11 +38,6 @@ android {
       initWith(getByName("debug"))
       applicationIdSuffix = ".devicetest"
       matchingFallbacks += listOf("debug")
-      buildConfigField("int", "GATEWAY_PORT", "18480")
-      buildConfigField("int", "MIHOMO_PORT", "18490")
-      buildConfigField("int", "DSH_PORT", "18380")
-      buildConfigField("int", "OPENCLAW_PORT", "19789")
-      buildConfigField("int", "SSH_PORT", "18222")
     }
   }
 
@@ -63,7 +53,6 @@ android {
   }
 
   buildFeatures {
-    buildConfig = true
     compose = true
   }
 
@@ -83,12 +72,12 @@ dependencies {
   implementation(project(":barekit-host"))
   implementation(platform("androidx.compose:compose-bom:2024.09.03"))
   implementation("androidx.activity:activity-compose:1.9.2")
+  implementation("androidx.activity:activity-ktx:1.9.2")
   implementation("androidx.compose.material3:material3")
   implementation("androidx.compose.ui:ui")
   implementation("androidx.compose.ui:ui-tooling-preview")
   implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
   implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.6")
-  implementation("com.composables:icons-lucide:1.1.0")
   implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
   debugImplementation("androidx.compose.ui:ui-tooling")

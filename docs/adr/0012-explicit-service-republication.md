@@ -2,6 +2,12 @@
 
 Status: Accepted and implemented
 
+The publisher terminology below is historical. ADR 0013 supersedes its
+identity/direction exception for the canonical runtime: republication now uses
+one selected peer identity and an explicit `peer`/`service` source regardless
+of whether the upstream relationship is dialed or accepted. The immediate-hop
+authorization and plaintext termination decisions remain in force.
+
 A publisher may publish local services and explicitly selected services from
 authorized upstream publishers. The republishing publisher owns this selection,
 its downstream service names, and its downstream access policy; this preserves

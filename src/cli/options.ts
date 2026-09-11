@@ -2,12 +2,11 @@ import path from "node:path";
 
 import type { DhtAddress } from "../mux/hyperdht.js";
 import { parseRoute, type Route } from "../mux/route.js";
-import type { MetricsListenAddress } from "../metrics/server.js";
-import type { SubscriberService } from "../runtime/subscriber.js";
 import {
   parseGatewayDomain,
   parseGatewayHost,
 } from "../home/gateway-options.js";
+import type { MetricsListenAddress } from "../metrics/server.js";
 
 export type ParsedOptions = ReadonlyMap<string, readonly string[]>;
 
@@ -65,58 +64,6 @@ export function repeatedOption(
   return [...(options.get(name) ?? [])];
 }
 
-export function parseMetricsListenOption(
-  options: ParsedOptions,
-): MetricsListenAddress | undefined {
-  const value = singleOption(options, "--metrics-listen");
-  if (value === undefined) return undefined;
-  const separator = value.startsWith("[")
-    ? value.indexOf("]:") + 1
-    : value.lastIndexOf(":");
-  if (separator <= 0 || separator >= value.length - 1) {
-    throw new Error("--metrics-listen must use host:port");
-  }
-  const host = value.startsWith("[")
-    ? value.slice(1, separator - 1)
-    : value.slice(0, separator);
-  const port = value.slice(separator + 1);
-  if (!host) throw new Error("--metrics-listen host must be non-empty");
-  return {
-    host,
-    port: parseTcpPort(port, "--metrics-listen port", true),
-  };
-}
-
-export function parseSubscriberService(value: string): SubscriberService {
-  const parts = value.split(":");
-  const id = parts[0];
-  let kind: "tcp" | "udp" | undefined;
-  let port: string | undefined;
-  if (parts.length === 2) {
-    port = parts[1];
-  } else if (parts.length === 3) {
-    if (parts[1] === "tcp" || parts[1] === "udp") {
-      kind = parts[1];
-      port = parts[2];
-    }
-  }
-  if (!id || !port || (parts.length === 3 && kind === undefined) || parts.length > 3) {
-    throw new Error("--service must use id:local-port or id:udp:local-port");
-  }
-  if (!/^[a-z][a-z0-9-]*$/.test(id) || id === "home") {
-    throw new Error("--service id must be a non-reserved lowercase identifier");
-  }
-  return {
-    id,
-    ...(kind === "udp" ? { kind } : {}),
-    localPort: parseTcpPort(
-      port,
-      kind === "udp" ? "--service UDP local port" : "--service local port",
-      true,
-    ),
-  };
-}
-
 export function parseRouteOption(options: ParsedOptions): Route {
   return parseRoute(singleOption(options, "--route") ?? "auto");
 }
@@ -146,6 +93,35 @@ export function parseGatewayDomainOption(
   return value === undefined
     ? undefined
     : parseGatewayDomain(value, "--gateway-domain");
+}
+
+export function parseMetricsListenOption(
+  options: ParsedOptions,
+): MetricsListenAddress | undefined {
+  const value = singleOption(options, "--metrics-listen");
+  if (value === undefined) return undefined;
+  return parseMetricsListenValue(value);
+}
+
+export function parseMetricsListenValue(value: string): MetricsListenAddress {
+  let host: string;
+  let portText: string;
+  if (value.startsWith("[")) {
+    const closing = value.indexOf("]:");
+    if (closing < 0) throw new Error("--metrics-listen must use host:port");
+    host = value.slice(1, closing);
+    portText = value.slice(closing + 2);
+  } else {
+    const separator = value.lastIndexOf(":");
+    if (separator <= 0) throw new Error("--metrics-listen must use host:port");
+    host = value.slice(0, separator);
+    portText = value.slice(separator + 1);
+    if (host.includes(":")) {
+      throw new Error("IPv6 metrics hosts must be enclosed in brackets");
+    }
+  }
+  if (!host || !portText) throw new Error("--metrics-listen must use host:port");
+  return { host, port: parseTcpPort(portText, "--metrics-listen", true) };
 }
 
 export function parseBootstrapOptions(

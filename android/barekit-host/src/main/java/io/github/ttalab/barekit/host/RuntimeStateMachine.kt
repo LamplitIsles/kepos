@@ -8,19 +8,38 @@ enum class RuntimeState {
   FAILED,
 }
 
-data class PublisherSnapshot(
-  val displayName: String,
-  val publisherKey: String,
+data class PeerConnectionSnapshot(
+  val label: String,
+  val publicKey: String,
+  val connection: String,
+  val status: String,
+  val generation: Long,
+  val capability: String,
+  val services: Int,
+  val error: String? = null,
 )
 
 data class ServiceSnapshot(
   val id: String,
   val name: String,
-  val access: String,
-  val action: String? = null,
+  val kind: String,
+  val available: Boolean,
+  val error: String? = null,
+  val access: String = "tcp",
+  val action: String = "copy-endpoint",
   val icon: String = "port",
   val url: String? = null,
   val copyText: String? = null,
+)
+
+data class BindingSnapshot(
+  val peer: String,
+  val service: String,
+  val listen: String,
+  val port: Int? = null,
+  val available: Boolean,
+  val error: String? = null,
+  val kind: String = "tcp",
 )
 
 data class RuntimeSnapshot(
@@ -28,11 +47,12 @@ data class RuntimeSnapshot(
   val runtimeId: String? = null,
   val echoUrl: String? = null,
   val error: String? = null,
-  val subscriberPublicKey: String? = null,
+  val peerKey: String? = null,
+  val connections: List<PeerConnectionSnapshot> = emptyList(),
+  val services: List<ServiceSnapshot> = emptyList(),
+  val bindings: List<BindingSnapshot> = emptyList(),
   val configured: Boolean = false,
   val connection: String? = null,
-  val publisher: PublisherSnapshot? = null,
-  val services: List<ServiceSnapshot> = emptyList(),
 )
 
 data class StartDecision(val runtimeId: String, val shouldCreate: Boolean)
@@ -63,12 +83,13 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
   fun running(
     runtimeId: String,
     echoUrl: String,
-    subscriberPublicKey: String? = null,
+    peerKey: String?,
+    connections: List<PeerConnectionSnapshot> = emptyList(),
+    services: List<ServiceSnapshot> = emptyList(),
+    bindings: List<BindingSnapshot> = emptyList(),
+    error: String? = null,
     configured: Boolean = false,
     connection: String? = null,
-    error: String? = null,
-    publisher: PublisherSnapshot? = null,
-    services: List<ServiceSnapshot> = emptyList(),
   ) {
     requireCurrent(runtimeId)
     check(current.state == RuntimeState.STARTING || current.state == RuntimeState.RUNNING) {
@@ -79,11 +100,12 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
       runtimeId = runtimeId,
       echoUrl = echoUrl,
       error = error,
-      subscriberPublicKey = subscriberPublicKey,
+      peerKey = peerKey,
+      connections = connections,
+      services = services,
+      bindings = bindings,
       configured = configured,
       connection = connection,
-      publisher = publisher,
-      services = services,
     )
   }
 
@@ -99,10 +121,7 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
   @Synchronized
   fun stopped(runtimeId: String) {
     requireCurrent(runtimeId)
-    check(
-      current.state == RuntimeState.STOPPING ||
-        current.state == RuntimeState.FAILED,
-    ) {
+    check(current.state == RuntimeState.STOPPING || current.state == RuntimeState.FAILED) {
       "runtime cannot enter stopped from ${current.state}"
     }
     current = RuntimeSnapshot(RuntimeState.STOPPED)
@@ -115,8 +134,6 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
   }
 
   private fun requireCurrent(runtimeId: String) {
-    require(current.runtimeId == runtimeId) {
-      "stale runtime callback: $runtimeId"
-    }
+    require(current.runtimeId == runtimeId) { "stale runtime callback: $runtimeId" }
   }
 }

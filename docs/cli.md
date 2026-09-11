@@ -1,486 +1,368 @@
 # CLI, identity, and configuration
 
-The Kepos CLI can run a publisher, a subscriber, or both roles in one device
-process. Standalone role commands remain available when the roles need separate
-network policy or lifecycles. One subscriber keeps one encrypted connection
-open to one publisher. Registry, control, HTTP, SSH, and other services use
-independent Protomux channels on that connection.
+The shipped CLI uses one canonical peer runtime. A peer has one persistent
+identity and one configuration owner. Connection direction is selected per
+configured peer; service provision, service consumption, and local bindings
+are separate policy entries.
 
-## Create identities
+The commands are intentionally a hard cutover. `publisher`, `subscriber`, and
+`device` command groups, their role-specific flags, old TOML tables, and old
+state paths are not aliases. They fail as unknown commands/options. Existing
+old clients remain supported at the wire boundary described in
+[network transport and compatibility](network-transport-and-compatibility.md).
 
-Create a subscriber identity:
+## Commands
 
-```sh
-npm run kepos -- setup subscriber \
-  --state ~/.local/state/kepos-neo/subscriber
+```text
+kepos setup peer       Create or validate one canonical identity and config
+kepos peer key         Print one peer's public key
+kepos peer status      Inspect canonical identity/config without starting DHT
+kepos peer pair        Add or replace an explicitly trusted peer in TOML
+kepos peer trust       Alias for peer pair
+kepos peer convert     Offline-convert one selected legacy identity
+kepos peer run         Start the canonical peer runtime
 ```
 
-Create the publisher's seed-derived identity:
+Every command accepts only the options shown in its section. `--config` and
+`--state` paths are resolved before use and can point into a test-owned or
+deployment-owned directory.
+
+## Initialize one peer
 
 ```sh
-npm run kepos -- setup publisher \
-  --state ~/.local/state/kepos-neo/publisher
-```
-
-Publisher setup accepts only `--state`. It creates one strict
-`publisher.json` containing the seed, reuses a valid identity without key
-rotation, and rejects partial, extra, or malformed state. Publisher display
-name, subscriber devices, services, and service allowlists belong in TOML.
-
-Print an existing publisher's public key without repeating or changing its
-policy:
-
-```sh
-npm run kepos -- publisher key \
-  --state ~/.local/state/kepos-neo/publisher
-```
-
-Run the publisher, then pin its public key on the subscriber:
-
-```sh
-npm run kepos -- publisher run \
-  --state ~/.local/state/kepos-neo/publisher \
+npm run kepos -- setup peer \
+  --state ~/.local/state/kepos-neo/peer \
   --config ~/.config/kepos/config.toml
-
-npm run kepos -- subscriber set-publisher \
-  --state ~/.local/state/kepos-neo/subscriber \
-  --label kosmos \
-  --publisher-key '<publisher-public-key>'
 ```
 
-## Shared TOML policy
+`setup peer` creates `peer.json` when the state directory is absent and writes
+an empty canonical config when the selected config is absent. Repeating it
+validates and reuses the existing identity without rotating its key. Its only
+output is:
 
-The CLI and desktop read `$XDG_CONFIG_HOME/kepos/config.toml`, or
-`~/.config/kepos/config.toml` when `XDG_CONFIG_HOME` is unset:
+```text
+Peer key: <64 lowercase hexadecimal characters>
+```
+
+The private seed is never printed. `peer key` reads the same canonical state
+without starting a network runtime:
+
+```sh
+npm run kepos -- peer key \
+  --state ~/.local/state/kepos-neo/peer
+```
+
+## Canonical TOML
+
+The file contains only network/gateway settings and three peer-oriented
+collections. Keys in TOML are snake_case; the in-memory TypeScript API uses
+camelCase.
 
 ```toml
 [network]
-bootstrap = [
-  "bootstrap-one.example:49737",
-  "bootstrap-two.example:49738",
-]
+bootstrap = ["bootstrap-one.example:49737", "bootstrap-two.example:49738"]
+route = "auto"
 
-[publisher]
-enabled = false
-display_name = "kosmos"
-subscribers = [
-  { label = "nuc", public_key = "<subscriber-public-key>" },
-]
+[gateway]
+port = 17480
+# host = "127.0.0.1"
+# domain = "kepos.internal"
 
-[[publisher.services]]
-id = "ssh"
-name = "SSH"
-source = { local_port = 22 }
+[metrics]
+host = "127.0.0.1"
+port = 17481
 
-[[publisher.services]]
+[[peers]]
+label = "mac"
+public_key = "<mac-peer-public-key>"
+connection = "accept"
+
+[[peers]]
+label = "phone"
+public_key = "<phone-peer-public-key>"
+connection = "dial"
+
+[[services]]
+id = "cua"
+name = "CUA driver"
+source = { unix_socket = "/run/user/1000/cua-driver.sock" }
+allow = ["<nuc-peer-public-key>"]
+
+[[services]]
 id = "navidrome"
 name = "Navidrome"
 kind = "http"
 source = { local_port = 4533 }
-allow = ["<subscriber-public-key>"]
+allow = ["<phone-peer-public-key>"]
 
-[[publisher.services]]
-id = "forgejo"
-name = "Forgejo"
-kind = "http"
-source = { local_port = 3000 }
-max_publisher_to_subscriber_bps = 2000000
+[[services]]
+id = "mac-cua"
+name = "Mac CUA through NUC"
+source = { peer = "mac", service = "cua" }
+allow = ["<phone-peer-public-key>"]
 
-[[publisher.services]]
-id = "stardew"
-name = "Stardew direct IP"
-kind = "udp"
-source = { local_port = 24642 }
+[[bindings]]
+peer = "mac"
+service = "cua"
+listen = { unix_socket = "/run/user/1000/kepos-cua.sock" }
 
-[subscriber]
-enabled = true
-gateway_port = 17480
-route = "auto"
-
-[[subscriber.services]]
-id = "ssh"
-local_port = 2222
-
-[[subscriber.services]]
-id = "stardew"
-kind = "udp"
-local_port = 24642
+[[bindings]]
+peer = "phone"
+service = "navidrome"
+listen = { local_port = 0 }
 ```
 
-Use `--config <path>` to select another file. A publisher run, or a
-publisher-enabled `device run`, requires that the selected/default file exists
-and contains a complete `[publisher]` table. Subscriber-only commands remain
-independent of publisher policy. An empty bootstrap array selects HyperDHT
-defaults.
+The schema requires `peers`, `services`, and `bindings` arrays, including when
+they are empty. A peer label and public key are unique. `connection` is either
+`dial` or `accept`; there is no automatic election. A `dial` peer maintains a
+connection and an `accept` peer waits for it. The authenticated public key,
+not the label or a message claim, identifies the remote peer.
 
-When `[publisher]` exists, `display_name`, `subscribers`, and `services` form the
-complete runtime policy. `enabled` controls desktop auto-start only. Identities
-and the subscriber's pinned publisher contact always stay in the state
-directory.
+Each service has a lowercase ID, display name, `tcp`, `http`, or `udp` kind,
+one source, and an immediate-peer `allow` list. A missing or empty `allow` list
+denies the service. A source is exactly one of:
 
-Every published service has exactly one explicit `source`. Use
-`source = { local_port = <port> }` for a loopback service, or
-`source = { publisher_key = "<upstream-public-key>", service_id = "<id>" }`
-for a named service on an upstream publisher. The upstream must allow this
-publisher's public key in its subscriber policy; the republishing publisher's
-own `subscribers` and per-service `allow` values independently control its
-downstream devices. The republishing publisher handles plaintext traffic at
-each hop, and operators keep source relationships acyclic. A source remains
-configured when its upstream is unreachable, but is reported unavailable until
-the upstream connection and named service recover.
+- `source = { local_port = 1234 }`, a fixed loopback TCP/UDP source;
+- `source = { unix_socket = "/absolute/path.sock" }`, a byte-stream source;
+- `source = { peer = "label-or-key", service = "upstream-id" }`, an explicit
+  upstream service selected from one configured peer.
 
-For example, a publisher can expose an upstream HTTP and UDP service under its
-own names while retaining a local SSH service:
+Service ports are fixed positive ports. Unix paths are absolute and bounded by
+the host socket limit. A Unix source cannot provide a UDP service. A binding
+owns a local loopback TCP port, local loopback UDP port, or Unix socket;
+`local_port = 0` asks the OS for an ephemeral port. Omit `kind` for the
+byte-stream/TCP default and use `kind = "udp"` for a forward UDP binding.
+Remote peers cannot choose a local path, port, or target. Reverse UDP is not a
+byte-stream capability.
 
-```toml
-[[publisher.services]]
-id = "remote-navidrome"
-name = "Remote Navidrome"
-kind = "http"
-source = { publisher_key = "<upstream-public-key>", service_id = "navidrome" }
+An upstream service is not imported merely because a binding names it. To
+republish it, create a new `[[services]]` entry with a peer/service source,
+new `id`/`name`, and a downstream `allow` list. Each hop checks its immediate
+peer independently. Keep source relationships acyclic; there is no graph
+discovery, fallback peer, or end-user identity delegation.
 
-[[publisher.services]]
-id = "remote-stardew"
-name = "Remote Stardew"
-kind = "udp"
-source = { publisher_key = "<upstream-public-key>", service_id = "stardew" }
-```
+`network.bootstrap` is an optional list of `host:port` DHT endpoints and
+`network.route` is `auto` or `public`. `gateway` defaults to loopback and port
+17480. `gateway.domain` adds an explicit suffix without removing the existing
+`.localhost` convention.
 
-Create the publisher identity independently with its state path; setup reads
-only `--state`. The TOML supplies the publisher policy when the runtime starts:
+The parser rejects unknown fields, old `[publisher]`/`[subscriber]` tables,
+camelCase TOML spellings, incomplete source variants, unknown peer references,
+duplicate IDs, duplicate labels/keys, and invalid endpoints. Serialization
+round-trips through the same strict parser. Config saves are atomic and use
+owner-only file permissions.
+
+## Trust and pairing
+
+For a known public key, add an explicit relationship with:
 
 ```sh
-npm run kepos -- setup publisher \
-  --state ~/.local/state/kepos-neo/publisher
+npm run kepos -- peer pair \
+  --config ~/.config/kepos/config.toml \
+  --label mac \
+  --public-key '<mac-peer-public-key>' \
+  --connection accept
 ```
 
-The headless publisher polls its selected TOML policy every second while it
-runs. Valid changes apply without restarting the process, publisher identity, or
-DHT listener. Removing a subscriber device from the policy disconnects only
-that subscriber and denies reconnects; service-list, source, transport-kind,
-and service ACL changes affect the next Home-registry request and newly opened
-service channels, while affected existing service tunnels and UDP flows close
-so they cannot continue using an obsolete source or authorization decision.
-Invalid or incomplete
-TOML keeps the last valid policy and reports a reload failure. Desktop's **Add
-device** approval is different: it updates both TOML and the running desktop
-publisher.
+`peer pair` edits only the canonical `peers` list. It does not add the key to
+any service's `allow` list. Add or remove service grants separately and then
+let the running peer reload the file. `peer trust` is the same command name
+for operators who prefer trust terminology.
 
-Publisher subscriber-device policy and service-specific allowlists fail closed:
+The desktop peer surface can create a short-lived pairing invitation for an
+unknown candidate. Approval adds that candidate as an `accept` peer and
+authorizes the authenticated connection, but it does not broaden any service
+allowlist. Denial or expiry closes the candidate. Pairing is disabled by
+configuration only when the host explicitly disables the desktop pairing
+surface.
 
-- an empty publisher `subscribers` list denies all devices;
-- an omitted service allowlist inherits the publisher subscriber-device policy;
-- an explicit empty service allowlist denies that service to everyone;
-- restricted services are omitted from registries returned to unauthorized
-  subscribers.
+On a fresh Android install, select `Connect with key` and enter the other
+peer's public key, or select `Scan invitation` for the QR invitation created by
+the desktop/CLI pairing surface. Android also consumes a `kepos://pair?...`
+deep link. The foreground Worklet writes the selected peer into its app-private
+canonical `config.toml` and keeps the seed in app-private `peer.json`; the
+host IPC uses `configure` for key entry and `pair` for an invitation. Admission
+still does not add service grants, so the provider must list the Android public
+key in each intended service's `allow` list. Android renders the canonical
+service action metadata and opens supported HTTP actions or copies supported
+endpoints; it does not expose a general config editor or reverse-service UI.
 
-There are no publisher state-policy mutation commands. Edit the TOML
-`display_name`, `subscribers`, `services`, and `allow` values instead. A
-publisher state directory contains identity only; the separate service
-manifest and state policy snapshot are not read or migrated.
+## Identity and deliberate cutover
 
-Published service payloads can optionally be capped in the
-publisher-to-subscriber direction:
+Canonical state is a directory containing exactly:
 
-```toml
-[[publisher.services]]
-id = "forgejo"
-name = "Forgejo"
-kind = "http"
-source = { local_port = 3000 }
-max_publisher_to_subscriber_bps = 2000000
+```text
+peer.json                 { "seed": "<private 32-byte seed>" }
 ```
 
-`max_publisher_to_subscriber_bps` is a positive decimal bytes-per-second rate.
-It is aggregate per service and publisher, shared by every channel and
-subscriber using that service; it does not limit subscriber-to-publisher
-traffic or any other service. Omit the field to keep the service unlimited.
-The Forgejo example caps publisher-to-subscriber payload at 2 MB/s
-(2,000,000 bytes per second). Policy reloads apply a changed limit to newly
-opened channels; existing channels keep the limit they had when they opened.
+The directory mode is `0700` and the file mode is `0600` on Unix-like hosts.
+Runtime startup reads only this file, validates the derived HyperDHT public
+key, and takes one sibling kernel lock. It never probes or migrates legacy
+publisher/subscriber state and never starts two role runtimes for one device.
 
-## UDP services
+The intended cutover preserves NUC's current publisher public key and Mac's
+active subscriber public key as their selected peer keys. If a device has both
+old identities, choose one deliberately and rewrite every relevant peer pin
+and immediate service grant; the two keys are not aliases.
 
-Publish a UDP service with `kind = "udp"` and either a fixed local source or an
-explicit upstream source. The publisher never accepts a subscriber-selected
-host or port:
-
-```toml
-[[publisher.services]]
-id = "stardew"
-name = "Stardew direct IP"
-kind = "udp"
-source = { local_port = 24642 }
-allow = ["<subscriber-public-key>"]
-```
-
-The subscriber maps that named service to a loopback UDP listener:
-
-```toml
-[[subscriber.services]]
-id = "stardew"
-kind = "udp"
-local_port = 24642
-```
-
-The desktop service card copies `127.0.0.1:24642` for the subscriber-side
-listener; it does not open a browser URL. A zero `local_port` selects an
-available loopback port, which the desktop shows and copies after the listener
-binds. The CLI spelling is
-`--service stardew:udp:24642` (the existing two-part `id:local-port` spelling
-continues to mean TCP).
-
-UDP service traffic is carried as encrypted unordered messages on the same
-authenticated SecretStream/UDX connection as the control and TCP services. It
-does not create a Protomux data channel or a second DHT connection. Each local
-UDP source endpoint gets a bounded flow and an isolated publisher-side
-connected `udp4` socket; replies are accepted only from the configured
-loopback target. Publisher service allowlists, subscriber-device policy,
-reconnect cleanup, idle expiry, flow limits, send limits, and the configured
-publisher-to-subscriber rate policy all apply.
-
-The current implementation cap is 1,200 application payload bytes per datagram.
-An individual encrypted carrier envelope is limited to 1,000 payload bytes;
-application datagrams from 1,001 through 1,200 bytes use at most two bounded
-fragments and are reassembled without retransmission. This is a conservative
-policy derived from the installed UDX baseline and worst-case IPv6/network
-overhead; UDX can negotiate different route MTUs, but the effective path still
-varies. Broadcast, multicast, arbitrary destinations, IPv6 local listeners,
-and seamless game-session preservation across reconnect are outside this
-contract. A denied, unavailable, malformed, oversized, incomplete, or
-over-budget datagram is dropped with a bounded diagnostic; it is never silently
-converted to a reliable byte stream.
-
-The first intended application is Stardew Valley direct-IP on UDP port 24642.
-Real Stardew join/play acceptance is explicitly deferred for this round; the
-native transport probe does not establish game compatibility. The cap and
-fixed-target model alone are not a game acceptance claim; see [the game
-scenario record](game-multiplayer-scenarios.md) and the evidence note in
-`docs/evidence/native-udp-implementation-2026-09-09.md`.
-
-## Publisher metrics and dashboard
-
-Publisher-capable commands expose metrics only when explicitly requested:
+The offline helper accepts either a selected old state directory or its exact
+identity file:
 
 ```sh
-npm run kepos -- publisher run \
-  --state ~/.local/state/kepos-neo/publisher \
-  --metrics-listen 127.0.0.1:9464
-
-npm run kepos -- device run \
-  --publisher-state ~/.local/state/kepos-neo/publisher \
-  --metrics-listen 127.0.0.1:9464
+npm run kepos -- peer convert \
+  --source /backup/old-publisher \
+  --destination /var/lib/kepos/peer \
+  --expected-public-key '<retained-public-key>'
 ```
 
-Scrape `GET http://127.0.0.1:9464/metrics`. No endpoint is started when the
-option is omitted; other paths and methods return no metric exposition. The
-listener is part of publisher shutdown and binds only where the deployment's
-network policy permits.
+It recognizes one `publisher.json` seed or one validated
+`client.identity.json` keypair, refuses a linked/ambiguous source, refuses an
+existing destination or a destination inside the source, requires and
+verifies the expected public key, and writes only private owner-only state.
+It prints the resulting public key, never the seed or secret key. It is not a
+startup migration.
 
-The seven stable metric names are:
+Recommended operator order:
 
-- `kepos_publisher_subscriber_connected` — `1` while a configured subscriber
-  device has the current connection, otherwise `0`.
-- `kepos_publisher_subscriber_last_connected_timestamp_seconds` — the most
-  recent successful activation time, or `0` before the first connection.
-- `kepos_publisher_subscriber_connection_bytes` — current-connection payload
-  bytes, reset on replacement or close.
-- `kepos_publisher_subscriber_bytes_total` — monotonic process-lifetime
-  subscriber payload counters.
-- `kepos_publisher_service_authorized` — the configured device/service ACL
-  cross-product, including explicit zeroes.
-- `kepos_publisher_service_active_channels` — live channels per device and
-  published service, including idle zeroes.
-- `kepos_publisher_service_bytes_total` — monotonic service payload counters.
+1. Stop and verify the old daemon is no longer using the selected identity.
+2. Make a private backup outside both active state directories. Keep it until
+   rollback is no longer needed.
+3. Run `peer convert` with explicit paths and `--expected-public-key`; compare
+   its public output with the deployment record.
+4. Rewrite canonical `peers`, service `allow`, and upstream references using
+   public keys or local labels. Do not copy an old subscriber contact into
+   canonical state or broaden an ACL to compensate for a renamed peer.
+5. Run `peer status`, inspect the counts, and start only `peer run` with the
+   canonical state/config.
+6. Verify an isolated service request and connection status before enabling
+   host supervision.
 
-Labels are deliberately bounded to `subscriber_label`, the first 16 lowercase
-hex characters of the public key as `subscriber_id`, `service`, and (where
-applicable) `direction`. Direction values are `publisher_to_subscriber` and
-`subscriber_to_publisher`. Full keys, addresses, outer IDs, and channel IDs
-never appear in the metric labels. Service counters count payload bytes at the
-mux data path; subscriber counters aggregate those same service flows.
+Rollback is also deliberate: stop the canonical runtime, move its state aside,
+restore the separately held backup, restore the previous config, and start the
+old runtime. No active process should be killed by a cleanup script, and no
+lock file should be manually deleted while a runtime may be alive.
 
-The dashboard is dependency-free Jsonnet owned by Kepos in
-`grafana/kepos-publisher-observability.jsonnet` and
-`grafana/traffic-console.libsonnet`. Build the owned artifact with
-`nix build .#grafana-dashboard`; it installs
-`share/kepos/grafana/kepos-publisher-observability.json`. The dashboard uses a
-selectable Prometheus datasource, shows connected devices and every authorized
-service before rolling `rate` charts, and keeps offline devices in a muted final
-table.
+## Run and reload
 
-## HTTP service device authentication
+```sh
+npm run kepos -- peer run \
+  --state ~/.local/state/kepos-neo/peer \
+  --config ~/.config/kepos/config.toml \
+  --observations ndjson \
+  --metrics-listen 127.0.0.1:17481
+```
 
-Use `kind = "http"` (or the final `:http` service-declaration segment) only
-for a plaintext HTTP/1.1 target. It is a publisher-side authentication adapter,
-not a generic TLS terminator or protocol tunnel.
+`--observations` is `human` by default or `ndjson`. The runtime acquires the
+peer lock before starting DHT, gateway, or bindings. It reloads a valid
+canonical config every second. Invalid changes leave the last valid config in
+place and report an error. Valid peer direction changes close the old
+connection; service, source, grant, and binding changes close affected active
+channels and UDP flows. Existing bytes are never replayed after reconnect.
 
-For every HTTP request, including the opening request of a `ws://` WebSocket
-Upgrade, Kepos removes all caller-supplied `Authorization` fields and forwards
-exactly one target-facing field:
+The command keeps bindings configured while a peer is offline and reports
+them unavailable. A later connection can serve new requests after capability
+and grant checks. A local Unix binding is removed only when its socket is
+still the socket created by this runtime; an occupied or replaced foreign path
+is preserved. Unix endpoints fail clearly on Windows.
+
+`[metrics]` enables the existing Prometheus series on a separate
+read-only `/metrics` listener. `--metrics-listen host:port` overrides the
+configured listener for that process; port `0` selects an ephemeral port and
+the effective URL appears in runtime status. The collector retains the
+established `kepos_publisher_*` names and immediate-peer labels used by the
+shipped Grafana artifact.
+
+`peer status` is a stopped inspection of identity and configuration:
+
+```sh
+npm run kepos -- peer status \
+  --state ~/.local/state/kepos-neo/peer \
+  --config ~/.config/kepos/config.toml
+```
+
+The running desktop and diagnostics surfaces additionally show connection
+direction, generation, capability (`ready` or `unsupported`), service
+availability, bindings, gateway, and pairing phase. Observations are
+diagnostic, not a stable external API, and must not contain state files,
+seeds, pairing tokens, full addresses, or secret material.
+
+## Gateway and service operations
+
+The HTTP gateway defaults to:
+
+```text
+http://<service-id>.localhost:17480/
+```
+
+`home.localhost` serves the authenticated machine-readable registry. The
+gateway keeps service names unqualified. If more than one visible peer offers
+the same TCP/HTTP service ID, the request fails with an ambiguity error until
+one explicit `bindings` selection identifies the peer. Kepos never picks by
+connection timing or reconnect order and does not invent peer-qualified URLs.
+
+Raw TCP services use a binding:
+
+```toml
+[[bindings]]
+peer = "nuc"
+service = "ssh"
+listen = { local_port = 2222 }
+```
+
+Forward UDP services use an explicit UDP binding. This opens a local loopback
+datagram listener and maps each local flow to the authenticated remote service:
+
+```toml
+[[bindings]]
+peer = "nuc"
+service = "game"
+kind = "udp"
+listen = { local_port = 0 }
+```
+
+The selected local port is included in status. The target peer must be
+configured with `connection = "dial"`; an accept-side UDP binding is retained
+in configuration but reported unavailable, since reverse UDP is not provided.
+Flow limits, datagram/fragment limits, authorization, revocation, source
+outage, and reconnect are handled by the same canonical runtime; bytes or
+replies from an old generation are not replayed. Reverse UDP remains explicitly
+unsupported.
+
+HTTP services use the existing HTTP/1.1 adapter only when `kind = "http"`.
+Every request has caller-supplied `Authorization` fields removed and exactly
+one immediate authenticated-peer header inserted:
 
 ```http
-Authorization: Kepos <subscriber-public-key>
+Authorization: Kepos <immediate-peer-public-key>
 ```
 
-`<subscriber-public-key>` is the authenticated subscriber's canonical
-lowercase 64-hex-character public key. It identifies a device, not a person or
-a secret bearer token. A target can authorize it with small HTTP middleware or
-an Upgrade-handler check. Caller-supplied Bearer, Basic, and other
-`Authorization` values are intentionally not forwarded. Normal target
-responses, including `401` with `WWW-Authenticate: Kepos` and `403`, pass
-through unchanged.
+Ordinary request bodies, sequential keep-alive, and valid `ws://` WebSocket
+upgrades are supported. HTTPS, `wss://`, HTTP/2, h2c, HTTP/3, CONNECT, and
+non-WebSocket upgrades are not. A raw `tcp` stream receives no added header.
 
-The adapter supports ordinary HTTP/1.1 requests (including bodies, chunked
-requests, and sequential keep-alive requests) and `ws://`. A target's valid
-`101 Switching Protocols` response switches the connection to opaque WebSocket
-bytes; a rejected upgrade remains an ordinary HTTP response. HTTPS/TLS,
-`wss://`, HTTP/2 and h2c, HTTP/3, CONNECT, and non-WebSocket upgrades are not
-supported. Malformed or ambiguous framing, and request or inspected Upgrade
-response heads larger than 16 KiB, fail closed instead of becoming an opaque
-identity-bearing stream.
+UDP services retain the existing fixed-target operation: IPv4 loopback only,
+1,200-byte application datagrams, bounded 1,000-byte carrier fragments,
+per-flow budgets, and no broadcast/multicast/arbitrary destination. Forward
+UDP republication is supported when the upstream source is a UDP service. A
+UDP service cannot be opened through the reverse byte-stream binding; it
+returns an explicit unsupported result.
 
-The header is trustworthy only at its intended private publisher ingress:
-anything that can connect to the target without passing through Kepos can forge
-`Authorization: Kepos ...`. Keep the target private and rely on the header only
-when its traffic must pass through the publisher adapter. The subscriber gateway
-binds to loopback by default. Binding it to a non-loopback address such as
-`0.0.0.0` delegates that subscriber device's Kepos capability to every reachable
-LAN client; the client-to-gateway HTTP leg is plaintext unless the deployment
-protects it separately.
+## Compatibility boundary
 
-## Run both roles as one device
+An upgraded accept side negotiates the `kepos/peer-services/1` capability
+before using reverse byte-stream opens. A legacy client that does not declare
+it is still allowed to use the established Home, pairing, HTTP, TCP, and UDP
+wire operations. Its request for reverse service access is rejected as
+unsupported; Kepos does not silently open a second outbound connection.
 
-A dual-role host can keep the two state directories and identities while
-sharing one device-owned HyperDHT node and UDP transport:
+The compatibility promise is deliberately one-way: old client → new server
+is supported for the established operations. New client → old server has no
+promise and no fallback path.
 
-```sh
-npm run kepos -- device run \
-  --publisher-state ~/.local/state/kepos-neo/publisher \
-  --subscriber-state ~/.local/state/kepos-neo/subscriber \
-  --subscriber-service ssh:2222
-```
+## Network and firewall boundary
 
-The state flags select the roles explicitly. The TOML `enabled` fields control
-Desktop auto-start and do not silently add a role to `device run`. The command
-reads publisher policy and subscriber gateway, route, and service defaults from
-the shared TOML. Repeated `--subscriber-service id:local-port` options replace
-configured subscriber bindings for that invocation.
-
-`--bootstrap host:port` is device-wide for this command and replaces
-`[network].bootstrap` once for both roles. Startup is atomic: if either selected
-role cannot start, Kepos stops any role that did start, destroys the shared
-node, releases both state locks, and exits for the host supervisor to retry.
-The publisher lock is acquired before the subscriber lock; shutdown releases
-them in the opposite order.
-
-`publisher run` and `subscriber run` still create and own independent DHT nodes.
-Use them for single-role hosts, separate supervisors, transport isolation, or
-rollback. Sharing a device node never merges role keys, subscriber-device
-policies, publisher pins, or state.
-
-## Local services
-
-Run the subscriber with a raw SSH listener:
-
-```sh
-npm run kepos -- subscriber run \
-  --state ~/.local/state/kepos-neo/subscriber \
-  --service ssh:2222
-
-ssh -p 2222 user@127.0.0.1
-```
-
-The HTTP gateway listens on `127.0.0.1:17480` by default. Published HTTP
-services share that listener:
-
-```text
-http://navidrome.localhost:17480/
-```
-
-Kepos reserves `home` for machine-readable discovery:
-
-```text
-http://home.localhost:17480/.well-known/kepos/services.json
-```
-
-The gateway bounds only the complete request header section, including its
-terminating `CRLF` pair, to 16 KiB. Request body bytes are forwarded unchanged
-and are not included in that header bound.
-
-The root Home path does not serve a human page. `ssh` remains a raw TCP service
-with an explicit subscriber-side local port.
-
-## Runtime behavior
-
-The gateway and raw listeners remain bound while the publisher is unavailable.
-Reconnection happens in the background. Existing TCP streams still break and
-must be retried by their clients.
-
-Peers negotiate a `kepos/control/1` heartbeat on the existing connection. A
-silent path is replaced after about 35 seconds: 15 seconds before a probe, a
-10-second deadline, then one retry with another 10-second deadline. A new
-control-ready connection replaces the previous connection for the same
-subscriber public key.
-
-The CLI locks a subscriber state directory while it owns that identity. The
-publisher and `device run` commands take the matching publisher lock too.
-Different installations must use different identities. Each role lock is the
-stable sibling path beside its state directory, and the desktop singleton uses
-its existing machine-local path.
-
-Kepos owns these scopes with an advisory kernel file lock held by an open
-descriptor. The lock file remains on disk across normal shutdown and a crash;
-its contents do not identify the owner. A live runtime still excludes a second
-CLI, desktop process, or same-process acquisition, while the kernel releases
-ownership after process death so a replacement can restart with the unchanged
-identity directory. Do not manually delete or replace a lock file while a
-runtime may be active. This is local-filesystem coordination, not a
-distributed lease or authentication mechanism.
-
-## Route and observations
-
-Route mode `auto` permits HyperDHT's LAN-local shortcut. `--route public`
-disables only that shortcut for comparisons; it does not force a relay or
-promise a fixed Internet path.
-
-Explicit `--bootstrap host:port` options replace the configured bootstrap list
-for one invocation. Bootstrap nodes help the peer enter the DHT; they do not
-relay the established stream, authorize a peer, or change the pinned publisher
-key.
-
-Use `--observations ndjson` for structured events. Status remains on stderr so
-stdout stays valid NDJSON. `outerId` correlates one connection with its service
-channels. Transport snapshots include RTT, congestion window, retransmit,
-recovery, and byte counters. Hole-punch observations contain firewall classes
-and candidate counts, never candidate IP addresses.
-
-When both roles share a device node, HyperDHT counters describe that node as a
-whole. They cannot be assigned exactly to publisher or subscriber traffic even
-when an observation was emitted by one role. Role-specific events are recorded
-above the DHT layer.
-
-Operators should admit HyperDHT's UDP candidate listener range, normally
-`49737-49741`, rather than only the preferred first port. A shared node normally
-selects one listener from that range, but `dht-rpc` also uses an ephemeral DHT
-client socket and HyperDHT manages ephemeral UDX connection sockets. The
-candidate listener range does not cover those UDX connection sockets and does
-not guarantee the encrypted data path by itself.
-
-These diagnostics are sanitized but their shape is not a stable API. Never
-copy state files into logs.
-
-HyperDHT crawling, regional bootstrap measurements, and candidate validation
-live in
-[`LamplitIsles/hyperdht-observatory`](https://github.com/LamplitIsles/hyperdht-observatory).
-Kepos never fetches or trusts Observatory output at runtime. Operators choose
-and configure endpoints themselves.
-
-The bounded transport endpoint is available for diagnostics:
-
-```text
-GET /.well-known/kepos/benchmark?bytes=16777216
-```
-
-`bytes` must be between 1 and 67108864. The response is streamed and not
-cached.
+Operators should admit the HyperDHT candidate listener range, normally
+`49737-49741`, rather than only the first preferred port. The shared runtime
+also uses an ephemeral DHT client socket and HyperDHT manages ephemeral UDX
+connection sockets. The candidate listener range does not cover UDX connection sockets;
+it does not guarantee the encrypted data path by itself.

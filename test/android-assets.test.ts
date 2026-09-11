@@ -250,14 +250,12 @@ test("Android build embeds only bootstrap endpoints from the local Kepos config"
     await writeFile(
       path.join(configDirectory, "config.toml"),
       [
+        "peers = []",
+        "services = []",
+        "bindings = []",
+        "",
         "[network]",
         'bootstrap = ["bootstrap-one.example:49737", "bootstrap-two.example:49738"]',
-        "",
-        "[subscriber]",
-        "gateway_port = 17480",
-        "",
-        "[publisher]",
-        'display_name = "incomplete and irrelevant to Android"',
         "",
       ].join("\n"),
     );
@@ -315,7 +313,7 @@ test("required shared bootstrap generation rejects missing and empty assets", as
     await mkdir(configDirectory, { recursive: true });
     await writeFile(
       path.join(configDirectory, "config.toml"),
-      "[network]\nbootstrap = []\n",
+      "peers = []\nservices = []\nbindings = []\n\n[network]\nbootstrap = []\n",
     );
     await assert.rejects(
       builder.writeKeposBootstrapAsset({

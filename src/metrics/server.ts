@@ -20,7 +20,7 @@ export interface StartMetricsServerOptions {
 const metricsPath = "/metrics";
 const contentType = "text/plain; version=0.0.4; charset=utf-8";
 
-/** Start the intentionally small, read-only Prometheus scrape endpoint. */
+/** A read-only, intentionally small Prometheus endpoint for the peer runtime. */
 export async function startMetricsServer(
   options: StartMetricsServerOptions,
 ): Promise<RunningMetricsServer> {
@@ -42,9 +42,7 @@ export async function startMetricsServer(
       });
       response.end(body);
     } catch (error) {
-      response.writeHead(500, {
-        "content-type": "text/plain; charset=utf-8",
-      });
+      response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       response.end(`Metrics rendering failed: ${errorMessage(error)}\n`);
     }
   });
@@ -55,10 +53,9 @@ export async function startMetricsServer(
     await closeServer(server).catch(() => undefined);
     throw error;
   }
-
   const address = server.address();
   if (!address || typeof address === "string") {
-    await closeServer(server);
+    await closeServer(server).catch(() => undefined);
     throw new Error("Metrics server address is unavailable");
   }
   let closed = false;
@@ -92,6 +89,10 @@ function listen(server: Server, address: MetricsListenAddress): Promise<void> {
 
 function closeServer(server: Server): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
     server.close((error) => (error ? reject(error) : resolve()));
   });
 }

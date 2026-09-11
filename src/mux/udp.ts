@@ -592,8 +592,16 @@ export interface UdpPublisherForwarderOptions {
     direction: "subscriber-to-publisher" | "publisher-to-subscriber",
     bytes: number,
   ) => void;
+  /** Canonical peer observability hooks; legacy callers continue using onBytes. */
+  onServiceBytes?: (
+    serviceId: string,
+    direction: "subscriber-to-publisher" | "publisher-to-subscriber",
+    bytes: number,
+  ) => void;
   onError?: (error: string) => void;
   onDrop?: (reason: string, fields?: Record<string, unknown>) => void;
+  /** Ignore datagrams owned by the local canonical peer-side consumer. */
+  ignoreIncoming?: (envelope: UdpEnvelope) => boolean;
 }
 
 export interface UdpPublisherRemote {
@@ -611,6 +619,7 @@ export interface RunningUdpPublisherForwarder {
   close: () => void;
   closeFlows: (serviceId?: string) => void;
   available: () => boolean;
+  transport: SubscriberDatagramConnection;
   receiveReply: (
     serviceId: string,
     flowId: Uint8Array,
@@ -693,6 +702,7 @@ export function createUdpPublisherForwarder(
     },
     closeFlows,
     available: carrier.available,
+    transport: carrier,
     receiveReply,
   };
 
@@ -705,6 +715,7 @@ export function createUdpPublisherForwarder(
       drop("malformed-envelope", { error: errorMessage(error) });
       return;
     }
+    if (options.ignoreIncoming?.(envelope)) return;
     if (envelope.type === "error" || envelope.type === "close") {
       const flow = flows.get(flowKey(envelope.serviceId, envelope.flowId));
       if (flow) removeFlow(flow);
@@ -791,6 +802,11 @@ export function createUdpPublisherForwarder(
       }
     }
     options.onBytes?.("subscriber-to-publisher", payload.byteLength);
+    options.onServiceBytes?.(
+      flow.serviceId,
+      "subscriber-to-publisher",
+      payload.byteLength,
+    );
     if (flow.remote) {
       sendToRemote(flow, payload);
       return;
@@ -994,6 +1010,11 @@ export function createUdpPublisherForwarder(
         }
       }
       options.onBytes?.("publisher-to-subscriber", payload.byteLength);
+      options.onServiceBytes?.(
+        flow.serviceId,
+        "publisher-to-subscriber",
+        payload.byteLength,
+      );
     } catch (error) {
       reportError(`UDP reply failed: ${errorMessage(error)}`);
     } finally {

@@ -1,10 +1,11 @@
 # ADR 0006: Desktop dual-role runtime ownership
 
-Status: Accepted
+Status: Accepted (historical role model; canonical runtime superseded by ADR 0013)
 
 Date: 2026-07-25
 
-Superseded in part by ADR 0008 and ADR 0010. The original decision that
+Superseded in part by ADR 0008 and ADR 0010, and for the canonical peer
+runtime by ADR 0013. The original decision that
 Desktop roles do not share a DHT instance is replaced by device-owned shared
 HyperDHT transport. Its state-owned publisher-policy consequences are replaced
 by identity-only publisher state and TOML-only policy ownership.

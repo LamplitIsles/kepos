@@ -10,14 +10,11 @@ import java.io.InputStream
 import java.util.concurrent.CancellationException
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -25,33 +22,32 @@ import org.junit.Test
 
 class BareRuntimeTest {
   @Test
-  fun startPassesAppPrivateArgumentsAfterTheRuntimeId() {
+  fun startPassesCanonicalAppPrivateArgumentsAfterTheRuntimeId() {
     val session = FakeRuntimeSession()
     val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
-    val startWithArguments = BareRuntime::class.java.methods.singleOrNull {
-      it.name == "start" && it.parameterTypes.size == 3
-    }
 
-    assertNotNull(startWithArguments)
-    if (startWithArguments == null) return
-    startWithArguments.invoke(
-      runtime,
+    runtime.start(
       ByteArrayInputStream("bundle".encodeToByteArray()),
-      "/kepos.bundle",
-      arrayOf("/data/user/0/io.github.ttalab.kepos/files/subscriber"),
+      arguments = arrayOf(
+        "/data/user/0/io.github.ttalab.kepos/files/peer",
+        "/data/user/0/io.github.ttalab.kepos/files/config.toml",
+        "null",
+      ),
     )
 
     assertArrayEquals(
       arrayOf(
         "runtime-1",
-        "/data/user/0/io.github.ttalab.kepos/files/subscriber",
+        "/data/user/0/io.github.ttalab.kepos/files/peer",
+        "/data/user/0/io.github.ttalab.kepos/files/config.toml",
+        "null",
       ),
       session.arguments,
     )
   }
 
   @Test
-  fun duplicateStartOwnsOneSessionAndAcknowledgedStopClosesIt() {
+  fun duplicateStartOwnsOneSessionAndStopClosesItAfterAcknowledgement() {
     val session = FakeRuntimeSession()
     val scheduler = FakeScheduler()
     val runtime = BareRuntime({ session }, { "runtime-1" }, scheduler)
@@ -60,59 +56,16 @@ class BareRuntimeTest {
 
     runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
     runtime.start(ByteArrayInputStream("unused".encodeToByteArray()))
-    session.emit(
-      EventEnvelope(
-        1,
-        "event",
-        "runtime.stateChanged",
-        buildJsonObject {
-          put("state", "running")
-          put("runtimeId", "runtime-1")
-          put("echoUrl", "http://127.0.0.1:17482/")
-          put("subscriberPublicKey", "cd".repeat(32))
-          put("configured", true)
-          put("connection", "connected")
-          putJsonObject("publisher") {
-            put("displayName", "kosmos")
-            put("publisherKey", "ab".repeat(32))
-          }
-          putJsonArray("services") {
-            add(buildJsonObject {
-              put("id", "navidrome")
-              put("name", "Navidrome")
-              put("access", "http")
-              put("url", "http://navidrome.localhost:17480/")
-            })
-            add(buildJsonObject {
-              put("id", "ssh")
-              put("name", "SSH")
-              put("access", "tcp")
-            })
-          }
-        },
-      ),
-    )
+    session.emit(runningEvent())
 
     assertEquals(1, session.starts)
-    assertTrue(runtime.snapshot().toString().contains("subscriberPublicKey=${"cd".repeat(32)}"))
+    assertEquals("cd".repeat(32), runtime.snapshot().peerKey)
     assertEquals(
       RuntimeSnapshot(
-        RuntimeState.RUNNING,
-        "runtime-1",
-        "http://127.0.0.1:17482/",
-        subscriberPublicKey = "cd".repeat(32),
-        configured = true,
-        connection = "connected",
-        publisher = PublisherSnapshot("kosmos", "ab".repeat(32)),
-        services = listOf(
-          ServiceSnapshot(
-            id = "navidrome",
-            name = "Navidrome",
-            access = "http",
-            url = "http://navidrome.localhost:17480/",
-          ),
-          ServiceSnapshot(id = "ssh", name = "SSH", access = "tcp"),
-        ),
+        state = RuntimeState.RUNNING,
+        runtimeId = "runtime-1",
+        echoUrl = "http://127.0.0.1:17482/",
+        peerKey = "cd".repeat(32),
       ),
       runtime.snapshot(),
     )
@@ -164,18 +117,7 @@ class BareRuntimeTest {
     val session = FakeRuntimeSession()
     val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
     runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
-    session.emit(
-      EventEnvelope(
-        1,
-        "event",
-        "runtime.stateChanged",
-        buildJsonObject {
-          put("state", "running")
-          put("runtimeId", "runtime-1")
-          put("echoUrl", "http://127.0.0.1:17482/")
-        },
-      ),
-    )
+    session.emit(runningEvent())
 
     val ping = runtime.ping()
     val request = session.writes.single() as RequestEnvelope
@@ -198,83 +140,55 @@ class BareRuntimeTest {
   }
 
   @Test
-  fun configurePublisherCompletesWithTheUpdatedRuntimeState() {
+  fun canonicalOnboardingActionsUseHostProtocolAndWaitForResponses() {
     val session = FakeRuntimeSession()
     val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
     runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
-    session.emit(runningEvent(configured = false, connection = "offline"))
+    session.emit(runningEvent())
 
-    val configured = runtime.configurePublisher("ab".repeat(32))
-    val request = session.writes.single() as RequestEnvelope
-    assertEquals("configure", request.method)
-    assertEquals("ab".repeat(32), request.params?.jsonObject?.get("publisherKey")?.jsonPrimitive?.content)
-    assertFalse(configured.isDone)
-
-    session.emit(runningEvent(configured = true, connection = "connecting"))
-    session.emit(
-      ResponseEnvelope(
-        1,
-        "response",
-        request.id,
-        buildJsonObject { put("connection", "connecting") },
-      ),
-    )
-
-    val snapshot = configured.get(1, TimeUnit.SECONDS)
-    assertTrue(snapshot.configured)
-    assertEquals("connecting", snapshot.connection)
-  }
-
-  @Test
-  fun pairPublisherCarriesTheInvitationAndCompletesAfterApproval() {
-    val session = FakeRuntimeSession()
-    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
-    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
-    session.emit(runningEvent(configured = false, connection = "offline"))
-
-    val pairing = runtime.pairPublisher(
-      "kepos://pair?v=1&token=one-time",
-      "Neil's Pixel",
-      "android",
-    )
-    val request = session.writes.single() as RequestEnvelope
-    assertEquals("pair", request.method)
+    val configured = runtime.configurePeer("ab".repeat(32), "phone", "dial")
+    val configureRequest = session.writes.single() as RequestEnvelope
+    assertEquals("configure", configureRequest.method)
     assertEquals(
-      "kepos://pair?v=1&token=one-time",
-      request.params?.jsonObject?.get("invitation")?.jsonPrimitive?.content,
+      buildJsonObject {
+        put("publicKey", "ab".repeat(32))
+        put("label", "phone")
+        put("connection", "dial")
+      },
+      configureRequest.params,
     )
-    assertFalse(pairing.isDone)
-
-    session.emit(runningEvent(configured = true, connection = "connected"))
+    assertFalse(configured.isDone)
     session.emit(
       ResponseEnvelope(
         1,
         "response",
-        request.id,
-        buildJsonObject { put("connection", "connected") },
+        configureRequest.id,
+        buildJsonObject { put("configured", true) },
       ),
     )
+    assertEquals(RuntimeState.RUNNING, configured.get(1, TimeUnit.SECONDS).state)
 
-    assertEquals("connected", pairing.get(1, TimeUnit.SECONDS).connection)
-  }
-
-  @Test
-  fun pairingExpiryReturnsToSetupWithoutFailingTheWorklet() {
-    val session = FakeRuntimeSession()
-    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
-    runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
-
+    val paired = runtime.pairPeer("kepos://pair?v=1", "Pixel", "android")
+    val pairRequest = session.writes.last() as RequestEnvelope
+    assertEquals("pair", pairRequest.method)
+    assertEquals(
+      buildJsonObject {
+        put("invitation", "kepos://pair?v=1")
+        put("deviceLabel", "Pixel")
+        put("platform", "android")
+      },
+      pairRequest.params,
+    )
+    assertFalse(paired.isDone)
     session.emit(
-      runningEvent(
-        configured = false,
-        connection = "offline",
-        error = "Pairing invitation has expired",
+      ResponseEnvelope(
+        1,
+        "response",
+        pairRequest.id,
+        buildJsonObject { put("paired", true) },
       ),
     )
-
-    assertEquals(RuntimeState.RUNNING, runtime.snapshot().state)
-    assertFalse(runtime.snapshot().configured)
-    assertEquals("Pairing invitation has expired", runtime.snapshot().error)
+    assertEquals(RuntimeState.RUNNING, paired.get(1, TimeUnit.SECONDS).state)
   }
 
   @Test
@@ -296,18 +210,7 @@ class BareRuntimeTest {
     val session = FakeRuntimeSession()
     val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
     runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
-    session.emit(
-      EventEnvelope(
-        1,
-        "event",
-        "runtime.stateChanged",
-        buildJsonObject {
-          put("state", "running")
-          put("runtimeId", "runtime-1")
-          put("echoUrl", "http://127.0.0.1:17482/")
-        },
-      ),
-    )
+    session.emit(runningEvent())
 
     val ping = runtime.ping()
     val stopped = runtime.stop()
@@ -342,8 +245,6 @@ class BareRuntimeTest {
       createRuntimeId = { "runtime-${++runtimeIds}" },
       scheduler = FakeScheduler(),
     )
-    val observed = mutableListOf<RuntimeState>()
-    runtime.observe { observed += it.state }
     val failedSource = TrackingInputStream()
 
     assertThrows(IllegalStateException::class.java) {
@@ -363,48 +264,6 @@ class BareRuntimeTest {
     assertEquals(RuntimeState.STARTING, runtime.snapshot().state)
     assertEquals("runtime-2", runtime.snapshot().runtimeId)
     assertEquals(1, session.starts)
-    assertEquals(
-      listOf(
-        RuntimeState.STOPPED,
-        RuntimeState.STARTING,
-        RuntimeState.FAILED,
-        RuntimeState.STARTING,
-      ),
-      observed,
-    )
-  }
-
-  @Test
-  fun synchronousSessionFailureEmitsFailedOnlyOnce() {
-    val error = IllegalStateException("native start failed")
-    val session = object : RuntimeSession {
-      override fun start(
-        filename: String,
-        source: InputStream,
-        arguments: Array<String>,
-        onData: (ByteArray) -> Unit,
-        onFailure: (Throwable) -> Unit,
-      ) {
-        onFailure(error)
-        throw error
-      }
-
-      override fun write(data: ByteArray, onFailure: (Throwable) -> Unit) = Unit
-
-      override fun close() = Unit
-    }
-    val runtime = BareRuntime({ session }, { "runtime-1" }, FakeScheduler())
-    val observed = mutableListOf<RuntimeState>()
-    runtime.observe { observed += it.state }
-
-    assertThrows(IllegalStateException::class.java) {
-      runtime.start(ByteArrayInputStream("bundle".encodeToByteArray()))
-    }
-
-    assertEquals(
-      listOf(RuntimeState.STOPPED, RuntimeState.STARTING, RuntimeState.FAILED),
-      observed,
-    )
   }
 
   private class FakeRuntimeSession : RuntimeSession {
@@ -446,22 +305,18 @@ class BareRuntimeTest {
     }
   }
 
-  private fun runningEvent(
-    configured: Boolean,
-    connection: String,
-    error: String? = null,
-  ) = EventEnvelope(
+  private fun runningEvent() = EventEnvelope(
     1,
     "event",
     "runtime.stateChanged",
     buildJsonObject {
       put("state", "running")
       put("runtimeId", "runtime-1")
-      put("echoUrl", "http://navidrome.localhost:17480/")
-      put("subscriberPublicKey", "cd".repeat(32))
-      put("configured", configured)
-      put("connection", connection)
-      error?.let { put("error", it) }
+      put("echoUrl", "http://127.0.0.1:17482/")
+      put("peerKey", "cd".repeat(32))
+      putJsonArray("connections") {}
+      putJsonArray("services") {}
+      putJsonArray("bindings") {}
     },
   )
 

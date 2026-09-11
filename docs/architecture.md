@@ -1,267 +1,255 @@
 # Kepos architecture
 
-This document is for contributors and operators who need the implementation
-model. The [Kepos user documentation](https://kepos.guion.io/docs/) is the
-primary guide for installing and using the product.
+This document describes the implemented peer-services model for contributors
+and operators. The [Kepos user documentation](https://kepos.guion.io/docs/)
+remains the installation and end-user guide.
 
 ## System boundary
 
 Kepos is a service-scoped proxy for split TCP byte streams and bounded UDP
-datagrams. It does not create an IP subnet and it does not forward TCP or UDP
-packets end to end.
+datagrams. It is not an IP router, VPN, TUN device, or blind target forwarder.
 
 ```text
-browser / SSH / native client
-          |
-          | local URL, TCP port, or UDP endpoint
-          v
- subscriber gateway or listener
-          |
-          | OPEN / DATA / FIN / RESET, or encrypted unordered datagram
-          v
-      Protomux channel or SecretStream message
-          |
-          v
- Noise-encrypted outer stream
-          |
-          v
-       UDX over UDP
-          |
-          v
-        publisher
-          |
-          | configured local source, or one authenticated upstream connection
-          v
-    local service / upstream publisher
+local client
+  | loopback HTTP, TCP, or UDP endpoint
+  v
+peer gateway or binding
+  | named service open / bounded datagram envelope
+  v
+Protomux + Noise SecretStream
+  | one authenticated outer connection
+  v
+HyperDHT / UDX over UDP
+  v
+authenticated peer
+  | fixed local source or explicit upstream peer/service source
+  v
+service endpoint
 ```
 
-The local TCP connection terminates at the subscriber and a separate local TCP
-connection starts at the immediate publisher or republisher. For UDP, the
-subscriber's loopback datagram endpoint is mapped to a publisher-side
-connected IPv4 socket for a local source, or to a flow on the republisher's
-authenticated upstream carrier. Kepos moves TCP payload bytes, lifecycle
-messages, and backpressure through Protomux; UDP payloads retain datagram
-boundaries and use the encrypted unordered SecretStream message API.
-TCP/UDP headers and TCP acknowledgements do not cross the peer connection.
+TCP terminates locally at both ends. `OPEN`, data, half-close, reset,
+backpressure, and authorization status use a Protomux channel; TCP headers and
+TCP acknowledgements do not cross the outer connection. A raw `tcp` service is
+byte-transparent. An `http` service opts into the existing HTTP/1.1 framing
+adapter and immediate-peer identity header. A `udp` service retains datagram
+boundaries over encrypted unordered messages and maps only to a fixed IPv4
+loopback target.
 
-The default `tcp` kind is byte-transparent. A publisher may instead opt a
-plaintext HTTP/1.1 target into `http`: a framing-aware publisher-side adapter
-replaces every target-facing `Authorization` field with the authenticated
-subscriber device key, and supports a `ws://` Upgrade after a valid target
-`101` response. It does not add TLS, HTTP/2, h2c, HTTP/3, CONNECT, or a generic
-Upgrade tunnel. A `udp` service is named and fixed-target: it accepts only
-IPv4-loopback unicast, has bounded flows and a 1,200-byte application-datagram
-cap, and reassembles at most two 1,000-byte carrier fragments without adding
-retransmission. It does not provide broadcast, multicast, or arbitrary target
-selection. The [CLI HTTP service contract](cli.md#http-service-device-authentication)
-and [UDP service contract](cli.md#udp-services) define those boundaries.
+The Internet carrier is a separate layer. HyperDHT handles discovery,
+authentication setup, and NAT punching. UDX provides the reliable ordered
+outer stream over UDP. Noise SecretStream encrypts and authenticates the
+stream and supplies the unordered message surface used by UDP. A bootstrap
+node helps a peer enter the DHT; it does not authorize a peer or become a
+service endpoint.
 
-The Internet carrier is a different layer: HyperDHT discovers peers and
-coordinates NAT traversal, UDX provides reliable ordered streams over UDP, and
-Noise protects the peer connection. A bootstrap node helps a peer enter the
-DHT; it does not authorize a subscriber or act as the service endpoint.
+## One identity, independent connection direction
 
-## Roles and authority
+The canonical runtime loads one seed-only `peer.json`, derives one HyperDHT
+keypair, and uses that key for both dialing and accepting. `peers` entries
+select a local `dial` or `accept` direction for each remote public key. The
+same runtime can accept one peer and dial another with the same identity.
 
-A **publisher** listens under a publisher-owned key, advertises a registry of
-named services, and checks the subscriber public key against its local
-subscriber-device policy. Each trusted device has a publisher-local label and
-public key. A service may inherit that policy or narrow it with its own
-public-key allowlist. An empty subscriber-device list denies every subscriber.
+```text
+peer identity
+  +-- peer A: accept
+  +-- peer B: dial
+  +-- local service sources
+  +-- upstream service opens
+  +-- local bindings
+```
 
-A **subscriber** owns a separate client identity and pins one publisher
-contact. Once its outer connection is authorized, it reads the registry and
-opens only the named services that the publisher returned. HTTP services share
-the local hostname gateway; raw services receive explicit loopback listeners.
+The direction of a connection does not decide which end provides a service.
+Once a connection is authenticated, the two new peers negotiate
+`kepos/peer-services/1` with the `byte-stream-v1` handshake. A `ready` result
+enables named byte-stream opens in either direction. A timeout or an unknown
+handshake is `unsupported`; the runtime never sends a reverse request to a
+legacy endpoint and never creates a second connection to satisfy one.
 
-The registry is not an authorization database. It is returned only after the
-publisher has authenticated and authorized the subscriber. Bootstrap, DHT, and
-transport components cannot add a device to a publisher subscriber-device
-policy.
+Legacy server-side service protocols remain installed at the wire boundary.
+An old subscriber can still pair with an upgraded accept side, read Home, and
+use established TCP, HTTP, and UDP operations. It does not receive the new
+reverse capability. New-client → old-server compatibility is intentionally not
+implemented.
 
-### Service sources and republication
+## Configuration and ownership
 
-A publisher service has exactly one source. `source.localPort` selects a
-fixed loopback service on that publisher. `source.publisherKey` together with
-`source.serviceId` selects a named service from an explicitly authorized
-upstream publisher. The downstream publisher owns the public ID, name, and
-subscriber allowlist; the upstream publisher authorizes the republisher's
-publisher key through its ordinary subscriber policy. No downstream device
-identity is delegated to the upstream hop.
+`src/config.ts` is the strict in-memory schema and `src/app-config.ts` is the
+snake_case TOML boundary. The root has only optional `network`/`gateway`/
+`metrics` and required `peers`, `services`, and `bindings` arrays.
 
-The publisher runtime owns one outbound authenticated connection per distinct
-configured upstream and shares its TCP/HTTP opens and UDP carrier across the
-local aliases that reference it. The republisher is a trusted plaintext
-processing hop. A TCP/HTTP stream and a UDP flow are still terminated and
-recreated at each hop, so a source outage or policy edit closes affected
-resources rather than promising session continuity. Home and desktop surfaces
-retain configured upstream entries and mark them unavailable with a bounded
-reason; healthy local services and other upstreams continue independently.
+```text
+peers       authenticated remote identity + local dial/accept direction
+services    published source + kind + immediate-peer allowlist
+bindings    locally owned endpoint for one remote peer/service
+network     DHT bootstrap and route preference
+gateway     local HTTP host/port/domain
+metrics     optional Prometheus host/port listener
+```
 
-One-hop republication is the accepted validation topology, not a protocol hop
-limit. Kepos does not discover or import an upstream registry, fail over to a
-different source, or detect cycles/self-reference. Operators select sources
-explicitly and keep the resulting service relationships acyclic.
+A service source is exactly one fixed loopback port, fixed Unix socket, or
+peer/service reference. A binding endpoint is local and cannot be selected by
+remote input. Unknown fields, old role tables, obsolete flags, incomplete
+references, invalid paths/ports, duplicate labels/keys/IDs, and duplicate
+bindings fail parsing. Empty or missing service `allow` is deny-by-default.
 
-## Holepunch stack
+The runtime owns the active config, peer entries keyed by authenticated public
+key, current connection generation, service catalogs, local binding listeners,
+and local Home registry servers. Home is a catalog, not an authorization
+source: it is served only over an authenticated channel, and every open is
+checked again against the current local grant.
 
-Kepos uses the Holepunch networking primitives directly rather than presenting
-a generic VPN abstraction:
+## Service channels and republication
 
-- **HyperDHT** handles peer discovery, announcement, connection setup, and NAT
-  punching.
-- **UDX** carries the encrypted reliable stream over UDP. It supplies ordering,
-  retransmission, congestion control, and flow control for the outer stream.
-- **Noise SecretStream** authenticates the peer keys and encrypts the outer
-  byte stream and provides the unordered message path used by UDP services.
-- **Protomux** multiplexes the registry, heartbeat, pairing, and independent
-  service channels on the authenticated connection.
-- **Bare** hosts the shared JavaScript runtime inside the Android Worklet and
-  the native desktop application. The desktop package has no Node or Electron
-  child process.
+For a local source, `acceptService` connects to the configured loopback port or
+Unix socket. For an upstream source, it opens the selected service on the
+current connection to that exact peer. The republisher does not dial an
+upstream because it is a provider; it uses whichever configured relationship
+is current. Its downstream service has its own ID, name, and `allow` list.
 
-A dual-role device owns one HyperDHT node and lends it to the publisher and
-subscriber roles. That shared transport does not merge their identities,
-allowlists, state directories, locks, or wire protocols. Publisher-owned
-upstream connections use the publisher identity and do not reuse the
-separately pinned subscriber contact. Standalone CLI role commands can still
-own independent nodes when separate transport policy or failure isolation is
-required.
+```text
+Mac peer --(Mac dials NUC; NUC accepts)--> NUC peer
+  Mac service: cua  -- authorized upstream open --> NUC service: mac-cua
+                                                    -- authorized downstream open --> phone
+```
 
-The detailed layer model, NAT behavior, relay terminology, and compatibility
-limits live in [Network transport and compatibility](network-transport-and-compatibility.md).
+Each hop authorizes its immediate authenticated public key. The republisher
+terminates and recreates each TCP/HTTP stream or UDP flow and therefore sees
+plaintext at its hop. No end-user identity is delegated upstream, no catalog
+is implicitly imported, and a binding alone does not put a service in the
+local catalog. Operators keep source relationships acyclic; the runtime does
+not discover or silently reroute cycles.
 
-## Host and runtime boundaries
+Connection replacement increments a peer generation. Only the current
+generation can serve new opens or clear the peer's current status. A close
+from an older stream cannot invalidate a replacement. Policy changes close
+active service channels and UDP flows before new opens are admitted; a
+reconnect never replays bytes or application actions.
 
-### Android
+## Local endpoint behavior
 
-The Kotlin Android app owns the Activity, Compose UI, foreground service,
-notifications, and user start/stop actions. The foreground service owns one
-persistent Bare Worklet. The Worklet runs the shared subscriber runtime and
-binds the app's local gateway and fixed raw listeners. Closing the Activity does
-not stop that Worklet; an explicit service stop does.
+TCP and Unix byte streams share the same `Duplex` bridge and half-close
+semantics. A UDP binding owns a local loopback datagram listener and maps each
+local flow to the existing bounded forward UDP envelopes on the authenticated
+connection. It is usable only when its configured peer is a `dial` peer;
+accept-side UDP bindings remain unavailable and do not create reverse UDP.
+Local bindings are created even when their peer is offline and are reported
+unavailable until the remote catalog and grant are current. A client
+connection is paused while it waits for acquisition and is destroyed on
+timeout, cancellation, revocation, or source failure.
 
-The Android app is subscriber-only. Its identity is created in app-private
-storage and preserved across an in-place update. It never copies a publisher
-seed or another device's secret key. Android currently presents and runs only
-HTTP/TCP service mappings; it deliberately filters UDP services until a
-separate mobile design and validation exists.
+Unix paths are absolute and bounded by the platform socket limit. Unix sources
+and bindings fail clearly on Windows. A binding refuses an occupied path; it
+does not unlink a pre-existing socket. On shutdown or reconfiguration, Kepos
+unlinks only a socket whose device/inode still matches the socket it created.
+TCP port `0` is supported for bindings and the selected port is exposed in
+status. Service source ports are fixed positive ports.
+
+The HTTP gateway keeps unqualified names such as
+`http://dsh.localhost:17480/`. If several current catalogs expose the same
+TCP/HTTP service ID, lookup reports `Service is ambiguous` unless one explicit
+binding selects a peer. Timing, insertion order, and reconnect order never
+select a destination. Raw streams receive no HTTP headers. The HTTP adapter
+removes caller `Authorization` fields and inserts exactly the authenticated
+immediate peer key for each request; it supports HTTP/1.1 and valid `ws://`
+upgrades only.
+
+UDP remains a fixed-target application mapping, not reverse byte-stream
+support. The existing forward operation carries bounded envelopes over the
+same authenticated connection, supports local and explicit upstream UDP
+sources, and enforces flow, rate, fragment, idle, and ACL limits. Application
+datagrams are capped at 1,200 bytes and carrier fragments at 1,000 bytes.
+Reverse UDP requested through a byte-stream binding returns an explicit
+unsupported error. UDP bindings are a forward consumer operation only; they do
+not make a service a reverse-open capability.
+
+The canonical `src/services/presentation.ts` module owns service actions,
+icons, access labels, URLs, and copy text. Desktop and Android consume that
+metadata from runtime status rather than inferring behavior from service IDs.
+The peer runtime also owns the purpose-named metrics collector and optional
+read-only `/metrics` listener. It emits the existing
+`kepos_publisher_*` series, with authenticated immediate-peer labels and
+current-connection gauges, so the shipped Grafana artifact and existing
+scrapers keep their contract without a second publisher runtime.
+
+## Host boundaries
+
+### CLI
+
+`peer run` owns the canonical DHT node, gateway, bindings, reload loop, and
+peer runtime lock. `setup peer`, `peer key`, `peer status`, `peer pair`/`trust`,
+and `peer convert` operate on the canonical identity/config contract. The
+runtime uses the existing observation, heartbeat, mux, and cleanup seams.
 
 ### Desktop
 
-The native desktop host owns the window, WebView, menu-bar or notification-area
-lifecycle, and one shared device runtime. The WebView renders the relationship
-UI; native code owns process supervision, filesystem paths, diagnostics, and
-external URL opening.
+The native desktop host owns one canonical peer runtime, WebView, tray/menu
+surface, paths, diagnostics, singleton lock, and shutdown. The peer surface
+shows the public identity, relationship direction/capability, services,
+bindings, gateway, and pairing state. It does not expose private seeds. The
+desktop pairing invitation admits one unknown candidate temporarily; approval
+persists the public key as an `accept` peer but does not add service grants.
 
-A desktop can run publisher-only, subscriber-only, or both. Each role has its
-own state directory and runtime lock. A publisher's **Add device** invitation
-is a two-minute QR flow for an Android subscriber. Android connects with its
-existing identity; the publisher sees the candidate fingerprint and must
-approve it before the connection is promoted to the normal registry and service
-protocols. A desktop subscriber currently uses the manual path: copy its public
-key and a local label into the desktop publisher's TOML subscriber-device policy;
-the running publisher reconciles that policy without a restart; then copy the
-publisher public key and enter it in **Connect this subscriber**. The
-desktop app does not receive the QR invitation through a deep link.
+### Android and Bare
 
-The packaged first run creates a default config before ensuring any enabled role
-identity. When publisher startup is enabled, it creates missing publisher state
-with only a seed-derived identity. If publisher state already exists, startup
-validates the one-file state and reuses its seed and public key; mutable TOML
-policy supplies the display name, subscriber devices, services, and allowlists
-without rewriting that identity. CLI `setup publisher` has the same strict
-idempotency and accepts only a state directory. A config or identity is never
-silently replaced to make startup succeed.
+The Android foreground service owns one persistent Bare Worklet. The Worklet
+loads the canonical peer identity/configuration and starts the same `startPeer`
+runtime used by the repository-owned hosts. Shared bootstrap/config generation
+reads the canonical `[network]` settings. A fresh install can enter a peer
+public key or consume a `kepos://pair?...` invitation from the QR scanner or a
+deep link; the Worklet persists the resulting canonical peer policy and
+reconnects it through the host IPC. Admission and service grants remain
+separate. The UI is a status/service console with the canonical action metadata
+for supported services; it does not grow a general configuration editor,
+reverse-service UI, or reverse UDP interface. Previously built Android binaries
+are the frozen legacy-client interoperability targets; they are not a second
+fresh-build runtime or configuration source. The Bare host protocol remains
+the lifecycle boundary between Kotlin and the Worklet.
 
-The desktop process hides rather than quits when its main window closes. Tray
-or menu-bar **Open Kepos** restores the window; **Quit Kepos** stops publisher,
-subscriber, WebView, tray, and runtime resources through one idempotent
-shutdown path.
+### Nix/Home Manager
 
-### Windows packaging
+`services.kepos.peer` generates the canonical TOML, keeps `peer.json` in a
+mutable state directory outside the Nix store, runs `setup peer` as
+`ExecStartPre`, and supervises `peer run` as a user service. Generated public
+keys, directions, sources, grants, bindings, gateway, and metrics settings are
+parsed by the same runtime schema. Private seeds never enter the store.
 
-The Windows release is a self-contained x64 App Runtime tree in a portable ZIP.
-`App\\Kepos.exe` and the companion files must remain together. The optional
-per-user `Install.cmd` copies the complete tree and owns its shortcuts; it is
-not an MSI, MSIX, service, login task, or updater. WebView2 and the Microsoft
-Visual C++ Redistributable remain host prerequisites.
+## State and lifecycle
 
-## State, configuration, and lifecycle
+Canonical state is exactly a `0700` directory containing owner-only `peer.json`
+with a seed. It has one stable sibling kernel lock. A second process cannot
+use the same identity; lock-file existence is not treated as ownership and
+must not be manually deleted while a process may be active. Runtime stop
+closes candidates, current mux channels, bindings, gateway, Home servers, and
+owned DHT resources in dependency order.
 
-The shared TOML file contains transport bootstrap settings and optional role
-policy. It does not contain private identity material. On Unix-like desktop
-hosts the default paths are:
-
-```text
-~/.config/kepos/config.toml
-~/.local/state/kepos-neo/publisher
-~/.local/state/kepos-neo/subscriber
-```
-
-On Windows they are under `%APPDATA%\\Kepos\\config.toml` and
-`%LOCALAPPDATA%\\Kepos\\state\\{publisher,subscriber}`. Diagnostics live in
-the corresponding state root.
-
-Role state is created atomically and validated as a complete directory. A
-publisher state contains exactly one strict `publisher.json` seed document.
-Publisher policy is TOML-only; no manifest or policy snapshot is read or
-migrated. A subscriber state contains its identity plus one active or pending
-publisher contact. A pending contact is promoted after pairing approval;
-pairing tokens do not enter durable state.
-
-The desktop and CLI use matching per-role locks. A second process cannot use the
-same role identity concurrently. Runtime startup is visible as role phases:
-
-```text
-starting -> running -> stopping -> stopped
-                 \-> failed
-```
-
-The subscriber connection separately reports `connecting`, `connected`,
-`reconnecting`, and `stopped`. Its local gateway and configured listeners can
-remain bound during reconnect, although active client streams must be retried.
-A heartbeat replaces a silent outer path in bounded time, and a newer
-control-ready connection replaces an older connection for the same subscriber
-identity.
-
-A headless publisher requires a complete `[publisher]` TOML policy at startup
-and reconciles valid changes while it runs. Removing a subscriber device closes
-its active connection; new devices and service authorizations appear
-immediately. Source, transport-kind, or service ACL changes close affected
-service streams and UDP flows so stale forwarding cannot continue. Desktop
-**Add device** is a special live Android pairing path: approval persists the new
-labeled device to TOML, updates the in-memory policy, and promotes the final
-connection without a second NAT traversal.
-
-Publisher metrics are an optional `GET /metrics` endpoint. Its stable labels
-are a subscriber-local label, a short public-key fingerprint, service, and
-direction; full keys, addresses, and transport/channel IDs are excluded. The
-Kepos-owned Grafana source and rendered Nix artifact are described in
-[`docs/cli.md`](cli.md#publisher-metrics-and-dashboard).
+The offline conversion helper is separate from startup. It accepts an
+explicit old publisher seed or validated subscriber keypair, requires and
+verifies the expected retained public key, refuses overwrite/linked/ambiguous
+sources, and writes a new private canonical directory. It does not inspect
+live state, print private material, or create a legacy fallback.
 
 ## Diagnostics and safety
 
-Desktop diagnostics are bounded, rotated, and sanitized. The summary can retain
-role state, connection state, counters, and selected observations. It removes
-secret keys, pairing tokens, seeds, and candidate IP addresses. The CLI's
-structured observations follow the same boundary; their shape is diagnostic,
-not a stable external API.
+Observations are sanitized diagnostics. They may identify a bounded peer key
+fingerprint and transport counters, but not seeds, secret keys, pairing
+tokens, or candidate addresses. The stable operational distinctions are:
 
-Transport failures must not be converted into availability promises. The
-current product has no TCP relay fallback, no generic firewall bypass, and no
-virtual-network routing. It has a bounded fixed-target UDP service protocol,
-but that protocol still requires the authenticated outer UDP path and does not
-provide arbitrary UDP forwarding. A VPN or TUN interface can still interfere
-with the UDP carrier, and operators must diagnose that boundary rather than
-assume a fallback path.
+```text
+offline       configured peer/source has no usable current connection
+unsupported   connected peer lacks the reverse capability
+unauthorized  authenticated peer lacks the service grant/catalog entry
+conflicting   multiple visible same-name services require an explicit binding
+```
+
+The transport has no generic TCP relay fallback, arbitrary target forwarding,
+automatic direction election, retired-key alias, or old schema migration.
+Those boundaries are deliberate and are described in
+[network transport and compatibility](network-transport-and-compatibility.md).
 
 ## Related decisions
 
-- [ADR 0003: Android subscriber and Bare host boundaries](adr/0003-android-subscriber-and-bare-host-boundaries.md)
-- [ADR 0004: Two-level subscriber runtime locking](adr/0004-two-level-subscriber-runtime-locking.md)
-- [ADR 0005: Centralize built-in service presentation](adr/0005-centralize-built-in-service-presentation.md)
-- [ADR 0006: Desktop dual-role runtime ownership](adr/0006-desktop-dual-role-runtime-ownership.md)
-- [ADR 0007: Pair on the final publisher connection](adr/0007-pair-on-the-final-publisher-connection.md)
-- [ADR 0008: Share one HyperDHT node per device runtime](adr/0008-share-one-hyperdht-node-per-device-runtime.md)
-- [ADR 0010: Publisher identity state and TOML policy ownership](adr/0010-publisher-identity-state-and-toml-policy.md)
+- [ADR 0013: Peer identity and independent connection/service roles](adr/0013-separate-connection-roles-from-service-roles.md) — accepted implementation decision.
+- [ADR 0012: Explicit service republication](adr/0012-explicit-service-republication.md) — historical publisher wording retained where it describes the existing wire contract; canonical peer identity supersedes its role exception.
+- [ADR 0010: Publisher identity state and TOML policy](adr/0010-publisher-identity-state-and-toml-policy.md) — historical state decision; canonical `peer.json` and peer TOML supersede its runtime ownership.
+- [ADR 0008: Share one HyperDHT node per device runtime](adr/0008-share-one-hyperdht-node-per-device-runtime.md) — transport lifecycle contract retained by host integrations.
+- [ADR 0003: Android subscriber and Bare host boundaries](adr/0003-android-subscriber-and-bare-host-boundaries.md) — legacy client/host boundary retained.

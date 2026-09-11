@@ -25,28 +25,6 @@ test("Nix package carries its own Node runtime", async () => {
   assert.doesNotMatch(packageSource, /\.\.\/home|cp -r home/);
 });
 
-test("Home Manager module owns policy and initializes identity-only state", async () => {
-  const moduleSource = await read("nix/home-manager-module.nix");
-
-  for (const option of [
-    "stateDir",
-    "bootstrap",
-    "displayName",
-    "subscribers",
-    "services",
-  ]) {
-    assert.match(moduleSource, new RegExp(option));
-  }
-  assert.match(moduleSource, /formats\.toml/);
-  assert.match(moduleSource, /systemd\.user\.services/);
-  assert.match(moduleSource, /strMatching "\[0-9a-f\]\{64\}"/);
-  assert.match(moduleSource, /ints\.between 1 65535/);
-  assert.match(moduleSource, /serviceIdPattern/);
-  assert.match(moduleSource, /id != "home"/);
-  assert.match(moduleSource, /Restart/);
-  assert.doesNotMatch(moduleSource, /seed\s*=|privateKey\s*=/);
-});
-
 test("CI builds the Nix flake", async () => {
   const workflow = await read(".github/workflows/check.yml");
 

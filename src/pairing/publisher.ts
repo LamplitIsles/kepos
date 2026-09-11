@@ -4,7 +4,6 @@ import {
   type CreatePairingInvitationOptions,
 } from "./invitation.js";
 import type { PairingRequest, PairingResponse } from "./protocol.js";
-import type { SubscriberDevice } from "../config.js";
 
 const publisherKeyPattern = /^[0-9a-f]{64}$/u;
 
@@ -45,7 +44,13 @@ export interface PublisherPairingOptions {
   displayName: string;
   now?: () => number;
   randomBytes?: CreatePairingInvitationOptions["randomBytes"];
-  persistSubscriber: (subscriber: SubscriberDevice) => Promise<void>;
+  persistPeer: (peer: PairingPeer) => Promise<void>;
+}
+
+/** Identity facts collected at the legacy pairing wire boundary. */
+export interface PairingPeer {
+  publicKey: string;
+  label: string;
 }
 
 interface InvitationState {
@@ -136,7 +141,7 @@ export class PublisherPairing {
     if (this.approving) return this.approving;
     const pending = this.pending;
     const operation = (async () => {
-      await this.options.persistSubscriber({
+      await this.options.persistPeer({
         publicKey: pending.subscriberKey,
         label: pending.label,
       });

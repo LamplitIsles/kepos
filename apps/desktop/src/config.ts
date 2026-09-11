@@ -3,13 +3,10 @@ import {
   saveKeposConfig,
   type KeposConfig,
 } from "../../../src/app-config.js";
+import { parsePeerConfig, type PeerConfig } from "../../../src/config.js";
 import { defaultKeposConfigPath } from "../../../src/platform/paths.js";
-import type { SubscriberDevice } from "../../../src/config.js";
 import type { DesktopRuntimeConfiguration } from "./runtime.js";
-import {
-  parseDesktopOptions,
-  type DesktopOptions,
-} from "./options.js";
+import { parseDesktopOptions, type DesktopOptions } from "./options.js";
 
 export interface ApplyDesktopConfigContext {
   homeDirectory: string;
@@ -19,24 +16,11 @@ export interface ApplyDesktopConfigContext {
   saveConfig?: typeof saveKeposConfig;
   reconfigure(configuration: DesktopRuntimeConfiguration): Promise<void>;
 }
-
 export async function applyDesktopConfig(
-  config: KeposConfig,
+  config: PeerConfig,
   context: ApplyDesktopConfigContext,
 ): Promise<DesktopOptions> {
-  const options = parseDesktopOptions([], {
-    homeDirectory: context.homeDirectory,
-    environment: context.environment,
-    config,
-    configPath:
-      context.configPath ??
-      defaultKeposConfigPath(
-        context.environment,
-        context.homeDirectory,
-        context.platform,
-      ),
-    platform: context.platform,
-  });
+  const parsed = parsePeerConfig(config);
   const configPath =
     context.configPath ??
     defaultKeposConfigPath(
@@ -44,28 +28,14 @@ export async function applyDesktopConfig(
       context.homeDirectory,
       context.platform,
     );
-  await (context.saveConfig ?? saveKeposConfig)(config, configPath);
-  await context.reconfigure(options);
-  return options;
-}
-
-export async function persistDesktopPublisherSubscribers(
-  configPath: string,
-  subscribers: SubscriberDevice[],
-  dependencies: {
-    loadConfig?: typeof loadKeposConfig;
-    saveConfig?: typeof saveKeposConfig;
-  } = {},
-): Promise<void> {
-  const config = await (dependencies.loadConfig ?? loadKeposConfig)(configPath);
-  if (!config?.publisher) {
-    throw new Error("Desktop publisher config is not configured");
-  }
-  await (dependencies.saveConfig ?? saveKeposConfig)(
-    {
-      ...config,
-      publisher: { ...config.publisher, subscribers },
-    },
+  const options = parseDesktopOptions([], {
+    homeDirectory: context.homeDirectory,
+    environment: context.environment,
+    config: parsed,
     configPath,
-  );
+    platform: context.platform,
+  });
+  await (context.saveConfig ?? saveKeposConfig)(parsed, configPath);
+  await context.reconfigure({ peer: options.peer });
+  return options;
 }

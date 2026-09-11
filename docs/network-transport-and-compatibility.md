@@ -1,581 +1,249 @@
-# Kepos Neo network transport and compatibility
+# Kepos network transport and compatibility
 
-Status: discussion draft
-Date: 2026-07-10
-Scope: desktop and headless devices, family trust, and TCP/UDP service proxying
+Status: current implementation boundary
+Date: 2026-09-11
 
-The accepted staged MLP scope is recorded in
-[mlp-decisions.md](./mlp-decisions.md). This document keeps the broader
-research, including the deferred TCP/TLS relay option.
+Kepos connects one authenticated peer identity to another and exposes named
+services at the application boundary. It does not create an IP subnet, carry
+TCP/UDP packets end to end, or accept arbitrary remote targets.
 
-## 1. What this document decides
+## Current transport stack
 
-Kepos Neo proxies selected local TCP services and bounded fixed-target UDP
-services between trusted devices. A publisher may also explicitly select a
-named service from an authorized upstream publisher and publish it under a
-local service ID. That does not mean the Internet transport is TCP or that a
-UDP service is a virtual network.
+The direct path is:
 
-The main Holepunch path uses:
+```text
+local client
+  | loopback HTTP/TCP/UDP
+  v
+Kepos binding or gateway
+  | Protomux stream / encrypted UDP envelope
+  v
+Noise SecretStream outer connection
+  | reliable ordered UDX stream
+  v
+HyperDHT discovery and NAT punching over UDP
+  | one authenticated peer connection
+  v
+remote Kepos runtime
+  | fixed local source or explicit upstream peer/service source
+  v
+service endpoint
+```
 
-- local TCP or IPv4-loopback UDP on each end;
-- Noise SecretStream for peer encryption and identity;
-- Protomux for control and TCP tunnel messages, plus SecretStream unordered
-  messages for UDP datagrams;
-- UDX reliable streams over UDP for Internet transport;
-- HyperDHT and Hyperswarm for discovery, connection setup, and NAT punching.
+The layers have different contracts:
 
-This gives a good P2P path when UDP works. It does not cover every network.
-The current Holepunch blind relay also uses UDX over UDP, so it helps with hard
-NAT pairs but not with networks that block or badly shape UDP.
-
-The complete compatibility path is not simply "UDP or TCP". It can be:
-
-1. use UDP-based P2P whenever it is healthy;
-2. use a UDP blind relay when direct NAT punching fails;
-3. later add an end-to-end encrypted TCP/TLS or WebSocket relay when measured
-   UDP coverage proves insufficient;
-4. choose paths from measured quality, not only from connection success or a
-   fixed country label.
-
-## 2. The four network layers
-
-The word "TCP" can refer to different layers. Mixing them leads to the wrong
-compatibility claim.
-
-| Layer | Kepos Neo use | Normal protocol |
+| Layer | Kepos responsibility | Mechanism |
 | --- | --- | --- |
-| Local service | The app being exposed, such as SSH, HTTP, a database, or a fixed-target game endpoint | TCP or bounded UDP |
-| Tunnel protocol | Open, data, half-close, reset, and flow control; or bounded datagrams | Protomux or SecretStream messages |
-| Peer security | Device authentication and encrypted byte stream | Noise SecretStream |
-| Internet carrier | Discovery, NAT punching, and peer data | HyperDHT + UDX over UDP |
+| Local service | Fixed TCP/HTTP/Unix byte stream or fixed-target IPv4 UDP | Node/Bare local sockets |
+| Service tunnel | Open, data, half-close, reset, status, flow control | Protomux + `Duplex` |
+| UDP service operation | Datagram boundaries, bounded flow IDs/fragments | SecretStream unordered messages |
+| Peer security | Authenticate configured public key and encrypt bytes | Noise SecretStream |
+| Internet carrier | Discovery, announcement, punching, reliable outer bytes | HyperDHT + UDX over UDP |
 
-Normal direct path:
+UDX's reliability applies to the ordered outer byte stream, not to the
+application's UDP service. UDP service datagrams are bounded and unordered;
+Kepos does not add retransmission or reliable delivery to them.
 
-```text
-client app
-  |
-  | loopback TCP or UDP
-  v
-Neo local listener                 first TCP connection ends here
-  |
-  | OPEN / DATA / FIN / RESET
-  v
-Protomux tunnel channel
-  |
-  v
-Noise SecretStream
-  |
-  v
-UDX reliable stream
-  |
-  | UDP datagrams through the Internet and NATs
-  v
-remote UDX -> Noise -> Protomux
-  |
-  | new local TCP connection, or an authenticated upstream service open
-  v
-Neo service connector              immediate source connection starts here
-  |
-  v
-local service or upstream publisher
-```
+## One outer connection, either service direction
 
-Kepos Neo does not carry TCP/UDP headers or TCP acknowledgements through the
-tunnel. Each TCP agent receives payload bytes from its local TCP stack and
-moves those bytes through a different reliable stream. A UDP agent retains
-datagram boundaries and sends an encrypted unordered message on the same outer
-connection. The TCP term is a **split TCP byte-stream proxy over UDX**, not an
-IP-level TCP-over-UDP tunnel; the UDP service is likewise a fixed-target
-application proxy, not a host-to-host UDP bridge.
+Each runtime loads one seed-only `peer.json` and derives one HyperDHT keypair.
+The canonical `peers` array decides whether this runtime dials or accepts a
+relationship. Service direction is independent of that connection direction.
 
-UDX being UDP-based does not mean application bytes are unreliable. UDX adds
-ordering, retransmission, congestion control, and flow control. UDP is the
-carrier that lets Holepunch control NAT mappings and change peer paths.
-
-### 2.1 Named UDP service path
-
-The UDP service path is intentionally narrower than the outer carrier:
+After authentication, both new peers open the
+`kepos/peer-services/1` capability protocol and exchange `byte-stream-v1`.
+Only a `ready` result permits reverse named byte-stream opens. A timeout or
+unknown handshake becomes `unsupported`; the runtime does not probe an old
+wire format, open a second reverse connection, or silently reroute to another
+peer.
 
 ```text
-native UDP client
-  |
-  | 127.0.0.1 datagram
-  v
-subscriber UDP listener
-  |
-  | service ID + flow ID + bounded payload
-  v
-encrypted unordered SecretStream message
-  |
-  v
-publisher connected UDP/IPv4 socket
-  |
-  | fixed 127.0.0.1 target port
-  v
-publisher application
+Mac (dial)  ---------------------->  NUC (accept)
+             one authenticated outer
+Mac service  <==== authorized stream ====
+NUC service  ==== authorized stream ====>
 ```
 
-The subscriber selects a flow from its local source endpoint. The publisher
-creates a target socket only after outer and service authorization succeeds,
-and accepts replies only from that configured target. The flow is bounded by
-count, idle expiry, pending sends, and datagram/byte budgets. The current
-application datagram cap is 1,200 bytes. UDX's 1,200-byte baseline is a
-complete packet budget; after network, UDX, SecretStream, envelope, and
-worst-case service-ID overhead, 1,021 bytes is the IPv6 ceiling for one
-unfragmented envelope, so each carrier fragment is limited to 1,000 bytes.
-Datagrams through 1,200 bytes use at most two fragments and are reassembled
-without retransmission. Broadcast, multicast, arbitrary destinations, IPv6
-local listeners, and seamless session preservation across reconnect are outside
-the contract.
+The current-generation connection is selected by authenticated remote public
+key. A replacement connection supersedes its predecessor. A close from the
+old generation cannot clear the new connection or keep old service channels
+usable. Policy revocation, source changes, and disconnects close affected
+channels/flows; bytes and application operations are never replayed after
+reconnect.
 
-### 2.2 Explicit republication path
+## Service sources and republication
 
-Republication composes the service proxy at a trusted publisher boundary:
+Canonical service sources are exactly one of:
+
+- fixed loopback `local_port`;
+- fixed absolute `unix_socket` for a byte stream;
+- an explicit `peer` plus upstream `service` ID.
+
+Bindings own a local loopback TCP/UDP port or Unix socket for one remote peer
+and service. Set the binding kind to `udp` for a forward datagram listener;
+UDP bindings require a loopback port and use the authenticated connection's
+existing bounded UDP envelopes. A UDP binding is usable only for a configured
+`dial` peer; a binding targeting an `accept` peer remains unavailable because
+local UDP consumption is forward-only. A byte-stream binding is the default
+and Unix endpoints remain byte-stream only. The endpoint is selected locally;
+remote messages cannot choose it. An imported service is not published merely
+because it has a binding.
+
+Republication is a new local service entry:
 
 ```text
-final subscriber
-  | local listener / Home gateway
-  v
-republishing publisher (its own publisher key and downstream ACL)
-  | one shared authenticated outer per configured upstream
-  v
-upstream publisher (authorizes the republisher as a subscriber)
-  |
-  v
-selected local service
+peer A service cua
+        ^
+        | NUC consumes exact peer/service source
+        v
+peer B service mac-cua -- own name + own allowlist --> peer C
 ```
 
-The republisher configures one exact `(publisher_key, service_id)` source for
-each service. It does not import the upstream catalog or choose a fallback.
-TCP and HTTP opens use the upstream service's TCP wire kind; UDP requires an
-upstream UDP service and reuses the shared unordered carrier with a fresh flow
-mapping. Different downstream devices and aliases receive isolated flow/reply
-ownership even when they reference one upstream service.
+The upstream peer authorizes the republisher's key. The republisher's service
+allowlist independently authorizes the downstream peer. Every hop terminates
+and recreates the stream or UDP flow and may see plaintext; the downstream
+identity is not delegated upstream. There is no catalog import, implicit
+fallback, cycle discovery, or unrelated-peer rerouting. Operators keep source
+relationships acyclic.
 
-Each hop authenticates and authorizes its immediate peer independently. The
-republisher can inspect plaintext at its hop; the protocol does not delegate
-the final subscriber identity upstream or provide end-to-end encryption
-through the republisher. One republishing hop is the validated acceptance
-topology. There is no cycle, self-reference, provenance, or hop-count check,
-so operators must keep source relationships acyclic.
+## TCP and HTTP
 
-## 3. How a direct connection is made
+Raw `tcp` is payload-transparent. A local TCP connection terminates at the
+consumer and a separate local connection starts at the immediate provider or
+republisher. Protomux carries lifecycle and payload messages while the stream
+backpressure and half-close behavior remain visible to both local sockets.
 
-### 3.1 Discovery
+`http` is an opt-in plaintext HTTP/1.1 adapter. It removes all caller-supplied
+`Authorization` fields and sends exactly one header to the immediate target:
 
-MLP does not publish or discover a shared Family topic. Family is local UI
-metadata, not a protocol roster. Each publisher has a stable `homeKey` that a
-client pins during out-of-band pairing. The publisher announces that key
-through HyperDHT, and the client connects to the pinned key. After authenticating
-to Home, the client can learn separately published `serviceKey` values from the
-Registry. DHT bootstrap and lookup traffic use UDP.
+```http
+Authorization: Kepos <authenticated-immediate-peer-public-key>
+```
 
-The default HyperDHT bootstrap set contains a small number of fixed IPv4 UDP
-endpoints. A bootstrap node helps a device enter the DHT. It is not a data
-relay and gives no general availability promise.
+This is a device assertion, not a bearer secret. Keep the target private to
+the Kepos ingress because a direct target connection could forge it. Ordinary
+HTTP/1.1 requests, bodies, sequential keep-alive, and valid `ws://` upgrades
+are supported. HTTPS/TLS, `wss://`, HTTP/2/h2c, HTTP/3, CONNECT, and other
+upgrades are outside the adapter contract. Raw TCP receives no added header.
 
-### 3.2 Handshake and NAT punching
+## UDP service operation
 
-HyperDHT routes initial handshake and hole-punch control messages through DHT
-nodes. The peers then send UDP probes to each other's observed public address.
-If the NAT mappings are compatible, the peers establish a direct UDX path.
-
-The DHT nodes leave the data path after a direct connection is ready. Peer
-data remains encrypted end to end by Noise.
-
-CGNAT alone does not prove that punching will fail. NAT behavior matters more
-than the private address range. HyperDHT distinguishes open, consistent, and
-randomized mappings. Two randomized NATs are a known failure case; other
-pairs may still connect.
-
-### 3.3 Publisher authentication and authorization
-
-A DHT announcement is discovery, not authorization. Noise authenticates the
-connecting `clientKey`, and each publisher checks that public key against its
-own static allowlist. In the Hypertele baseline, its firewall performs this
-check before exposing Home or another service.
-
-MLP has no owner-signed membership record, synchronized Family roster, or
-dynamic revoke protocol. Removing a client key takes effect after the
-publisher reloads its allowlist. At a republication boundary, the upstream
-allowlist controls the republisher key and the downstream allowlist controls
-final subscribers; either denial blocks forwarding. Bootstrap and relay nodes
-cannot add a key to an allowlist or grant access to a published service.
-
-## 4. Three different meanings of relay
-
-These roles must have distinct names in code, logs, UI, and operations.
-
-### 4.1 DHT routing relay
-
-This relays announce, lookup, handshake, and hole-punch control messages. It
-does not carry the application byte stream.
-
-### 4.2 Blind UDX data relay
-
-When direct punching fails, current Hyperswarm can use `relayThrough` and the
-Holepunch `blind-relay` package:
+The established forward UDP path is deliberately narrower than the carrier:
 
 ```text
-peer A -- UDX/UDP --> public blind relay <-- UDX/UDP -- peer B
-          \________ end-to-end Noise encryption ________/
-```
-
-The relay sees endpoint addresses, timing, and byte counts but not service
-plaintext. It is useful for double randomized NATs and other punching errors.
-It still needs working outbound UDP from both peers.
-
-The current `relayThrough` path is newer than the core direct path. Its API,
-authentication, abuse controls, limits, and production behavior need a focused
-spike. A normal WSL device behind NAT is not a public blind relay.
-
-### 4.3 TCP/TLS or WebSocket gateway
-
-A restricted device can keep one outbound connection to a public gateway on
-TCP/TLS 443 or WSS:
-
-```text
-restricted Neo
-  |
-  | outbound TLS or WSS on TCP/443
+local UDP listener
+  | service ID + flow ID + bounded datagram
   v
-Kepos relay gateway
-  |
-  | HyperDHT / UDX side of the network
+encrypted unordered message on the peer outer
   v
-remote peer or remote gateway
+fixed connected IPv4 loopback target
 ```
 
-This is the path that can work when UDP is fully blocked. TLS protects the
-hop to the gateway, but Kepos still needs inner end-to-end Noise encryption.
-The gateway must never own an endpoint secret key.
+An application datagram may be at most 1,200 bytes. Carrier fragments are at
+most 1,000 payload bytes; a 1,001–1,200-byte datagram uses bounded fragments
+and is reassembled without retransmission. Flows have idle, count, pending
+send, byte, and datagram budgets. ACL checks happen before target socket
+creation. Broadcast, multicast, arbitrary destinations, IPv6 local listeners,
+and reliable delivery are not provided.
 
-Holepunch publishes an experimental package for this shape:
-`@hyperswarm/dht-relay`. Its protocol covers lookup, announce, connect,
-listen, open, data, end, and destroy over TCP or WebSocket. It is useful proof
-that a full fallback can fit the ecosystem, but it is not production-ready:
+Explicit upstream UDP sources are supported for existing forward
+republication: the republisher maps each downstream flow to a fresh upstream
+flow on the current authenticated connection and returns replies only to that
+downstream flow. Source outage, policy revocation, connection replacement,
+rate limits, and flow expiry remove the mapping. Opening a UDP service through
+the new reverse byte-stream operation returns a truthful unsupported error;
+this change does not add reverse UDP.
 
-- its README says not to use it in production;
-- its default custodial mode sends secret keys to the relay and is forbidden
-  for Kepos Neo;
-- non-custodial mode keeps signing and Noise at the endpoint, but issue #26
-  reports a failing server path and a maintainer says the package is not
-  actively maintained;
-- issue #25 reports WebSocket and Protomux open/reject failures.
+## Discovery, authentication, and authorization
 
-Kepos Neo must treat this package as spike material. We must either prove and
-maintain a non-custodial fork or build a small relay transport with the same
-security boundary. We must not depend on its default mode.
+HyperDHT bootstrap and lookup are discovery and NAT traversal only. A
+bootstrap node cannot add a key to `peers` or a service `allow` list, and it
+does not become the application endpoint. Noise authenticates the remote
+public key before the runtime creates an authorized service surface.
 
-## 5. UDP and TCP trade-offs
-
-### 5.1 Why keep the UDP path
-
-- NAT punching needs control over UDP mappings.
-- UDX gives a reliable stream without placing another Internet TCP connection
-  around the proxied service.
-- A direct path removes relay bandwidth cost and usually reduces latency.
-- UDX can change the remote path, which lets a relayed connection move to a
-  direct path when punching later succeeds.
-
-### 5.2 What a TCP fallback fixes
-
-- networks that block all outbound UDP;
-- enterprise, hotel, campus, or mobile networks where only common TCP/TLS
-  traffic works;
-- UDP paths that connect but have severe loss or rate limits;
-- cross-border cases where a measured TCP relay path is more stable than a
-  direct UDP path.
-
-### 5.3 What a TCP fallback costs
-
-- relay bandwidth, capacity planning, and a public service to operate;
-- more buffering and another failure point;
-- metadata exposure at the relay;
-- head-of-line blocking when many logical tunnels share one ordered TCP
-  connection;
-- reconnect behavior: active proxied TCP connections must fail and reopen.
-
-This is not the classic IP-level TCP-over-TCP problem because Kepos terminates
-the local TCP connections and moves only payload bytes. There is still real
-head-of-line blocking: loss of one outer TCP segment stalls every logical
-channel behind it. Direct UDX also has cross-channel blocking if all Protomux
-channels share one ordered UDX stream. We must measure this rather than claim
-that either carrier gives independent streams.
-
-## 6. Network compatibility evidence
-
-### 6.1 What is well supported
-
-Evidence level A means a standard, official document, source code, or project
-maintainer statement.
-
-- RFC 9308 summarizes measurements where roughly 3% to 5% of networks block
-  all UDP. It also notes that UDP NAT state can expire quickly, so keepalive
-  and recovery matter.
-- HyperDHT, UDX, and blind relay source confirm that the current main path and
-  relay path use UDP.
-- Tailscale falls back from UDP direct paths to HTTPS DERP relay. NetBird uses
-  WebSocket relay on TCP/443 when its UDP path is unavailable. ZeroTier has a
-  separate TCP relay rather than treating a Moon as TCP fallback.
-- IPv6 cannot be treated as an automatic escape path. Residential IPv6
-  firewalls still block unsolicited inbound traffic, and the currently used
-  HyperDHT code does not put IPv6 candidates into its normal connect handshake.
-
-### 6.2 What remains unproven
-
-- There is no reliable public cross-network test matrix for HyperDHT,
-  Hyperswarm, Pear, or Keet.
-- A successful hole punch does not prove that a path has enough sustained
-  throughput or low enough loss for the exposed service.
-- Mobile, campus, hotel, enterprise, and CGNAT paths still need direct
-  measurement rather than assumptions based on network labels.
-
-## 7. Compatibility by network shape
-
-| Network shape | Direct UDX | Blind UDX relay | TCP/TLS relay | Main risk |
-| --- | --- | --- | --- | --- |
-| Public IPv4 or friendly home NAT | Usually the best path | Backup | Backup | Normal loss and churn |
-| One hard NAT, one friendly NAT | Often possible | Useful | Backup | Punch time and mapping changes |
-| Two randomized or hard CGNATs | Often fails | Designed for this case | Strong backup | Relay availability |
-| Mobile hotspot or 5G on both ends | Uncertain | May work | Needed for coverage | CGNAT and UDP shaping |
-| Campus, hotel, or enterprise Wi-Fi | Uncertain | Fails if UDP is blocked | Most compatible | TLS proxy and idle timeout |
-| Residential networks | Usually good but not guaranteed | Useful | Covers UDP-blocked tail | Hard NAT and ISP policy |
-| WSL2 default NAT | Extra NAT layer | Useful | Useful | Windows firewall and WSL mode |
-
-"Regional relay may help" is not a promise. Candidates must be measured from
-both peers. Physical distance alone does not pick the best path.
-
-## 8. Future full-compatibility path model
-
-This section describes the possible end state after MLP V2. TCP relay and the
-three-mode selector are not committed MLP V1 or V2 scope.
-
-### 8.1 Product modes
-
-- `auto`: use a healthy direct path; otherwise use the best relay path.
-- `direct-only`: diagnostic and privacy-sensitive mode; fail if direct is not
-  usable.
-- `relay-only`: compatibility and support mode; do not rely on users blocking
-  UDP by hand to force this behavior.
-
-### 8.2 Path states
-
-The daemon needs more detail than `direct` and `relay`:
+The runtime then checks the current configured relationship and the service's
+immediate-peer allowlist. Home is an authenticated catalog, not a grant. A
+service absent from the catalog or marked unavailable is not a reason to
+choose another peer. The operational distinctions are:
 
 ```text
-offline
-  -> discovering
-  -> direct_probing
-  -> direct_healthy
-  -> direct_degraded
-  -> relay_udp
-  -> relay_tcp
-
-separate failure labels:
-  bootstrap_unreachable
-  udp_unavailable
-  punch_failed
-  relay_unreachable
-  publisher_auth_failed
+offline       no current usable connection/source
+unsupported   connected endpoint lacks peer-services capability
+unauthorized  authenticated peer lacks the service grant
+conflicting   multiple visible same-name services require an explicit binding
 ```
 
-### 8.3 Selection behavior
+Pairing is an admission workflow, not a service grant. Approval persists the
+candidate's public key as a configured peer and authorizes its current
+connection; it does not modify any service `allow` list.
 
-1. Keep a TCP/TLS or WSS relay session warm enough to avoid a long failure
-   delay on the first user connection.
-2. Probe direct UDX and configured relays.
-3. Score paths from reachability, RTT, loss, sustained throughput, recent
-   failures, and region constraints.
-4. Start a new service connection on a stable path. Do not move an active TCP
-   byte stream during MLP.
-5. Continue low-cost probes. A better path applies to later connections.
-6. Use hysteresis so a path does not switch on every small measurement change.
-7. Let the user or operator pin allowed relays for a publisher.
+## Gateway names and conflicts
 
-The exact quality thresholds must come from tests. Hard-coding a country rule
-before measurement would hide failures rather than solve them.
-
-## 9. Architecture boundary for a deferred fallback
-
-The publisher trust, service, and tunnel protocols must depend on a small peer
-transport interface, not directly on Hyperswarm internals:
+The HTTP gateway retains unqualified names:
 
 ```text
-PeerTransport
-  connect(serviceKey) -> encrypted Duplex
-  listen(onPeer)
-  pathInfo() -> kind, relay, RTT, health
-
-implementations
-  HolepunchDirectOrBlindRelay
-  TcpTlsRelay
+http://<service-id>.localhost:17480/
 ```
 
-This boundary is not for speculative portability. It isolates a known product
-risk: the mature Holepunch path is UDP-only, while reliable use in restricted
-networks needs another carrier.
+`home.localhost` exposes the authenticated machine-readable registry. An
+optional configured domain adds another suffix but does not replace
+`.localhost` or install DNS. When multiple current catalogs offer the same
+TCP/HTTP service ID, the gateway reports an ambiguity until one explicit
+binding selects a peer. It never chooses by timing, insertion order, or
+reconnect order. The registry keeps its legacy `tcp`/`udp` kind values and may
+add `access = "http"` metadata so newer clients retain the canonical HTTP
+action without changing the established wire kind. UDP services are endpoints
+to copy/use, not browser actions.
 
-The end-to-end publisher authentication and tunnel protocol must be identical
-on both transports. A relay cannot edit a publisher allowlist, authorize a
-service, learn local target addresses, or terminate peer Noise.
+The canonical peer runtime can expose the existing Prometheus contract through
+an optional read-only `/metrics` listener configured by `[metrics]` or the
+`peer run --metrics-listen host:port` override. The purpose-named peer collector
+keeps the established `kepos_publisher_*` names, immediate-peer labels,
+authorization gauges, active-channel gauges, and traffic counters; the
+publisher runtime and shipped dashboard are not reintroduced or redesigned.
 
-## 10. Tunnel flow control
+## Legacy-client compatibility
 
-Each proxied TCP connection should have these messages:
+The upgraded accept side retains the existing pairing, Home registry, TCP,
+HTTP, and UDP wire adapters. A frozen old subscriber/client can therefore
+connect to a new server, receive only its authorized catalog, and use the
+established service operations. It does not declare `kepos/peer-services/1`,
+so reverse byte-stream requests are unavailable and do not trigger a second
+dial.
 
-- `OPEN`, with service ID and connection ID;
-- `OPEN_OK` or `OPEN_ERROR`;
-- bounded `DATA` chunks;
-- `FIN`, preserving TCP half-close;
-- `RESET`, for failure and cancellation.
+This is a one-way compatibility promise: old client → new server for the
+established operations. New client → old server is not promised and has no
+legacy probing or compatibility fallback. Configuration compatibility is
+separate: old publisher/subscriber TOML tables, flags, contacts, and startup
+state paths are rejected/not read even though the old network wire remains at
+the boundary.
 
-Protomux gives message framing, not independent reliable streams or per-tunnel
-flow control. The daemon must:
+## Network limits and deferred relays
 
-- pause the source TCP socket when the peer stream applies backpressure;
-- resume it only after drain;
-- bound per-peer and per-tunnel queued bytes;
-- set open, idle, and shutdown timeouts;
-- prevent a large tunnel from starving publisher and service control messages;
-- test 1, 10, and 100 concurrent connections.
+The current direct path requires usable outbound UDP and a NAT pair HyperDHT
+can punch. The DHT candidate listener range (normally `49737–49741`) is not a
+promise that ephemeral UDX connection sockets will be reachable. VPN/TUN
+interfaces, WSL NAT, enterprise filtering, mobile CGNAT, and UDP shaping can
+change the result. Route `auto` permits the existing LAN shortcut; `public`
+disables only that shortcut for comparison.
 
-If one outer TCP/WSS connection carries many tunnels, packet loss can stall
-all of them. The MLP can use one outer connection per peer or publisher and
-accept that limit, but it must measure the effect before setting concurrency
-claims.
+There is no production TCP/443 relay, WebSocket relay, generic UDP relay,
+automatic path election, or public service port in this implementation. A
+future blind UDX relay could carry Noise ciphertext when direct punching
+fails; a future TCP/TLS or WSS gateway could cover networks that block all
+UDP. Those designs require independent security, capacity, abuse, metadata,
+and reconnect validation and are deferred rather than silently implied by
+the current API.
 
-## 11. Infrastructure roles
+## Observability and test boundary
 
-These roles may share a binary, but they are not the same service:
+Structured `peer run --observations ndjson` output correlates an outer
+connection with its service channels and includes bounded transport/status
+information. Diagnostics must not contain seeds, secret keys, pairing tokens,
+full candidate addresses, or state files. They are not a stable API.
 
-| Role | Needs public ingress | Carries data | Trust authority |
-| --- | --- | --- | --- |
-| Persistent DHT/bootstrap node | UDP | Control only | No |
-| Blind data relay | UDP | Noise ciphertext | No |
-| TCP/TLS relay gateway | TCP/443, optional WSS | Noise ciphertext | No |
-| Service publisher | No | Publishes configured services | Yes, for its own allowlist |
-| WSL/headless peer | No | May publish or consume services | Only for services it publishes |
-
-A WSL headless device is a normal trusted device by default. WSL2 commonly
-adds its own NAT and Windows firewall boundary. It can expose a local service,
-but it is not a reliable public relay unless it has separately proven public
-reachability and an operations configuration.
-
-For a product beta, candidates should span at least two failure domains. A
-single relay is not enough evidence for broad availability, and every public
-service needs provider, abuse, metadata, and data-protection review.
-
-## 12. Full network test matrix
-
-### 12.1 Endpoints
-
-- home broadband from more than one ISP;
-- mobile hotspots from more than one carrier;
-- at least one campus, hotel, or enterprise network;
-- one network with all UDP blocked;
-- home networks in more than one region;
-- public IPv4 VPS endpoints;
-- WSL2 in default NAT and mirrored networking modes.
-
-### 12.2 Pairs
-
-- same-ISP and cross-ISP residential pairs;
-- fixed-to-mobile and mobile-to-mobile pairs;
-- same-region and long-distance pairs;
-- two CGNAT/mobile endpoints;
-- WSL to each important class.
-
-### 12.3 Measurements
-
-For each pair and each candidate relay:
-
-- bootstrap reachability and announce/lookup time;
-- observed NAT class and address mapping behavior;
-- 30 cold-start direct attempts and exact HyperDHT error codes;
-- direct and relay connection p50/p95 time;
-- direct, blind UDP relay, and TCP relay path chosen;
-- RTT, jitter, loss, throughput, and reconnect count;
-- sustained 2, 5, 20, and 50 Mbps traffic for 10 to 30 minutes;
-- idle survival at 30 seconds, 2 minutes, and 10 minutes;
-- TCP half-close, reset, backpressure, large transfer, and concurrent tunnels;
-- network changes, relay restart, gateway restart, and allowlist removal after
-  publisher reload.
-
-Testing only ping, SSH login, or hole-punch success is not enough. A path may
-connect and still degrade under sustained traffic.
-
-## 13. Release gates
-
-MLP V1 direct networking is ready only when:
-
-1. the direct UDX path works end to end with publisher allowlist authentication;
-2. path diagnostics distinguish discovery, punching, transport, and
-   publisher-auth failures;
-3. the representative direct-path matrix has recorded results, not assumptions;
-4. sustained-traffic tests meet an agreed success and performance bar.
-
-The V1 release claim must explicitly say:
-
-> Kepos Neo MLP V1 requires usable outbound UDP and a NAT pair that HyperDHT
-> can punch successfully.
-
-MLP V2 is ready only when blind relay is tested under known hard NAT pairs,
-relay selection and failure behavior are deterministic, and resource limits,
-abuse controls, metadata retention, and deployment responsibilities are
-written down. V2 still requires usable outbound UDP.
-
-## 14. Current staged decision
-
-Build and verify in this order:
-
-1. Keep the MLP V1 product protocol transport-independent when code moves
-   beyond the direct Hypertele P0 baseline.
-2. Build MLP V1 with direct HyperDHT/UDX only.
-3. Test V1 across the representative network matrix.
-4. Build MLP V2 with a private, authenticated blind UDX relay.
-5. Use measured V1 and V2 results to decide whether to build TCP/443 relay.
-
-TCP/TLS or WSS relay remains an explicit future option. It is not part of MLP
-V1 or V2.
-
-## 15. Sources
-
-### Holepunch and protocol sources
-
-- [Hyperswarm](https://github.com/holepunchto/hyperswarm)
-- [Hyperswarm discovery lifecycle](https://github.com/holepunchto/hyperswarm/blob/main/lib/peer-discovery.js)
-- [HyperDHT](https://github.com/holepunchto/hyperdht)
-- [HyperDHT connect path](https://github.com/holepunchto/hyperdht/blob/main/lib/connect.js)
-- [HyperDHT routed handshake and punching](https://github.com/holepunchto/hyperdht/blob/main/lib/router.js)
-- [HyperDHT announce records](https://github.com/holepunchto/hyperdht/blob/main/lib/announcer.js)
-- [HyperDHT blind relay example](https://github.com/holepunchto/hyperdht/blob/main/examples/connection-relaying/relay.js)
-- [UDX](https://github.com/holepunchto/udx-native)
-- [SecretStream](https://github.com/holepunchto/hyperswarm-secret-stream)
-- [Protomux](https://github.com/holepunchto/protomux)
-- [Blind relay](https://github.com/holepunchto/blind-relay)
-- [Experimental DHT relay](https://github.com/holepunchto/hyperswarm-dht-relay)
-- [DHT relay non-custodial issue #26](https://github.com/holepunchto/hyperswarm-dht-relay/issues/26)
-- [DHT relay WebSocket issue #25](https://github.com/holepunchto/hyperswarm-dht-relay/issues/25)
-
-### Standards and measurement
-
-- [RFC 4787: UDP NAT behavior](https://datatracker.ietf.org/doc/html/rfc4787)
-- [RFC 6888: CGN requirements](https://datatracker.ietf.org/doc/html/rfc6888)
-- [RFC 9308: Applicability of the QUIC transport protocol](https://datatracker.ietf.org/doc/html/rfc9308)
-- [RFC 6092: IPv6 residential CPE filtering](https://datatracker.ietf.org/doc/html/rfc6092)
-- [RFC 9000 section 2: QUIC streams](https://www.rfc-editor.org/rfc/rfc9000.html#section-2)
-
-### Comparable systems
-
-- [Tailscale connection types](https://tailscale.com/kb/1257/connection-types)
-- [Tailscale DERP](https://tailscale.com/kb/1232/derp-servers)
-- [Tailscale NAT traversal](https://tailscale.com/blog/nat-traversal-improvements-pt-1)
-- [Tailscale mobile UDP issue #2270](https://github.com/tailscale/tailscale/issues/2270)
-- [NetBird architecture](https://docs.netbird.io/about-netbird/how-netbird-works)
-- [NetBird NAT and relay](https://docs.netbird.io/about-netbird/understanding-nat-and-connectivity)
-- [ZeroTier roots and Moons](https://docs.zerotier.com/roots/)
-- [ZeroTier TCP relay](https://docs.zerotier.com/relay/)
-- [frp XTCP fallback](https://gofrp.org/en/docs/features/xtcp/)
-- [rathole out of scope](https://github.com/rathole-org/rathole/blob/main/docs/out-of-scope.md)
+The repository proves the direct transport with test-owned HyperDHT testnets,
+temporary TCP/Unix/UDP listeners, old-client wire paths, and controllable
+fakes. Those checks do not prove every NAT class, a production relay, or a
+live Mac GUI/cua-driver installation. A later operator smoke procedure is
+documented in [DeepSeek Harness integration](integrations/deepseek-harness.md).

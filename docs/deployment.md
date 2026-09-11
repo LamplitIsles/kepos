@@ -1,23 +1,15 @@
 # Nix, container, and Kubernetes deployment
 
-Kepos ships a Nix package, a Home Manager publisher module, and a non-root
-Linux container image. Kubernetes-specific routing is supported by the
-subscriber gateway, but this repository does not yet ship cluster manifests or
-a Helm chart.
+Kepos deployment owns three things outside the package: the canonical peer
+state directory, the canonical TOML policy, and process supervision. A
+deployment must not place private identity material in the Nix store, image,
+logs, or generated diagnostics.
 
-## Nix package and Home Manager publisher
+## Home Manager
 
-A consumer flake can follow its existing Nixpkgs and Home Manager inputs:
-
-```nix
-inputs.kepos = {
-  url = "github:LamplitIsles/kepos";
-  inputs.nixpkgs.follows = "nixpkgs";
-  inputs.home-manager.follows = "home-manager";
-};
-```
-
-Import and configure the module:
+The exported Home Manager module is `services.kepos.peer`. It generates the
+same strict peer-oriented TOML consumed by `peer run`, creates missing
+canonical state with `setup peer`, and supervises one user service.
 
 ```nix
 {
@@ -26,103 +18,153 @@ Import and configure the module:
 }: {
   imports = [inputs.kepos.homeManagerModules.default];
 
-  services.kepos.publisher = {
+  services.kepos.peer = {
     enable = true;
-    displayName = "kosmos";
-    subscribers = [
+    stateDir = "/var/lib/kepos/peer";
+    bootstrap = ["bootstrap.example:49737"];
+
+    peers = {
+      mac = {
+        publicKey = "<mac-peer-public-key>";
+        connection = "accept";
+      };
+      phone = {
+        publicKey = "<phone-peer-public-key>";
+        connection = "accept";
+      };
+    };
+
+    services = {
+      cua = {
+        name = "CUA driver";
+        source.unixSocket = "/run/user/1000/cua-driver.sock";
+        allow = ["<nuc-peer-public-key>"];
+      };
+      mac-cua = {
+        name = "Mac CUA";
+        source = {
+          peer = "mac";
+          service = "cua";
+        };
+        allow = ["<phone-peer-public-key>"];
+      };
+    };
+
+    bindings = [
       {
-        label = "nuc";
-        publicKey = "<subscriber-public-key>";
+        peer = "mac";
+        service = "cua";
+        unixSocket = "/run/user/1000/kepos-cua.sock";
+      }
+      {
+        peer = "phone";
+        service = "game";
+        kind = "udp";
+        localPort = 0;
       }
     ];
-    services = {
-      ssh = {
-        name = "SSH";
-        source.localPort = 22;
-      };
-      navidrome = {
-        name = "Navidrome";
-        kind = "http";
-        source.localPort = 4533;
-        allow = ["<subscriber-public-key>"];
-      };
+
+    gateway = {
+      port = 17480;
+      host = "127.0.0.1";
+    };
+
+    metrics = {
+      enable = true;
+      host = "127.0.0.1";
+      port = 17481;
     };
   };
 }
 ```
 
-Each Home Manager service has an explicit `source`: set `source.localPort` for
-a loopback service, or set `source.publisherKey` and `source.serviceId` for an
-authorized upstream service. `kind` defaults to `tcp` and may be `http` or
-`udp`.
+The `peers` attribute name becomes the local peer label. Each `publicKey` is a
+64-character lowercase key and `connection` is exactly `dial` or `accept`.
+Service sources select one of `localPort`, `unixSocket`, or a complete
+`peer`/`service` pair. Service `allow` values are immediate peer public keys;
+the default empty list denies access. Bindings select one `localPort` (zero is
+ephemeral) or `unixSocket`; set `kind = "udp"` for a forward UDP binding,
+which requires a local port and a dial-side target peer. An accept-side UDP
+binding remains unavailable; reverse UDP is not provided. A binding consumes a
+remote service; it does not publish it. `metrics.enable` adds the read-only
+Prometheus `/metrics` listener with the configured host and port; port `0` is
+allowed for an ephemeral listener.
 
-For example, a republisher can select an upstream service while retaining its
-own downstream policy:
+The module's generated TOML is written into the Nix store, but `peer.json`
+is created at `stateDir` by `ExecStartPre` with `0700/0600` permissions. The
+systemd user unit runs:
 
-```nix
-services.kepos.publisher.services.remote-navidrome = {
-  name = "Remote Navidrome";
-  kind = "http";
-  source = {
-    publisherKey = "<upstream-publisher-public-key>";
-    serviceId = "navidrome";
-  };
-};
+```text
+kepos peer run --state <stateDir> --config <generated-config> --observations ndjson
 ```
 
-The upstream publisher must list the republisher's publisher key as an
-authorized subscriber. The republisher's `subscribers` and service `allow`
-values independently authorize downstream devices. A selected upstream that
-is unavailable stays in the generated registry with a bounded unavailable
-status and resumes new traffic after recovery.
+Changes to Home Manager options produce a new complete config and the running
+peer reloads it. Changed grants, sources, directions, bindings, and metrics
+settings close or restart only the affected canonical surfaces; they do not
+replay old bytes. The unit uses
+`Restart=always`, `KillMode=mixed`, `UMask=0077`, `NoNewPrivileges=true`, and
+`PrivateTmp=true`. The package does not install firewall rules, DHT bootstrap
+servers, or a public gateway.
 
-On first start, the user service runs `setup publisher --state` to create the
-seed-only `publisher.json` under `$XDG_STATE_HOME/kepos-neo/publisher`.
-Repeated starts validate and reuse that identity without rotation; partial,
-extra, or malformed state fails closed. The module generates the complete
-publisher TOML policy in the Nix store and starts Kepos with that file. Private
-identity material is created later in the mutable state directory and never
-enters the store.
-
-Publisher state contains no display name, subscriber devices, services, or
-service manifest. The generated TOML lives in the Nix store and is not edited
-in place. Change the Home Manager publisher options, then rebuild and switch
-the configuration to apply the new policy; there are no state-policy mutation
-commands.
-
-The CLI is also available directly:
+Build or inspect the package without starting a runtime:
 
 ```sh
+nix build .#packages.x86_64-linux.default
 nix run github:LamplitIsles/kepos -- --help
 ```
 
-The Home Manager module remains publisher-only. A host that owns both role
-states can instead supervise one foreground device process:
+The module's generated file should be checked by the repository's Nix test and
+the actual `parseKeposConfig` parser. No private key is required to render or
+evaluate it.
 
-```sh
-kepos device run \
-  --publisher-state /var/lib/kepos/publisher \
-  --subscriber-state /var/lib/kepos/subscriber \
-  --subscriber-service ssh:2222 \
-  --config /etc/kepos/config.toml
-```
+## Deliberate identity cutover
 
-This uses one device-owned HyperDHT node while retaining the two identities and
-state locks. Kepos does not install the systemd unit or choose host paths; the
-host configuration still owns setup, restart policy, firewall rules, and
-deployment timing. Keep the standalone role commands when the roles need
-different transport policy or failure boundaries.
+The intended migration is a key selection, not an automatic merge. Retain
+NUC's existing publisher public key as NUC's canonical peer identity and
+retain Mac's active subscriber public key as Mac's canonical peer identity.
+If a host currently owns both old keys, choose one survivor and update every
+peer reference and immediate service grant that should follow it. Do not make
+the two keys aliases.
 
-For a publisher scrape endpoint, add `--metrics-listen 127.0.0.1:9464` to the
-publisher or dual-role command and permit only the deployment's Prometheus
-scraper to reach it. Build the owned dashboard with `nix build
-github:LamplitIsles/kepos#grafana-dashboard`; the resulting opaque JSON is at
-`share/kepos/grafana/kepos-publisher-observability.json`.
+Use this order during a later operator-controlled cutover:
+
+1. Record public keys and the intended peer/service ACL mapping. Do not copy
+   private files into the record.
+2. Stop the old supervisor and verify it no longer owns the selected identity.
+3. Make a backup of old state and config outside the active canonical paths.
+4. Run `peer convert --source ... --destination ...
+   --expected-public-key ...` for the selected old publisher or subscriber
+   identity. The expected key is mandatory. The helper is offline-only,
+   refuses overwrite and linked or ambiguous sources, and writes one private
+   `peer.json`.
+5. Install the canonical TOML with `peers`, `services`, and `bindings`; keep
+   allowlists explicit and do not turn a label conversion into a broad grant.
+6. Run `peer status`, start the canonical unit, and perform an isolated service
+   check. Only after that enable or switch supervision.
+
+Rollback is the inverse: stop the canonical unit, move its new state aside,
+restore the separately held old state/config, and start the old supervisor.
+Never delete a lock file or kill an unrelated process as part of rollback. The
+runtime has no legacy probing, fallback, or concurrent old/new mode.
+
+This repository has not performed this conversion on a real NUC or Mac.
 
 ## Container image
 
-Build and load the non-root image for the current supported Linux system
-(`x86_64-linux` or `aarch64-linux`):
+The non-root image includes the CLI and runtime but owns no persistent key by
+itself. Mount a deployment-owned directory at the peer `stateDir` and provide
+the canonical config as a read-only file or environment-managed secret-free
+artifact:
+
+```sh
+npm run kepos -- setup peer --state /var/lib/kepos/peer
+npm run kepos -- peer run \
+  --state /var/lib/kepos/peer \
+  --config /etc/kepos/config.toml \
+  --observations ndjson
+```
+
+For an image built from Nix:
 
 ```sh
 nix build .#container-image
@@ -130,68 +172,57 @@ docker load < result
 docker run --rm ghcr.io/lamplitisles/kepos:local --help
 ```
 
-The GitHub workflow currently runs on x86 and publishes a `linux/amd64` image
-from every push to `main`, using `main` and `sha-<git-commit>` tags. Deployments
-should pin the digest printed in the Actions summary:
+Pin a published deployment by digest. The container must have a writable
+state directory, outbound DHT/UDX networking, and a restart policy. Kepos does
+not expose a public service port; the HTTP gateway defaults to loopback unless
+the config explicitly selects another host.
 
-```text
-ghcr.io/lamplitisles/kepos@sha256:<digest>
-```
+## Kubernetes gateway pattern
 
-GHCR creates a new package as private. An organization owner must make the
-package public once before anonymous clusters can pull it.
-
-## Pod-facing subscriber gateway
-
-Loopback and `.localhost` are the safe defaults. A host-network subscriber can
-opt into a Pod-facing listener and one additional hostname suffix:
+Kepos does not ship Kubernetes manifests or a Helm chart. An operator may run
+the container on a node and expose its HTTP gateway to selected Pods:
 
 ```toml
-[subscriber]
-gateway_port = 17480
-gateway_host = "0.0.0.0"
-gateway_domain = "kepos.internal"
+[gateway]
+port = 17480
+host = "0.0.0.0"
+domain = "kepos.internal"
 ```
 
-The same settings can be passed to one CLI run:
-
-```sh
-kepos subscriber run \
-  --state /var/lib/kepos/node-subscriber \
-  --gateway-host 0.0.0.0 \
-  --gateway-domain kepos.internal
-```
-
-The gateway accepts both `navidrome.localhost:17480` for node-local clients and
-`navidrome.kepos.internal:17480` for Pods. `gateway_domain` only adds Host
-header routing. It does not install DNS, create a Service, or make the listener
-reachable by itself.
-
-This is device-level delegation: every Pod or LAN client that can reach the
-gateway can open services as that subscriber device. For a publisher service
-configured as `kind = "http"`, all of those callers produce the same
-`Authorization: Kepos <subscriber-public-key>` assertion at the target; there
-is no per-Pod identity. The client-to-gateway HTTP leg is plaintext unless the
+The existing names remain `service.localhost:17480`; `gateway.domain` adds an
+operator-selected suffix such as `service.kepos.internal:17480`. It does not
+install DNS, create a Service, or authenticate individual Pods. A reachable
+gateway gives callers the same immediate peer capability as the runtime that
+owns it, so protect the listener with network policy and keep it off the
+public Internet. The client-to-gateway HTTP leg is plaintext unless the
 deployment protects it separately.
 
-A cluster deployment must:
+A cluster arrangement should:
 
-- route `*.kepos.internal` to a ClusterIP backed by the host-network subscriber;
-- keep traffic on the node that owns the subscriber, for example with
+- route the chosen suffix to a Service backed by the node-local gateway;
+- keep traffic on the node that owns the state, for example with
   `internalTrafficPolicy: Local`;
-- restrict port 17480 to Pod or CNI source ranges at the node firewall;
-- keep the gateway off public interfaces;
-- give every subscriber deployment its own persistent identity and state lock.
+- restrict gateway access to intended Pod/CNI ranges at the node firewall;
+- give each independent peer deployment its own persistent state and lock;
+- supervise graceful stop so active channels fail rather than being replayed.
 
-The state lock file is persistent by design. Its presence does not mean that a
-process still owns the identity: ownership is the advisory kernel lock on the
-runtime's open descriptor, and the kernel releases it after a crash. Keep the
-state directory and its sibling lock file on the same local filesystem, and do
-not delete or replace the lock file while the subscriber may still be running.
-After a forced container restart, start Kepos with the unchanged state path;
-the new process can acquire the released kernel lock, including when both
-containers ran as PID 1.
+The gateway is an operator-owned access boundary, not a replacement for
+service allowlists. An upstream source and a downstream republished service
+still authorize their immediate public keys independently.
 
-This path has been exercised in a private Kubernetes deployment, including
-pulling the container across regions. That is evidence for feasibility, not a
-promise of supplied manifests, managed DNS, or production support.
+## Firewall and local files
+
+Allow the HyperDHT candidate listener range used by the deployment (normally
+`49737-49741`) and outbound UDP. UDX connection sockets are ephemeral; the
+candidate range alone does not guarantee an established data path. Bootstrap
+nodes help discovery but do not authorize peers or relay application data.
+
+Keep the state directory and sibling runtime lock on one local filesystem.
+Lock ownership is an advisory kernel lock on an open descriptor; the lock file
+may remain after a clean exit or crash, and its existence is not proof of a
+live process. Do not manually replace or remove it while the unit may still be
+running.
+
+For production operations, preserve the generated config and public-key
+record, but never collect `peer.json`, secret keys, pairing tokens, or raw
+state in logs or support bundles.

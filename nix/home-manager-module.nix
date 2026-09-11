@@ -4,42 +4,50 @@
   pkgs,
   ...
 }: let
-  cfg = config.services.kepos.publisher;
+  cfg = config.services.kepos.peer;
   toml = pkgs.formats.toml {};
+  keyPattern = "[0-9a-f]{64}";
   serviceIdPattern = "^[a-z][a-z0-9-]*$";
-  subscriberDeviceType = lib.types.submodule {
+  endpointPathType = lib.types.nullOr lib.types.str;
+
+  peerType = lib.types.submodule {
     options = {
-      label = lib.mkOption {
-        type = lib.types.nonEmptyStr;
-        description = "Publisher-local label for a trusted subscriber device.";
-      };
       publicKey = lib.mkOption {
-        type = lib.types.strMatching "[0-9a-f]{64}";
-        description = "Subscriber device public key in lowercase hexadecimal.";
+        type = lib.types.strMatching keyPattern;
+        description = "Configured peer public key in lowercase hexadecimal.";
+      };
+      connection = lib.mkOption {
+        type = lib.types.enum ["dial" "accept"];
+        description = "Direction owned by this peer runtime for the relationship.";
       };
     };
   };
-  subscriberLabels = map (subscriber: subscriber.label) cfg.subscribers;
-  subscriberKeys = map (subscriber: subscriber.publicKey) cfg.subscribers;
+
   sourceType = lib.types.submodule {
     options = {
       localPort = lib.mkOption {
         type = lib.types.nullOr (lib.types.ints.between 1 65535);
         default = null;
-        description = "Publisher loopback port used as the service source.";
+        description = "Fixed loopback TCP or UDP service source port.";
       };
-      publisherKey = lib.mkOption {
-        type = lib.types.nullOr (lib.types.strMatching "[0-9a-f]{64}");
+      unixSocket = lib.mkOption {
+        type = endpointPathType;
         default = null;
-        description = "Upstream publisher public key used as the service source.";
+        description = "Absolute Unix socket service source path.";
       };
-      serviceId = lib.mkOption {
+      peer = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Named configured upstream peer.";
+      };
+      service = lib.mkOption {
         type = lib.types.nullOr (lib.types.strMatching serviceIdPattern);
         default = null;
-        description = "Service ID selected from the upstream publisher.";
+        description = "Service ID selected from the upstream peer.";
       };
     };
   };
+
   serviceType = lib.types.submodule {
     options = {
       name = lib.mkOption {
@@ -54,93 +62,176 @@
       source = lib.mkOption {
         type = sourceType;
         default = {};
-        description = "Exactly one localPort, or both publisherKey and serviceId.";
+        description = "Exactly one loopback port, Unix socket, or peer/service source.";
       };
       allow = lib.mkOption {
-        type = lib.types.nullOr (lib.types.listOf (lib.types.strMatching "[0-9a-f]{64}"));
+        type = lib.types.listOf (lib.types.strMatching keyPattern);
+        default = [];
+        description = "Immediate peer public keys allowed to open this service.";
+      };
+      maxPublisherToSubscriberBps = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
         default = null;
-        description = "Subscriber public keys allowed to open this service; null inherits publisher subscriber devices.";
+        description = "Optional publisher-to-consumer byte rate limit.";
       };
     };
   };
-  publisherServices = lib.mapAttrsToList (id: service:
+
+  bindingType = lib.types.submodule {
+    options = {
+      peer = lib.mkOption {
+        type = lib.types.str;
+        description = "Configured peer label selected for this local binding.";
+      };
+      service = lib.mkOption {
+        type = lib.types.strMatching serviceIdPattern;
+        description = "Remote service ID selected for this binding.";
+      };
+      kind = lib.mkOption {
+        type = lib.types.enum ["tcp" "udp"];
+        default = "tcp";
+        description = "Transport kind consumed by this local binding.";
+      };
+      localPort = lib.mkOption {
+        type = lib.types.nullOr (lib.types.ints.between 0 65535);
+        default = null;
+        description = "Loopback TCP or UDP port to own for the binding.";
+      };
+      unixSocket = lib.mkOption {
+        type = endpointPathType;
+        default = null;
+        description = "Absolute Unix socket path to own for the binding.";
+      };
+    };
+  };
+
+  peerEntries = lib.mapAttrsToList (label: peer: {
+    inherit label;
+    public_key = peer.publicKey;
+    inherit (peer) connection;
+  }) cfg.peers;
+
+  sourceValue = source:
+    if source.localPort != null then {local_port = source.localPort;}
+    else if source.unixSocket != null then {unix_socket = source.unixSocket;}
+    else {inherit (source) peer service;};
+
+  serviceEntries = lib.mapAttrsToList (id: service:
     {
       inherit id;
       inherit (service) name;
-      source =
-        if service.source.localPort != null then {
-          local_port = service.source.localPort;
-        } else {
-          publisher_key = service.source.publisherKey;
-          service_id = service.source.serviceId;
-        };
+      source = sourceValue service.source;
     }
-    // lib.optionalAttrs (service.kind != "tcp") { inherit (service) kind; }
-    // lib.optionalAttrs (service.allow != null) {
-      inherit (service) allow;
-    })
-  cfg.services;
-  configFile = toml.generate "kepos-config.toml" {
+    // lib.optionalAttrs (service.kind != "tcp") {inherit (service) kind;}
+    // lib.optionalAttrs (service.allow != []) {inherit (service) allow;}
+    // lib.optionalAttrs (service.maxPublisherToSubscriberBps != null) {
+      max_publisher_to_subscriber_bps = service.maxPublisherToSubscriberBps;
+    }) cfg.services;
+
+  bindingListen = binding:
+    if binding.localPort != null then {local_port = binding.localPort;}
+    else {unix_socket = binding.unixSocket;};
+
+  bindingEntries = map (binding: {
+    inherit (binding) peer service;
+    listen = bindingListen binding;
+  } // lib.optionalAttrs (binding.kind != "tcp") { inherit (binding) kind; }) cfg.bindings;
+
+  configValue = {
     network.bootstrap = cfg.bootstrap;
-    publisher = {
-      display_name = cfg.displayName;
-      subscribers =
-        map (subscriber: {
-          inherit (subscriber) label;
-          public_key = subscriber.publicKey;
-        })
-        cfg.subscribers;
-      services = publisherServices;
+    peers = peerEntries;
+    services = serviceEntries;
+    bindings = bindingEntries;
+    gateway = {
+      port = cfg.gateway.port;
+      host = cfg.gateway.host;
+    } // lib.optionalAttrs (cfg.gateway.domain != null) { domain = cfg.gateway.domain; };
+  } // lib.optionalAttrs cfg.metrics.enable {
+    metrics = {
+      host = cfg.metrics.host;
+      port = cfg.metrics.port;
     };
   };
+  configFile = toml.generate "kepos-config.toml" configValue;
   initialize = pkgs.writeShellApplication {
-    name = "kepos-initialize-publisher";
+    name = "kepos-initialize-peer";
     text = ''
       state_dir=${lib.escapeShellArg cfg.stateDir}
       umask 077
-      exec ${lib.getExe cfg.package} setup publisher \
-        --state "$state_dir"
+      exec ${lib.getExe cfg.package} setup peer --state "$state_dir"
     '';
   };
 in {
-  options.services.kepos.publisher = {
-    enable = lib.mkEnableOption "Kepos publisher";
+  options.services.kepos.peer = {
+    enable = lib.mkEnableOption "Kepos peer";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = pkgs.callPackage ./package.nix {};
       defaultText = lib.literalExpression "pkgs.callPackage ./nix/package.nix {}";
-      description = "Kepos package used by the publisher service, including local and authorized-upstream sources.";
+      description = "Kepos package that runs the canonical peer runtime.";
     };
 
     stateDir = lib.mkOption {
       type = lib.types.str;
-      default = "${config.xdg.stateHome}/kepos-neo/publisher";
-      description = "Mutable publisher identity directory outside the Nix store.";
+      default = "${config.xdg.stateHome}/kepos-neo/peer";
+      description = "Mutable canonical peer identity directory outside the Nix store.";
     };
 
     bootstrap = lib.mkOption {
       type = lib.types.listOf lib.types.nonEmptyStr;
       default = [];
-      description = "HyperDHT bootstrap host:port endpoints; empty uses HyperDHT defaults.";
+      description = "HyperDHT bootstrap host:port endpoints.";
     };
 
-    displayName = lib.mkOption {
-      type = lib.types.nonEmptyStr;
-      default = "Local Publisher";
-      description = "Publisher name displayed by Kepos Home.";
-    };
-
-    subscribers = lib.mkOption {
-      type = lib.types.listOf subscriberDeviceType;
-      default = [];
-      description = "Trusted subscriber devices; an empty list denies every subscriber.";
+    peers = lib.mkOption {
+      type = lib.types.attrsOf peerType;
+      default = {};
+      description = "Named peers with an explicit local dial or accept direction.";
     };
 
     services = lib.mkOption {
       type = lib.types.attrsOf serviceType;
       default = {};
-      description = "Explicit local or authorized-upstream services published over the shared Kepos connection.";
+      description = "Explicit local or peer/service sources and immediate grants.";
+    };
+
+    bindings = lib.mkOption {
+      type = lib.types.listOf bindingType;
+      default = [];
+      description = "Locally owned TCP, UDP, or Unix bindings for remote services.";
+    };
+
+    metrics = {
+      enable = lib.mkEnableOption "the Prometheus metrics listener";
+      host = lib.mkOption {
+        type = lib.types.nonEmptyStr;
+        default = "127.0.0.1";
+        description = "Prometheus metrics listener bind host.";
+      };
+      port = lib.mkOption {
+        type = lib.types.ints.between 0 65535;
+        default = 17481;
+        description = "Prometheus metrics listener port; zero selects an ephemeral port.";
+      };
+    };
+
+    gateway = {
+      port = lib.mkOption {
+        type = lib.types.ints.between 0 65535;
+        default = 17480;
+        description = "Loopback HTTP gateway port; zero selects an ephemeral port.";
+      };
+      host = lib.mkOption {
+        type = lib.types.nonEmptyStr;
+        default = "127.0.0.1";
+        description = "HTTP gateway bind host.";
+      };
+      domain = lib.mkOption {
+        type = lib.types.nullOr lib.types.nonEmptyStr;
+        default = null;
+        description = "Optional additional HTTP gateway domain.";
+      };
     };
   };
 
@@ -148,41 +239,59 @@ in {
     assertions = [
       {
         assertion = lib.hasPrefix "/" cfg.stateDir;
-        message = "services.kepos.publisher.stateDir must be an absolute path";
+        message = "services.kepos.peer.stateDir must be an absolute path";
       }
       {
-        assertion = lib.all (
-          id: id != "home" && builtins.match serviceIdPattern id != null
-        ) (lib.attrNames cfg.services);
-        message = "services.kepos.publisher.services names must be lowercase, non-reserved service IDs";
+        assertion = lib.all (id: id != "home" && builtins.match serviceIdPattern id != null) (lib.attrNames cfg.services);
+        message = "services.kepos.peer.services names must be lowercase, non-reserved service IDs";
       }
       {
-        assertion = lib.length (lib.unique subscriberLabels) == lib.length subscriberLabels;
-        message = "services.kepos.publisher.subscribers labels must be unique";
-      }
-      {
-        assertion = lib.length (lib.unique subscriberKeys) == lib.length subscriberKeys;
-        message = "services.kepos.publisher.subscribers public keys must be unique";
+        assertion = lib.length (lib.unique (map (peer: peer.publicKey) (lib.attrValues cfg.peers))) == lib.length (lib.attrValues cfg.peers);
+        message = "services.kepos.peer.peers public keys must be unique";
       }
       {
         assertion = lib.all (service:
-          (service.source.localPort != null
-            && service.source.publisherKey == null
-            && service.source.serviceId == null)
-          || (service.source.localPort == null
-            && service.source.publisherKey != null
-            && service.source.serviceId != null)
-        ) (lib.attrValues cfg.services);
-        message = "services.kepos.publisher.services sources must be local or a complete upstream reference";
+          let source = service.source;
+          in lib.length (lib.filter (selected: selected) [
+            (source.localPort != null)
+            (source.unixSocket != null)
+            (source.peer != null || source.service != null)
+          ]) == 1
+          && ((source.peer == null) == (source.service == null))) (lib.attrValues cfg.services);
+        message = "services.kepos.peer.services sources must select exactly one complete variant";
+      }
+      {
+        assertion = lib.all (service:
+          service.source.unixSocket == null || (lib.hasPrefix "/" service.source.unixSocket && builtins.stringLength service.source.unixSocket <= 103)) (lib.attrValues cfg.services);
+        message = "services.kepos.peer Unix socket sources must be absolute and at most 103 characters";
+      }
+      {
+        assertion = lib.all (service:
+          service.kind != "udp" || service.source.unixSocket == null) (lib.attrValues cfg.services);
+        message = "services.kepos.peer UDP services require a localPort or peer/service source";
+      }
+      {
+        assertion = lib.all (binding:
+          lib.length (lib.filter (selected: selected) [
+            (binding.localPort != null)
+            (binding.unixSocket != null)
+          ]) == 1
+          && (binding.unixSocket == null || (lib.hasPrefix "/" binding.unixSocket && builtins.stringLength binding.unixSocket <= 103))) cfg.bindings;
+        message = "services.kepos.peer bindings must select one valid local endpoint";
+      }
+      {
+        assertion = lib.all (binding:
+          binding.kind != "udp" || binding.localPort != null) cfg.bindings;
+        message = "services.kepos.peer UDP bindings require a localPort endpoint";
       }
     ];
 
     home.packages = [cfg.package];
     xdg.configFile."kepos/config.toml".source = configFile;
 
-    systemd.user.services.kepos-publisher = {
+    systemd.user.services.kepos-peer = {
       Unit = {
-        Description = "Kepos publisher";
+        Description = "Kepos peer";
         After = ["network-online.target"];
       };
       Install.WantedBy = ["default.target"];
@@ -191,7 +300,7 @@ in {
         ExecStartPre = lib.getExe initialize;
         ExecStart = lib.escapeShellArgs [
           (lib.getExe cfg.package)
-          "publisher"
+          "peer"
           "run"
           "--state"
           cfg.stateDir

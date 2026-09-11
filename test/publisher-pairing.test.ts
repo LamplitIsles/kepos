@@ -29,8 +29,8 @@ test("publisher pairing persists before activating one approved candidate", asyn
     displayName: "Kosmos",
     now: () => now,
     randomBytes: () => Buffer.alloc(32, 7),
-    persistSubscriber: async (subscriber) => {
-      assert.deepEqual(subscriber, {
+    persistPeer: async (peer) => {
+      assert.deepEqual(peer, {
         publicKey: "cd".repeat(32),
         label: "Neil's Pixel",
       });
@@ -69,7 +69,7 @@ test("publisher pairing rejects invalid and competing requests", () => {
     displayName: "Kosmos",
     now: () => now,
     randomBytes: () => Buffer.alloc(32, 7),
-    persistSubscriber: async () => undefined,
+    persistPeer: async () => undefined,
   });
   const parsed = parsePairingInvitation(pairing.createInvitation().uri, {
     now: () => now,
@@ -100,7 +100,7 @@ test("publisher pairing keeps a candidate pending when persistence fails", async
     displayName: "Kosmos",
     now: () => now,
     randomBytes: () => Buffer.alloc(32, 7),
-    persistSubscriber: async () => {
+    persistPeer: async () => {
       throw new Error("disk full");
     },
   });
@@ -128,7 +128,7 @@ test("publisher pairing exposes an in-flight approval for ordered shutdown", asy
     displayName: "Kosmos",
     now: () => now,
     randomBytes: () => Buffer.alloc(32, 7),
-    persistSubscriber: async () => persistence,
+    persistPeer: async () => persistence,
   });
   const parsed = parsePairingInvitation(pairing.createInvitation().uri, {
     now: () => now,
@@ -157,7 +157,7 @@ test("publisher pairing expires and cancels invitations without retaining access
     displayName: "Kosmos",
     now: () => now,
     randomBytes: () => Buffer.alloc(32, 7),
-    persistSubscriber: async () => undefined,
+    persistPeer: async () => undefined,
   });
   const parsed = parsePairingInvitation(pairing.createInvitation().uri, {
     now: () => now,

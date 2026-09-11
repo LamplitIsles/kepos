@@ -2,7 +2,6 @@ package io.github.ttalab.kepos.ui
 
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
-import io.github.ttalab.barekit.host.ServiceSnapshot
 
 enum class KeposDestination {
   SETUP,
@@ -16,6 +15,7 @@ enum class ServiceAction {
   OPEN,
   COPY_URL,
   COPY_COMMAND,
+  COPY_ENDPOINT,
 }
 
 enum class ServiceIcon {
@@ -40,13 +40,18 @@ data class ServiceUiModel(
   val copyText: String?,
   val action: ServiceAction,
   val icon: ServiceIcon,
+  val kind: String,
+  val available: Boolean,
+  val error: String?,
 )
 
 data class KeposUiModel(
   val destination: KeposDestination,
-  val publisherName: String? = null,
+  val peerLabel: String? = null,
+  val peerKey: String? = null,
   val connection: String? = null,
   val services: List<ServiceUiModel> = emptyList(),
+  val bindings: Int = 0,
   val available: Boolean = false,
   val error: String? = null,
 ) {
@@ -56,36 +61,50 @@ data class KeposUiModel(
         return KeposUiModel(destination = KeposDestination.STOPPED)
       }
       if (snapshot.state == RuntimeState.FAILED) {
-        return KeposUiModel(
-          destination = KeposDestination.FAILED,
-          error = snapshot.error,
-        )
+        return KeposUiModel(destination = KeposDestination.FAILED, error = snapshot.error)
       }
       if (snapshot.state != RuntimeState.RUNNING) {
         return KeposUiModel(destination = KeposDestination.CONNECTING)
       }
       if (!snapshot.configured) {
-        return KeposUiModel(destination = KeposDestination.SETUP)
-      }
-      val publisher = snapshot.publisher
-        ?: return KeposUiModel(
-          destination = KeposDestination.CONNECTING,
-          connection = snapshot.connection,
+        return KeposUiModel(
+          destination = KeposDestination.SETUP,
+          peerKey = snapshot.peerKey,
+          error = snapshot.error,
         )
+      }
+      val connection = snapshot.connections.firstOrNull { it.status == "connected" }
+        ?: snapshot.connections.firstOrNull()
+      if (connection == null) {
+        return KeposUiModel(
+          destination = KeposDestination.CONNECTING,
+          peerKey = snapshot.peerKey,
+          connection = snapshot.connection,
+          error = snapshot.error,
+        )
+      }
+      val connectionStatus = snapshot.connection ?: connection.status
       return KeposUiModel(
         destination = KeposDestination.SERVICES,
-        publisherName = publisher.displayName,
-        connection = snapshot.connection,
+        peerLabel = connection.label,
+        peerKey = snapshot.peerKey,
+        connection = connectionStatus,
         services = snapshot.services.mapNotNull(::serviceUiModel),
-        available = snapshot.connection == "connected",
+        bindings = snapshot.bindings.size,
+        available = connectionStatus == "connected" && snapshot.services.any { it.available },
+        error = snapshot.error,
       )
     }
 
-    private fun serviceUiModel(service: ServiceSnapshot): ServiceUiModel? {
+    private fun serviceUiModel(service: io.github.ttalab.barekit.host.ServiceSnapshot): ServiceUiModel? {
+      // Android has no local UDP operation, so a canonical UDP catalog entry
+      // is not presented as an action the host cannot complete.
+      if (service.kind == "udp") return null
       val action = when (service.action) {
         "open" -> ServiceAction.OPEN
         "copy-url" -> ServiceAction.COPY_URL
         "copy-command" -> ServiceAction.COPY_COMMAND
+        "copy-endpoint" -> ServiceAction.COPY_ENDPOINT
         else -> return null
       }
       val icon = when (service.icon) {
@@ -109,6 +128,9 @@ data class KeposUiModel(
         copyText = service.copyText,
         action = action,
         icon = icon,
+        kind = service.kind,
+        available = service.available,
+        error = service.error,
       )
     }
   }

@@ -2,9 +2,10 @@ package io.github.ttalab.barekit.host.protocol
 
 import java.nio.ByteBuffer
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IpcFrameCodecTest {
@@ -87,19 +88,21 @@ class IpcFrameCodecTest {
   }
 
   @Test
-  fun roundTripsPublisherConfigurationParams() {
-    val publisherKey = "ab".repeat(32)
-    val frame = rawFrame(
-      """{"version":1,"kind":"request","id":4,"method":"configure","params":{"publisherKey":"$publisherKey"}}"""
-        .encodeToByteArray(),
+  fun roundTripsCanonicalPeerConfiguration() {
+    val request = RequestEnvelope(
+      1,
+      "request",
+      4,
+      "configure",
+      buildJsonObject {
+        put("publicKey", "ab".repeat(32))
+        put("label", "nuc")
+        put("connection", "dial")
+      },
     )
-    val codec = IpcFrameCodec()
-    val request = codec.push(frame).single()
-    val encoded = codec.encode(request)
-    val payload = encoded.copyOfRange(4, encoded.size).decodeToString()
+    val frame = IpcFrameCodec().encode(request)
 
-    assertTrue(payload.contains("\"method\":\"configure\""))
-    assertTrue(payload.contains("\"publisherKey\":\"$publisherKey\""))
+    assertEquals(listOf(request), IpcFrameCodec().push(frame))
   }
 
   @Test

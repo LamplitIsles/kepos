@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -9,1016 +9,454 @@ import {
   runCli,
   type CliDependencies,
 } from "../src/cli/main.js";
+import {
+  observationMode,
+  parseBootstrapOptions,
+  parseGatewayDomainOption,
+  parseGatewayHostOption,
+  parseGatewayPortOption,
+  parseOptions,
+  parseRouteOption,
+  repeatedOption,
+  requiredOption,
+  requiredState,
+  singleOption,
+} from "../src/cli/options.js";
 import { waitForSignal } from "../src/cli/signals.js";
-import type { Observation } from "../src/mux/observability.js";
-import { setupPublisher } from "../src/state/publisher.js";
+import type { PeerConfig } from "../src/config.js";
+import type { RunningPeer } from "../src/runtime/peer.js";
+import { loadPeerIdentity, setupPeer } from "../src/state/peer.js";
 
-interface Calls {
-  setupPublisher: unknown[];
-  setupSubscriber: unknown[];
-  setSubscriberPublisher: unknown[];
-  startDevice: unknown[];
-  startPublisher: unknown[];
-  policyApplications: unknown[];
-  lifecycle: string[];
-  startSubscriber: unknown[];
-  publisherLocks: string[];
-  subscriberLocks: string[];
-  stopped: string[];
-  configPaths: Array<string | undefined>;
-  runtime: string[];
+const peerKey = "11".repeat(32);
+const otherPeerKey = "22".repeat(32);
+
+function emptyConfig(): PeerConfig {
+  return { peers: [], services: [], bindings: [] };
 }
 
-function fakeCli(): {
-  calls: Calls;
-  dependencies: CliDependencies;
-  stderr: string[];
-  stdout: string[];
-} {
-  const calls: Calls = {
-    setupPublisher: [],
-    setupSubscriber: [],
-    setSubscriberPublisher: [],
-    startDevice: [],
-    startPublisher: [],
-    policyApplications: [],
-    lifecycle: [],
-    startSubscriber: [],
-    publisherLocks: [],
-    subscriberLocks: [],
-    stopped: [],
-    configPaths: [],
-    runtime: [],
-  };
+test("setup peer and peer key create and reuse one canonical identity and config", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-cli-peer-"));
+  const stateDir = path.join(root, "state", "peer");
+  const configPath = path.join(root, "config.toml");
   const stdout: string[] = [];
-  const stderr: string[] = [];
-  const dependencies: CliDependencies & {
-    acquirePublisherRuntimeLock(stateDir: string): Promise<{ release(): Promise<void> }>;
-  } = {
-    stdout: (line) => stdout.push(line),
-    stderr: (line) => stderr.push(line),
-    loadConfig: async (configPath) => {
-      calls.configPaths.push(configPath);
-      return {
-        publisher: {
-          displayName: "publisher",
-          subscribers: [],
-          services: [],
-        },
-      };
-    },
-    setupPublisher: async (options) => {
-      calls.setupPublisher.push(options);
-      return { created: true, publisherKey: "11".repeat(32) };
-    },
-    setupSubscriber: async (options) => {
-      calls.setupSubscriber.push(options);
-      return {
-        created: true,
-        configured: false,
-        publicKey: "22".repeat(32),
-      };
-    },
-    setSubscriberPublisher: async (options) => {
-      calls.setSubscriberPublisher.push(options);
-      return path.join(options.stateDir, "publisher.contact.json");
-    },
-    getPublisherPublicKey: async () => "11".repeat(32),
-    startPublisher: async (options) => {
-      calls.startPublisher.push(options);
-      options.observe?.({
-        component: "kepos",
-        timestamp: new Date(0).toISOString(),
-        elapsedMs: 0,
-        event: "outer.connected",
-        role: "publisher",
-        outerId: "outer-pub",
-        attempt: 2,
-      });
-      return {
-        publisherKey: "11".repeat(32),
-        home: { url: "http://127.0.0.1:3000" },
-        applyPolicy: async (policy) => {
-          calls.policyApplications.push(policy);
-          calls.lifecycle.push("policy.apply");
-          return true;
-        },
-        status: () => ({
-          role: "publisher" as const,
-          state: "running" as const,
-          publisherKey: "11".repeat(32),
-          homeUrl: "http://127.0.0.1:3000",
-          acceptedConnections: 1,
-          activeSubscribers: 1,
-          activeSubscriberKeys: ["22".repeat(32)],
-          pairing: { phase: "idle" as const },
-        }),
-        stop: async () => {
-          calls.stopped.push("publisher");
-          calls.lifecycle.push("publisher.stop");
-        },
-      };
-    },
-    startSubscriber: async (options) => {
-      calls.startSubscriber.push(options);
-      options.observe?.({
-        component: "kepos",
-        timestamp: new Date(0).toISOString(),
-        elapsedMs: 0,
-        event: "outer.connected",
-        role: "subscriber",
-        route: options.route,
-        outerId: "outer-sub",
-      } satisfies Observation);
-      return {
-        publisherKey: "11".repeat(32),
-        home: { url: "http://127.0.0.1:4000" },
-        services: options.services.map(({ id, localPort }) => ({
-          id,
-          port: localPort,
-        })),
-        status: () => ({
-          role: "subscriber" as const,
-          state: "running" as const,
-          connection: "connected" as const,
-          connectionGeneration: 1,
-          publisherKey: "11".repeat(32),
-          publisherLabel: "publisher",
-          subscriberKey: "22".repeat(32),
-          homeUrl: "http://127.0.0.1:4000",
-          services: options.services.map(({ id, localPort }) => ({
-            id,
-            port: localPort,
-          })),
-        }),
-        stop: async () => {
-          calls.stopped.push("subscriber");
-        },
-      };
-    },
-    startDevice: async (options) => {
-      calls.startDevice.push(options);
-      calls.runtime.push("device.start");
-      const publisher = options.publisher
-        ? await dependencies.startPublisher(options.publisher)
-        : undefined;
-      const subscriber = options.subscriber
-        ? await dependencies.startSubscriber(options.subscriber)
-        : undefined;
-      return {
-        publisher,
-        subscriber,
-        stop: async () => {
-          calls.runtime.push("device.stop");
-          calls.stopped.push("device");
-        },
-      };
-    },
-    acquireSubscriberRuntimeLock: async (stateDir) => {
-      calls.subscriberLocks.push(`acquire:${stateDir}`);
-      calls.runtime.push(`subscriber.acquire:${stateDir}`);
-      return {
-        release: async () => {
-          calls.subscriberLocks.push(`release:${stateDir}`);
-          calls.runtime.push(`subscriber.release:${stateDir}`);
-        },
-      };
-    },
-    acquirePublisherRuntimeLock: async (stateDir) => {
-      calls.publisherLocks.push(`acquire:${stateDir}`);
-      calls.runtime.push(`publisher.acquire:${stateDir}`);
-      return {
-        release: async () => {
-          calls.publisherLocks.push(`release:${stateDir}`);
-          calls.runtime.push(`publisher.release:${stateDir}`);
-        },
-      };
-    },
-    waitForSignal: async (stop) => {
-      await stop();
-    },
-    schedulePolicyReload: () => () => undefined,
-  };
-  return { calls, dependencies, stderr, stdout };
-}
+  try {
+    const dependencies = createDefaultCliDependencies({ stdout: (line) => stdout.push(line) });
+    await runCli(["setup", "peer", "--state", stateDir, "--config", configPath], dependencies);
+    const firstKey = stdout.at(-1)?.slice("Peer key: ".length);
+    assert.match(firstKey ?? "", /^[0-9a-f]{64}$/);
+    stdout.length = 0;
 
-test("device run selects explicit roles and owns their shared lifecycle", async () => {
-  const cli = fakeCli();
-  cli.dependencies.loadConfig = async (configPath) => {
-    cli.calls.configPaths.push(configPath);
-    return {
-      network: {
-        bootstrap: [{ host: "config.example", port: 49_737 }],
-      },
-      publisher: {
-        enabled: true,
-        displayName: "neilmac",
-        subscribers: [{ label: "device", publicKey: "33".repeat(32) }],
-        services: [],
-      },
-      subscriber: {
-        enabled: true,
-        gatewayPort: 17_480,
-        gatewayHost: "0.0.0.0",
-        gatewayDomain: "kepos.internal",
-        route: "auto" as const,
-        services: [{ id: "ignored", localPort: 9_999 }],
-      },
-    };
-  };
-
-  await runCli(
-    [
-      "device",
-      "run",
-      "--publisher-state",
-      "./publisher",
-      "--subscriber-state",
-      "./subscriber",
-      "--config",
-      "./kepos.toml",
-      "--bootstrap",
-      "cli.example:49738",
-      "--subscriber-service",
-      "ssh:2222",
-      "--gateway-port",
-      "18080",
-      "--route",
-      "public",
-    ],
-    cli.dependencies,
-  );
-
-  assert.equal(cli.calls.startDevice.length, 1);
-  const [options] = cli.calls.startDevice as Array<{
-    bootstrap: Array<{ host: string; port: number }>;
-    publisher?: { stateDir: string; policy?: unknown };
-    subscriber?: {
-      stateDir: string;
-      gatewayPort?: number;
-      gatewayHost?: string;
-      gatewayDomain?: string;
-      route?: string;
-      services: Array<{ id: string; localPort: number }>;
-      waitForPublisher?: boolean;
-    };
-  }>;
-  assert.deepEqual(options.bootstrap, [
-    { host: "cli.example", port: 49_738 },
-  ]);
-  assert.equal(options.publisher?.stateDir, path.resolve("./publisher"));
-  assert.deepEqual(options.publisher?.policy, {
-    enabled: true,
-    displayName: "neilmac",
-    subscribers: [{ label: "device", publicKey: "33".repeat(32) }],
-    services: [],
-  });
-  assert.deepEqual(
-    {
-      ...options.subscriber,
-      observe: undefined,
-    },
-    {
-      stateDir: path.resolve("./subscriber"),
-      gatewayPort: 18_080,
-      gatewayHost: "0.0.0.0",
-      gatewayDomain: "kepos.internal",
-      route: "public",
-      services: [{ id: "ssh", localPort: 2_222 }],
-      waitForPublisher: false,
-      observe: undefined,
-    },
-  );
-  assert.deepEqual(cli.calls.runtime, [
-    `publisher.acquire:${path.resolve("./publisher")}`,
-    `subscriber.acquire:${path.resolve("./subscriber")}`,
-    "device.start",
-    "device.stop",
-    `subscriber.release:${path.resolve("./subscriber")}`,
-    `publisher.release:${path.resolve("./publisher")}`,
-  ]);
-  assert.deepEqual(cli.calls.stopped, ["device"]);
-  assert.match(cli.stdout.join("\n"), /Publisher running:/);
-  assert.match(cli.stdout.join("\n"), /Subscriber running:/);
-  assert.match(cli.stdout.join("\n"), /Local service: ssh=127\.0\.0\.1:2222/);
-});
-
-test("device run does not add roles from enabled config", async () => {
-  const cli = fakeCli();
-  cli.dependencies.loadConfig = async () => ({
-    publisher: {
-      enabled: true,
-      displayName: "neilmac",
-      subscribers: [],
-      services: [],
-    },
-    subscriber: {
-      enabled: true,
-      services: [],
-    },
-  });
-
-  await runCli(
-    ["device", "run", "--publisher-state", "./publisher"],
-    cli.dependencies,
-  );
-
-  const [options] = cli.calls.startDevice as Array<{
-    publisher?: unknown;
-    subscriber?: unknown;
-  }>;
-  assert.ok(options.publisher);
-  assert.equal(options.subscriber, undefined);
-  assert.deepEqual(cli.calls.subscriberLocks, []);
-});
-
-test("device run rolls back the publisher lock when subscriber lock fails", async () => {
-  const cli = fakeCli();
-  cli.dependencies.acquireSubscriberRuntimeLock = async (stateDir) => {
-    cli.calls.subscriberLocks.push(`acquire:${stateDir}`);
-    cli.calls.runtime.push(`subscriber.acquire:${stateDir}`);
-    throw new Error("subscriber already running");
-  };
-
-  await assert.rejects(
-    runCli(
-      [
-        "device",
-        "run",
-        "--publisher-state",
-        "./publisher",
-        "--subscriber-state",
-        "./subscriber",
-      ],
-      cli.dependencies,
-    ),
-    /subscriber already running/,
-  );
-  assert.deepEqual(cli.calls.runtime, [
-    `publisher.acquire:${path.resolve("./publisher")}`,
-    `subscriber.acquire:${path.resolve("./subscriber")}`,
-    `publisher.release:${path.resolve("./publisher")}`,
-  ]);
-  assert.deepEqual(cli.calls.startDevice, []);
-});
-
-test("device run releases both locks when shared startup fails", async () => {
-  const cli = fakeCli();
-  cli.dependencies.startDevice = async () => {
-    cli.calls.runtime.push("device.start");
-    throw new Error("device startup failed");
-  };
-
-  await assert.rejects(
-    runCli(
-      [
-        "device",
-        "run",
-        "--publisher-state",
-        "./publisher",
-        "--subscriber-state",
-        "./subscriber",
-      ],
-      cli.dependencies,
-    ),
-    /device startup failed/,
-  );
-  assert.deepEqual(cli.calls.runtime, [
-    `publisher.acquire:${path.resolve("./publisher")}`,
-    `subscriber.acquire:${path.resolve("./subscriber")}`,
-    "device.start",
-    `subscriber.release:${path.resolve("./subscriber")}`,
-    `publisher.release:${path.resolve("./publisher")}`,
-  ]);
-});
-
-test("device run requires an explicit role state", async () => {
-  const cli = fakeCli();
-
-  await assert.rejects(
-    runCli(["device", "run"], cli.dependencies),
-    /device run requires --publisher-state or --subscriber-state/,
-  );
-  assert.deepEqual(cli.calls.startDevice, []);
-});
-
-test("device run rejects subscriber overrides without subscriber state", async () => {
-  for (const override of [
-    ["--subscriber-service", "ssh:2222"],
-    ["--gateway-port", "18080"],
-    ["--gateway-host", "0.0.0.0"],
-    ["--gateway-domain", "kepos.internal"],
-    ["--route", "public"],
-  ]) {
-    const cli = fakeCli();
-    await assert.rejects(
-      runCli(
-        [
-          "device",
-          "run",
-          "--publisher-state",
-          "./publisher",
-          ...override,
-        ],
-        cli.dependencies,
-      ),
-      /subscriber options require --subscriber-state/,
-    );
-    assert.deepEqual(cli.calls.startDevice, []);
+    await runCli(["setup", "peer", "--state", stateDir, "--config", configPath], dependencies);
+    assert.equal(stdout.at(-1), `Peer key: ${firstKey}`);
+    stdout.length = 0;
+    await runCli(["peer", "key", "--state", stateDir], dependencies);
+    assert.deepEqual(stdout, [`Peer key: ${firstKey}`]);
+    assert.match(await readFile(configPath, "utf8"), /peers = \[\]/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 
-test("setup publisher forwards only the identity state directory", async () => {
-  const cli = fakeCli();
-  await runCli(
-    ["setup", "publisher", "--state", "./publisher"],
-    cli.dependencies,
-  );
-
-  assert.deepEqual(cli.calls.setupPublisher, [
-    {
-      stateDir: path.resolve("./publisher"),
-    },
-  ]);
-  assert.deepEqual(cli.stdout, [`Publisher key: ${"11".repeat(32)}`]);
-  assert.equal(cli.stdout.join("\n").includes("seed"), false);
-});
-
-test("publisher key reports the public key without policy input", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "kepos-publisher-key-"));
-  const stateDir = path.join(root, "publisher");
-  const setup = await setupPublisher({ stateDir });
+test("peer pair edits only canonical trust and leaves service grants independent", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-cli-pair-"));
+  const configPath = path.join(root, "config.toml");
+  const stateDir = path.join(root, "peer");
   const stdout: string[] = [];
-
-  await runCli(
-    ["publisher", "key", "--state", stateDir],
-    createDefaultCliDependencies({ stdout: (line) => stdout.push(line) }),
-  );
-
-  assert.deepEqual(stdout, [`Publisher key: ${setup.publisherKey}`]);
-  assert.doesNotMatch(stdout.join("\n"), /seed|secret/i);
+  try {
+    const dependencies = createDefaultCliDependencies({ stdout: (line) => stdout.push(line) });
+    await runCli(["setup", "peer", "--state", stateDir, "--config", configPath], dependencies);
+    await runCli(["peer", "pair", "--config", configPath, "--label", "phone", "--public-key", otherPeerKey], dependencies);
+    const config = await dependencies.loadConfig(configPath);
+    assert.deepEqual(config?.peers, [{ label: "phone", publicKey: otherPeerKey, connection: "accept" }]);
+    assert.deepEqual(config?.services, []);
+    assert.match(stdout.at(-1) ?? "", /Peer approved: phone/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test("setup subscriber and set-publisher expose only public state", async () => {
-  const cli = fakeCli();
-  await runCli(
-    ["setup", "subscriber", "--state", "./subscriber"],
-    cli.dependencies,
-  );
-  await runCli(
-    [
-      "subscriber",
-      "set-publisher",
-      "--state",
-      "./subscriber",
-      "--label",
-      "kosmos",
-      "--publisher-key",
-      "11".repeat(32),
-    ],
-    cli.dependencies,
-  );
-
-  assert.deepEqual(cli.calls.setupSubscriber, [
-    { stateDir: path.resolve("./subscriber") },
-  ]);
-  assert.deepEqual(cli.calls.setSubscriberPublisher, [
-    {
-      stateDir: path.resolve("./subscriber"),
-      label: "kosmos",
-      publisherKey: "11".repeat(32),
-    },
-  ]);
-  assert.equal(cli.stdout[0], `Subscriber key: ${"22".repeat(32)}`);
+test("peer convert requires an expected key and preserves the selected identity", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-cli-convert-"));
+  const generatedDir = path.join(root, "generated");
+  const source = path.join(root, "legacy-publisher");
+  const destination = path.join(root, "peer");
+  const stdout: string[] = [];
+  try {
+    await setupPeer({ stateDir: generatedDir });
+    const identity = await loadPeerIdentity(generatedDir);
+    await mkdir(source, { mode: 0o700 });
+    await writeFile(path.join(source, "publisher.json"), JSON.stringify(identity), { mode: 0o600 });
+    const dependencies = createDefaultCliDependencies({ stdout: (line) => stdout.push(line) });
+    await runCli([
+      "peer",
+      "convert",
+      "--source",
+      source,
+      "--destination",
+      destination,
+      "--expected-public-key",
+      (await dependencies.getPeerPublicKey(generatedDir)),
+    ], dependencies);
+    assert.equal(stdout.at(-1), `Peer key: ${await dependencies.getPeerPublicKey(generatedDir)}`);
+    await assert.rejects(
+      runCli(["peer", "convert", "--source", source, "--destination", path.join(root, "missing-key")], dependencies),
+      /--expected-public-key is required/i,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test("publisher run prints human status and awaits signal-safe stop", async () => {
-  const cli = fakeCli();
-  await runCli(
-    [
-      "publisher",
-      "run",
-      "--state",
-      "./publisher",
-      "--bootstrap",
-      "bootstrap-one.example:49737",
-      "--bootstrap",
-      "bootstrap-two.example:49738",
-    ],
-    cli.dependencies,
-  );
-
-  assert.equal(cli.calls.startPublisher.length, 1);
-  const [options] = cli.calls.startPublisher as Array<{
-    stateDir: string;
-    bootstrap: Array<{ host: string; port: number }>;
-  }>;
-  assert.equal(options.stateDir, path.resolve("./publisher"));
-  assert.deepEqual(options.bootstrap, [
-    { host: "bootstrap-one.example", port: 49737 },
-    { host: "bootstrap-two.example", port: 49738 },
-  ]);
-  assert.deepEqual(cli.calls.stopped, ["publisher"]);
-  assert.deepEqual(cli.calls.publisherLocks, [
-    `acquire:${path.resolve("./publisher")}`,
-    `release:${path.resolve("./publisher")}`,
-  ]);
-  assert.match(
-    cli.stdout.join("\n"),
-    /Publisher running: key=[0-9a-f]+ registry=http:\/\/127\.0\.0\.1:3000\/\.well-known\/kepos\/services\.json/,
-  );
-  assert.doesNotMatch(cli.stdout.join("\n"), / home=http:/);
-  assert.match(cli.stdout.join("\n"), /outer\.connected/);
-  assert.match(cli.stdout.join("\n"), /attempt=2/);
-});
-
-test("publisher run forwards metricsListen through dependency injection", async () => {
-  const cli = fakeCli();
-
-  await runCli(
-    [
-      "publisher",
-      "run",
-      "--state",
-      "./publisher",
-      "--metrics-listen",
-      "127.0.0.1:0",
-    ],
-    cli.dependencies,
-  );
-
-  assert.deepEqual(
-    (cli.calls.startPublisher[0] as { metricsListen: unknown }).metricsListen,
-    { host: "127.0.0.1", port: 0 },
-  );
-});
-
-test("publisher run requires a complete TOML publisher policy", async () => {
-  const cli = fakeCli();
-  cli.dependencies.loadConfig = async () => undefined;
-
-  await assert.rejects(
-    () =>
-      runCli(["publisher", "run", "--state", "./publisher"], cli.dependencies),
-    /publisher run requires a complete \[publisher\] policy in TOML/,
-  );
-  assert.deepEqual(cli.calls.startPublisher, []);
-  assert.deepEqual(cli.calls.publisherLocks, []);
-});
-
-test("publisher-enabled device run forwards metricsListen to its publisher role", async () => {
-  const cli = fakeCli();
-
-  await runCli(
-    [
-      "device",
-      "run",
-      "--publisher-state",
-      "./publisher",
-      "--metrics-listen",
-      "127.0.0.1:0",
-    ],
-    cli.dependencies,
-  );
-
-  assert.deepEqual(
-    (cli.calls.startDevice[0] as {
-      publisher?: { metricsListen?: unknown };
-    }).publisher?.metricsListen,
-    { host: "127.0.0.1", port: 0 },
-  );
-  assert.deepEqual(
-    (cli.calls.startPublisher[0] as { metricsListen: unknown }).metricsListen,
-    { host: "127.0.0.1", port: 0 },
-  );
-});
-
-test("publisher-enabled device run requires a complete TOML publisher policy", async () => {
-  const cli = fakeCli();
-  cli.dependencies.loadConfig = async () => undefined;
-
-  await assert.rejects(
-    () =>
-      runCli(
-        ["device", "run", "--publisher-state", "./publisher"],
-        cli.dependencies,
-      ),
-    /device run requires a complete \[publisher\] policy in TOML/,
-  );
-  assert.deepEqual(cli.calls.startDevice, []);
-  assert.deepEqual(cli.calls.publisherLocks, []);
-});
-
-test("publisher run releases its identity lock when startup fails", async () => {
-  const cli = fakeCli();
-  cli.dependencies.startPublisher = async () => {
-    throw new Error("publisher failed");
-  };
-
-  await assert.rejects(
-    () =>
-      runCli(
-        ["publisher", "run", "--state", "./publisher"],
-        cli.dependencies,
-      ),
-    /publisher failed/,
-  );
-
-  assert.deepEqual(cli.calls.publisherLocks, [
-    `acquire:${path.resolve("./publisher")}`,
-    `release:${path.resolve("./publisher")}`,
-  ]);
-});
-
-test("run commands use TOML bootstrap unless the CLI overrides it", async () => {
-  const cli = fakeCli();
-  cli.dependencies.loadConfig = async (configPath) => {
-    cli.calls.configPaths.push(configPath);
-    return {
-      network: {
-        bootstrap: [{ host: "config.example.com", port: 49_737 }],
-      },
-      publisher: {
-        displayName: "publisher",
-        subscribers: [],
-        services: [],
-      },
-    };
-  };
-
-  await runCli(
-    [
-      "subscriber",
-      "run",
-      "--state",
-      "./subscriber",
-      "--config",
-      "./kepos.toml",
-    ],
-    cli.dependencies,
-  );
-  await runCli(
-    [
-      "publisher",
-      "run",
-      "--state",
-      "./publisher",
-      "--bootstrap",
-      "cli.example.com:49738",
-    ],
-    cli.dependencies,
-  );
-
-  assert.deepEqual(cli.calls.configPaths, [
-    path.resolve("./kepos.toml"),
-    undefined,
-  ]);
-  assert.deepEqual(
-    (cli.calls.startSubscriber[0] as { bootstrap: unknown }).bootstrap,
-    [{ host: "config.example.com", port: 49_737 }],
-  );
-  assert.deepEqual(
-    (cli.calls.startPublisher[0] as { bootstrap: unknown }).bootstrap,
-    [{ host: "cli.example.com", port: 49_738 }],
-  );
-});
-
-test("publisher setup and run use TOML publisher policy", async () => {
-  const cli = fakeCli();
-  const subscriberKey = "33".repeat(32);
-  cli.dependencies.loadConfig = async (configPath) => {
-    cli.calls.configPaths.push(configPath);
-    return {
-      publisher: {
-        displayName: "kosmos",
-        subscribers: [{ label: "device", publicKey: subscriberKey }],
-        services: [
-          { id: "navidrome", name: "Navidrome", source: { localPort: 4_533 } },
-        ],
-      },
-    };
-  };
-
-  await runCli(
-    ["setup", "publisher", "--state", "./publisher"],
-    cli.dependencies,
-  );
-  await runCli(
-    ["publisher", "run", "--state", "./publisher"],
-    cli.dependencies,
-  );
-
-  assert.deepEqual(cli.calls.setupPublisher, [
-    {
-      stateDir: path.resolve("./publisher"),
-    },
-  ]);
-  assert.deepEqual(
-    (cli.calls.startPublisher[0] as { policy: unknown }).policy,
-    {
-      displayName: "kosmos",
-      subscribers: [{ label: "device", publicKey: subscriberKey }],
-      services: [
-        { id: "navidrome", name: "Navidrome", source: { localPort: 4_533 } },
-      ],
-    },
-  );
-});
-
-test("publisher run serially reloads valid TOML and recovers from failures", async () => {
-  const cli = fakeCli();
-  const first = {
-    displayName: "first",
-    subscribers: [],
-    services: [],
-  };
-  const second = {
-    displayName: "second",
-    subscribers: [],
-    services: [],
-  };
-  const recovered = {
-    displayName: "recovered",
-    subscribers: [],
-    services: [],
-  };
-  let reads = 0;
-  cli.dependencies.loadConfig = async () => {
-    reads++;
-    if (reads === 1) return { publisher: first };
-    if (reads === 2) return { publisher: second };
-    if (reads === 3) return undefined;
-    if (reads === 4) throw new Error("malformed TOML");
-    return { publisher: recovered };
-  };
-  cli.dependencies.schedulePolicyReload = (callback, intervalMs) => {
-    assert.equal(intervalMs, 1_000);
-    callback();
-    callback();
-    callback();
-    callback();
-    return () => undefined;
-  };
-
-  await runCli(["publisher", "run", "--state", "./publisher"], cli.dependencies);
-
-  assert.deepEqual(cli.calls.policyApplications, [second, recovered]);
-  assert.match(cli.stderr.join("\n"), /Publisher policy reload failed: publisher policy reload requires a complete/);
-  assert.match(cli.stderr.join("\n"), /Publisher policy reload failed: malformed TOML/);
-});
-
-test("publisher run drains queued reloads before stopping the publisher", async () => {
-  const cli = fakeCli();
-  const initial = { displayName: "initial", subscribers: [], services: [] };
-  const next = { displayName: "next", subscribers: [], services: [] };
-  let reads = 0;
-  let releaseReload: (() => void) | undefined;
-  let scheduled: (() => void) | undefined;
-  cli.dependencies.loadConfig = async () => {
-    reads++;
-    if (reads === 1) return { publisher: initial };
-    await new Promise<void>((resolve) => {
-      releaseReload = resolve;
+test("peer status reads only canonical config and identity", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-cli-status-"));
+  const stateDir = path.join(root, "peer");
+  const configPath = path.join(root, "config.toml");
+  const stdout: string[] = [];
+  try {
+    const dependencies = createDefaultCliDependencies({ stdout: (line) => stdout.push(line) });
+    const setup = await dependencies.setupPeer({ stateDir });
+    await dependencies.saveConfig({
+      peers: [{ label: "phone", publicKey: otherPeerKey, connection: "accept" }],
+      services: [{ id: "ssh", name: "SSH", kind: "tcp", source: { localPort: 22 }, allow: [otherPeerKey] }],
+      bindings: [],
+    }, configPath);
+    await runCli(["peer", "status", "--state", stateDir, "--config", configPath], dependencies);
+    assert.deepEqual(JSON.parse(stdout.at(-1) ?? "null"), {
+      role: "peer",
+      state: "stopped",
+      peerKey: setup.publicKey,
+      config: { peers: 1, services: 1, bindings: 0 },
     });
-    return { publisher: next };
-  };
-  cli.dependencies.schedulePolicyReload = (callback) => {
-    scheduled = callback;
-    return () => cli.calls.lifecycle.push("poll.cancel");
-  };
-  cli.dependencies.waitForSignal = async (stop) => {
-    scheduled?.();
-    const stopping = stop();
-    await Promise.resolve();
-    assert.deepEqual(cli.calls.lifecycle, ["poll.cancel"]);
-    assert.deepEqual(cli.calls.stopped, []);
-    releaseReload?.();
-    await stopping;
-  };
-
-  await runCli(["publisher", "run", "--state", "./publisher"], cli.dependencies);
-
-  assert.deepEqual(cli.calls.lifecycle, [
-    "poll.cancel",
-    "policy.apply",
-    "publisher.stop",
-  ]);
-  assert.deepEqual(cli.calls.policyApplications, [next]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test("subscriber run uses TOML bindings and CLI overrides", async () => {
-  const cli = fakeCli();
-  cli.dependencies.loadConfig = async (configPath) => {
-    cli.calls.configPaths.push(configPath);
-    return {
-      network: { bootstrap: [] },
-      subscriber: {
-        gatewayPort: 17_480,
-        gatewayHost: "0.0.0.0",
-        gatewayDomain: "kepos.internal",
-        route: "auto",
-        services: [{ id: "ssh", localPort: 2_222 }],
+function fakeRunningPeer(events: string[]): RunningPeer {
+  return {
+    peerKey,
+    gateway: { port: 17_480, url: "http://home.localhost:17480" },
+    applyConfig: async () => {
+      events.push("apply");
+      return true;
+    },
+    open: async () => {
+      throw new Error("not used");
+    },
+    status: () => ({
+      role: "peer" as const,
+      state: "running" as const,
+      peerKey,
+      gateway: { port: 17_480, url: "http://home.localhost:17480" },
+      connections: [],
+      services: [],
+      bindings: [],
+      pairing: { phase: "idle" as const },
+    }),
+    createPairingInvitation: () => ({ uri: "kepos://pair", expiresAt: Date.now() + 1000 }),
+    pairingStatus: () => ({ phase: "idle" as const }),
+    approvePairing: async () => undefined,
+    denyPairing: () => undefined,
+    cancelPairing: () => undefined,
+    pair: async () => ({
+      role: "peer" as const,
+      state: "running" as const,
+      peerKey,
+      gateway: { port: 17_480, url: "http://home.localhost:17480" },
+      connections: [],
+      services: [],
+      bindings: [],
+      pairing: { phase: "idle" as const },
+    }),
+    stop: async () => {
+      events.push("stop");
+    },
+  };
+}
+
+test("peer run owns the canonical lock, reloads serially, and stops the runtime", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-cli-run-"));
+  const stateDir = path.join(root, "peer");
+  const configPath = path.join(root, "config.toml");
+  const events: string[] = [];
+  const stdout: string[] = [];
+  let reload: (() => void) | undefined;
+  let reads = 0;
+  const running = fakeRunningPeer(events);
+  const dependencies: CliDependencies = {
+    ...createDefaultCliDependencies({ stdout: (line) => stdout.push(line) }),
+    loadConfig: async () => {
+      reads++;
+      return emptyConfig();
+    },
+    acquirePeerRuntimeLock: async () => ({
+      release: async () => {
+        events.push("release");
       },
-    };
+    }),
+    startPeer: async (options) => {
+      events.push("start");
+      options.observe?.({
+        component: "kepos",
+        event: "outer.connected",
+        timestamp: "ignored",
+        elapsedMs: 0,
+        role: "peer",
+        text: "value",
+        count: 2,
+        enabled: true,
+        empty: null,
+        nested: { value: "json" },
+      });
+      return running;
+    },
+    scheduleConfigReload: (callback) => {
+      reload = callback;
+      return () => events.push("cancel-reload");
+    },
+    waitForSignal: async (stop) => {
+      reload?.();
+      await stop();
+    },
   };
-
-  await runCli(
-    ["subscriber", "run", "--state", "./subscriber"],
-    cli.dependencies,
-  );
-  await runCli(
-    [
-      "subscriber",
-      "run",
-      "--state",
-      "./subscriber",
-      "--gateway-port",
-      "18080",
-      "--gateway-host",
-      "127.0.0.2",
-      "--gateway-domain",
-      "cluster.internal",
-      "--route",
-      "public",
-      "--service",
-      "ssh:2200",
-    ],
-    cli.dependencies,
-  );
-
-  const [configured, overridden] = cli.calls.startSubscriber as Array<{
-    bootstrap?: unknown;
-    gatewayPort?: number;
-    gatewayHost?: string;
-    gatewayDomain?: string;
-    route: string;
-    services: Array<{ id: string; localPort: number }>;
-  }>;
-  assert.equal(configured.bootstrap, undefined);
-  assert.equal(configured.gatewayPort, 17_480);
-  assert.equal(configured.gatewayHost, "0.0.0.0");
-  assert.equal(configured.gatewayDomain, "kepos.internal");
-  assert.equal(configured.route, "auto");
-  assert.deepEqual(configured.services, [{ id: "ssh", localPort: 2_222 }]);
-  assert.equal(overridden.gatewayPort, 18_080);
-  assert.equal(overridden.gatewayHost, "127.0.0.2");
-  assert.equal(overridden.gatewayDomain, "cluster.internal");
-  assert.equal(overridden.route, "public");
-  assert.deepEqual(overridden.services, [{ id: "ssh", localPort: 2_200 }]);
+  try {
+    await runCli(["peer", "run", "--state", stateDir, "--config", configPath], dependencies);
+    assert.deepEqual(events, ["start", "cancel-reload", "apply", "stop", "stop", "release"]);
+    assert.equal(reads, 2);
+    assert.match(stdout.join("\n"), /Peer running: key=/);
+    assert.match(stdout.join("\n"), /outer.connected elapsedMs=0 role=peer text=value count=2 enabled=true empty=null nested=\{"value":"json"\}/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
-test("subscriber run maps services and writes NDJSON observations", async () => {
-  const cli = fakeCli();
-  await runCli(
-    [
-      "subscriber",
+test("removed role commands and flags are rejected", async () => {
+  const dependencies = createDefaultCliDependencies({ stdout: () => undefined });
+  for (const arguments_ of [
+    ["setup", "publisher"],
+    ["setup", "subscriber"],
+    ["publisher", "run"],
+    ["subscriber", "run"],
+    ["device", "run"],
+    ["peer", "run", "--publisher-state", "legacy"],
+  ]) {
+    await assert.rejects(runCli(arguments_, dependencies), /unknown command|unknown option/i);
+  }
+});
+
+test("canonical CLI option parsers validate and normalize supported values", () => {
+  const options = parseOptions([
+    "--state", "./peer",
+    "--label", "phone",
+    "--bootstrap", "127.0.0.1:49737",
+    "--bootstrap", "bootstrap.example:49738",
+    "--route", "public",
+    "--gateway-port", "17480",
+    "--gateway-host", "127.0.0.1",
+    "--gateway-domain", "Peers.Example",
+    "--observations", "ndjson",
+  ], [
+    "--state", "--label", "--bootstrap", "--route",
+    "--gateway-port", "--gateway-host", "--gateway-domain", "--observations",
+  ]);
+
+  assert.equal(requiredState(options), path.resolve("./peer"));
+  assert.equal(requiredOption(options, "--label"), "phone");
+  assert.deepEqual(repeatedOption(options, "--bootstrap"), ["127.0.0.1:49737", "bootstrap.example:49738"]);
+  assert.equal(parseRouteOption(options), "public");
+  assert.equal(parseGatewayPortOption(options), 17480);
+  assert.equal(parseGatewayHostOption(options), "127.0.0.1");
+  assert.equal(parseGatewayDomainOption(options), "peers.example");
+  assert.deepEqual(parseBootstrapOptions(options), [
+    { host: "127.0.0.1", port: 49737 },
+    { host: "bootstrap.example", port: 49738 },
+  ]);
+  assert.equal(observationMode(options), "ndjson");
+  assert.equal(singleOption(options, "--missing"), undefined);
+
+  assert.equal(parseRouteOption(parseOptions([], ["--route"])), "auto");
+  assert.equal(parseGatewayPortOption(parseOptions([], ["--gateway-port"])), undefined);
+  assert.equal(parseGatewayHostOption(parseOptions([], ["--gateway-host"])), undefined);
+  assert.equal(parseGatewayDomainOption(parseOptions([], ["--gateway-domain"])), undefined);
+  assert.equal(parseBootstrapOptions(parseOptions([], ["--bootstrap"])), undefined);
+  assert.equal(observationMode(parseOptions([], ["--observations"])), "human");
+
+  assert.throws(() => parseOptions(["--unknown", "value"], ["--state"]), /unknown option/);
+  assert.throws(() => parseOptions(["--state"], ["--state"]), /requires a value/);
+  assert.throws(() => requiredState(parseOptions([], ["--state"])), /--state is required/);
+  assert.throws(() => requiredOption(parseOptions([], ["--label"]), "--label"), /required/);
+  assert.throws(() => singleOption(parseOptions(["--label", "a", "--label", "b"], ["--label"]), "--label"), /may be used only once/);
+  assert.throws(() => parseBootstrapOptions(parseOptions(["--bootstrap", "bad"], ["--bootstrap"])), /host:port/);
+  assert.throws(() => observationMode(parseOptions(["--observations", "json"], ["--observations"])), /human or ndjson/);
+});
+
+test("waitForSignal stops once and removes every signal listener", async () => {
+  let stopCalls = 0;
+  let releaseStop!: () => void;
+  const stopped = new Promise<void>((resolve) => {
+    releaseStop = resolve;
+  });
+  const waiting = waitForSignal(async () => {
+    stopCalls++;
+    await stopped;
+  });
+  process.emit("SIGINT");
+  process.emit("SIGTERM");
+  assert.equal(stopCalls, 1);
+  releaseStop();
+  await waiting;
+  process.emit("SIGINT");
+  assert.equal(stopCalls, 1);
+
+  const rejected = waitForSignal(async () => {
+    throw new Error("stop failed");
+  });
+  process.emit("SIGTERM");
+  await assert.rejects(rejected, /stop failed/);
+});
+
+test("canonical CLI handles missing, existing, and failing command state", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-cli-edges-"));
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const base = createDefaultCliDependencies({
+    stdout: (line) => stdout.push(line),
+    stderr: (line) => stderr.push(line),
+  });
+  try {
+    await runCli([], base);
+    await runCli(["--help"], base);
+    assert.equal(stdout.filter((line) => line.startsWith("Usage:")).length, 2);
+
+    const stateDir = path.join(root, "peer");
+    const configPath = path.join(root, "config.toml");
+    let saves = 0;
+    const existingConfig = emptyConfig();
+    await runCli(["setup", "peer", "--state", stateDir, "--config", configPath], {
+      ...base,
+      setupPeer: async () => ({ created: false, publicKey: peerKey }),
+      loadConfig: async () => existingConfig,
+      saveConfig: async () => {
+        saves++;
+      },
+    });
+    assert.equal(saves, 0);
+
+    await assert.rejects(
+      runCli(["setup", "peer", "--state", stateDir, "--config", configPath], {
+        ...base,
+        setupPeer: async () => ({ created: false, publicKey: peerKey }),
+        loadConfig: async () => {
+          throw new Error("config is unreadable");
+        },
+      }),
+      /config is unreadable/,
+    );
+
+    await runCli(["peer", "status", "--state", stateDir, "--config", configPath], {
+      ...base,
+      loadConfig: async () => undefined,
+      getPeerPublicKey: async () => peerKey,
+    });
+    assert.deepEqual(JSON.parse(stdout.at(-1) ?? "null").config, {
+      peers: 0,
+      services: 0,
+      bindings: 0,
+    });
+
+    let paired: PeerConfig | undefined;
+    await runCli([
+      "peer",
+      "pair",
+      "--config",
+      configPath,
+      "--label",
+      "dial-peer",
+      "--public-key",
+      otherPeerKey,
+      "--connection",
+      "dial",
+    ], {
+      ...base,
+      loadConfig: async () => existingConfig,
+      saveConfig: async (config) => {
+        paired = config;
+      },
+    });
+    assert.equal(paired?.peers[0]?.connection, "dial");
+    await assert.rejects(
+      runCli([
+        "peer",
+        "pair",
+        "--config",
+        configPath,
+        "--label",
+        "bad",
+        "--public-key",
+        otherPeerKey,
+        "--connection",
+        "sideways",
+      ], base),
+      /dial or accept/,
+    );
+
+    await assert.rejects(
+      runCli(["peer", "run", "--state", stateDir, "--config", configPath], {
+        ...base,
+        loadConfig: async () => undefined,
+      }),
+      /requires a canonical config/,
+    );
+
+    let released = 0;
+    await assert.rejects(
+      runCli(["peer", "run", "--state", stateDir, "--config", configPath], {
+        ...base,
+        loadConfig: async () => emptyConfig(),
+        acquirePeerRuntimeLock: async () => ({
+          release: async () => {
+            released++;
+          },
+        }),
+        startPeer: async () => {
+          throw new Error("peer startup failed");
+        },
+      }),
+      /peer startup failed/,
+    );
+    assert.equal(released, 1);
+
+    const events: string[] = [];
+    const running = fakeRunningPeer(events);
+    await runCli([
+      "peer",
       "run",
       "--state",
-      "./subscriber",
-      "--service",
-      "ssh:2222",
-      "--gateway-port",
-      "18080",
-      "--route",
-      "public",
-      "--bootstrap",
-      "34.143.181.65:49738",
+      stateDir,
+      "--config",
+      configPath,
       "--observations",
       "ndjson",
-    ],
-    cli.dependencies,
-  );
-
-  const [options] = cli.calls.startSubscriber as Array<{
-    stateDir: string;
-    services: Array<{ id: string; localPort: number }>;
-    gatewayPort: number;
-    route: string;
-    bootstrap: Array<{ host: string; port: number }>;
-    waitForPublisher: boolean;
-  }>;
-  assert.equal(options.stateDir, path.resolve("./subscriber"));
-  assert.deepEqual(options.services, [{ id: "ssh", localPort: 2222 }]);
-  assert.equal(options.gatewayPort, 18_080);
-  assert.equal(options.route, "public");
-  assert.equal(options.waitForPublisher, false);
-  assert.deepEqual(options.bootstrap, [
-    { host: "34.143.181.65", port: 49738 },
-  ]);
-  assert.deepEqual(cli.calls.stopped, ["subscriber"]);
-  assert.deepEqual(cli.calls.subscriberLocks, [
-    `acquire:${path.resolve("./subscriber")}`,
-    `release:${path.resolve("./subscriber")}`,
-  ]);
-  assert.equal(cli.stdout.length, 1);
-  assert.equal(JSON.parse(cli.stdout[0] ?? "").event, "outer.connected");
-  assert.match(
-    cli.stderr.join("\n"),
-    /Subscriber running: publisher=[0-9a-f]+ registry=http:\/\/127\.0\.0\.1:4000\/\.well-known\/kepos\/services\.json/,
-  );
-  assert.doesNotMatch(cli.stderr.join("\n"), / home=http:/);
-});
-
-test("subscriber run releases its identity lock when startup fails", async () => {
-  const cli = fakeCli();
-  cli.dependencies.startSubscriber = async () => {
-    throw new Error("publisher unavailable");
-  };
-
-  await assert.rejects(
-    () =>
-      runCli(
-        ["subscriber", "run", "--state", "./subscriber"],
-        cli.dependencies,
-      ),
-    /publisher unavailable/,
-  );
-
-  assert.deepEqual(cli.calls.subscriberLocks, [
-    `acquire:${path.resolve("./subscriber")}`,
-    `release:${path.resolve("./subscriber")}`,
-  ]);
-});
-
-test("run commands reject malformed bootstrap endpoints", async () => {
-  const cli = fakeCli();
-
-  await assert.rejects(
-    () =>
-      runCli(
-        [
-          "subscriber",
-          "run",
-          "--state",
-          "./subscriber",
-          "--bootstrap",
-          "bootstrap.example",
-        ],
-        cli.dependencies,
-      ),
-    /bootstrap.*host:port/i,
-  );
-  await assert.rejects(
-    () =>
-      runCli(
-        [
-          "publisher",
-          "run",
-          "--state",
-          "./publisher",
-          "--bootstrap",
-          "bootstrap.example:70000",
-        ],
-        cli.dependencies,
-      ),
-    /bootstrap.*port/i,
-  );
-});
-
-test("canonical commands require explicit state and reject standalone status", async () => {
-  const cli = fakeCli();
-  await assert.rejects(
-    () => runCli(["setup", "subscriber"], cli.dependencies),
-    /--state is required/,
-  );
-  await assert.rejects(
-    () => runCli(["status"], cli.dependencies),
-    /unknown command|usage/i,
-  );
-});
-
-test("empty arguments and help print CLI usage", async () => {
-  const empty = fakeCli();
-  const help = fakeCli();
-
-  await runCli([], empty.dependencies);
-  await runCli(["--help"], help.dependencies);
-
-  assert.match(empty.stdout.join("\n"), /usage: kepos/i);
-  assert.equal(help.stdout.join("\n"), empty.stdout.join("\n"));
-});
-
-test("partial commands report valid CLI usage", async () => {
-  const cli = fakeCli();
-
-  await assert.rejects(
-    () => runCli(["publisher"], cli.dependencies),
-    /unknown command: publisher[\s\S]*usage: kepos/i,
-  );
-});
-
-test("signal wait removes handlers after one awaited stop", async () => {
-  const beforeInt = process.listenerCount("SIGINT");
-  const beforeTerm = process.listenerCount("SIGTERM");
-  let stopped = 0;
-  const waiting = waitForSignal(async () => {
-    stopped++;
-  });
-
-  process.emit("SIGTERM", "SIGTERM");
-  await waiting;
-
-  assert.equal(stopped, 1);
-  assert.equal(process.listenerCount("SIGINT"), beforeInt);
-  assert.equal(process.listenerCount("SIGTERM"), beforeTerm);
+    ], {
+      ...base,
+      loadConfig: async () => emptyConfig(),
+      acquirePeerRuntimeLock: async () => ({ release: async () => undefined }),
+      startPeer: async (options) => {
+        options.observe?.({
+          component: "kepos",
+          event: "outer.connected",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          elapsedMs: 1,
+          role: "peer",
+        });
+        return running;
+      },
+      scheduleConfigReload: () => () => undefined,
+      waitForSignal: async (stop) => stop(),
+    });
+    assert.match(stderr.join("\n"), /Peer running: key=/);
+    assert.match(stdout.join("\n"), /\"event\":\"outer.connected\"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

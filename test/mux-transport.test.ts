@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import compactModule from "compact-encoding";
-import { Duplex, Transform } from "node:stream";
+import { Duplex, PassThrough, Transform } from "node:stream";
 import { once } from "node:events";
 import { test } from "node:test";
 import ProtomuxModule from "protomux";
 
 import {
+  createMuxPeer,
   createMuxPublisher,
   createMuxSubscriber,
   TerminalPairingError,
@@ -278,6 +279,162 @@ test("multiplexes independent service streams over one persistent connection", a
   navidrome.destroy();
   subscriber.close();
   publisher.close();
+});
+
+test("canonical mux peers negotiate one connection and serve both directions", async () => {
+  const [leftOuter, rightOuter] = framedPair();
+  const left = createMuxPeer(leftOuter, {
+    accept: async (serviceId) => prefixService(`right:${serviceId}:`),
+    serviceAuthorized: (serviceId) => serviceId !== "denied",
+    remotePublicKey: "11".repeat(32),
+  });
+  const right = createMuxPeer(rightOuter, {
+    accept: async (serviceId) => prefixService(`left:${serviceId}:`),
+    remotePublicKey: "22".repeat(32),
+  });
+
+  try {
+    assert.equal(await left.capability, "ready");
+    assert.equal(await right.capability, "ready");
+    assert.equal(await left.controlReady, "ready");
+    assert.equal(await right.controlReady, "ready");
+
+    const rightService = await left.open("right-service");
+    assert.equal(await exchange(rightService, "request"), "left:right-service:request");
+    rightService.destroy();
+
+    const leftService = await right.open("left-service");
+    assert.equal(await exchange(leftService, "response"), "right:left-service:response");
+    leftService.destroy();
+
+    await assert.rejects(
+      () => right.open("denied"),
+      /not authorized/i,
+    );
+    left.closeServiceChannels("missing");
+    right.closeUdpFlows("missing");
+  } finally {
+    left.close();
+    right.close();
+  }
+});
+
+test("canonical mux authorization can promote the same connection", async () => {
+  const [candidateOuter, approvedOuter] = framedPair();
+  const candidate = createMuxPeer(candidateOuter, {
+    authorized: false,
+    accept: async () => prefixService("candidate:"),
+  });
+  const approved = createMuxPeer(approvedOuter, {
+    accept: async () => prefixService("approved:"),
+  });
+
+  try {
+    assert.equal(await candidate.capability, "ready");
+    assert.equal(await approved.capability, "ready");
+    await assert.rejects(() => approved.open("before-approval"), /not approved/i);
+
+    candidate.authorize();
+    assert.equal(await candidate.controlReady, "ready");
+    const stream = await approved.open("after-approval");
+    assert.equal(await exchange(stream, "payload"), "candidate:payload");
+    stream.destroy();
+  } finally {
+    candidate.close();
+    approved.close();
+  }
+});
+
+test("canonical peer reports source failures, rejects unsupported kinds, and closes policy channels", async () => {
+  const [leftOuter, rightOuter] = framedPair();
+  const left = createMuxPeer(leftOuter, {
+    accept: async (serviceId) => {
+      if (serviceId === "down") throw new Error("source is unavailable");
+      return prefixService(`source:${serviceId}:`);
+    },
+    serviceKind: (serviceId) => serviceId === "udp" ? "udp" : "tcp",
+    remotePublicKey: "11".repeat(32),
+  });
+  const right = createMuxPeer(rightOuter, {
+    accept: async () => prefixService("unused:"),
+    remotePublicKey: "22".repeat(32),
+  });
+
+  try {
+    await Promise.all([left.capability, right.capability]);
+    await assert.rejects(() => right.open("down"), /source is unavailable/i);
+    await assert.rejects(() => right.open("udp"), /UDP service requires/i);
+
+    const stream = await right.open("ok");
+    assert.equal(await exchange(stream, "payload"), "source:ok:payload");
+    const closed = once(stream, "close");
+    left.closeServiceChannels("ok");
+    await closed;
+  } finally {
+    left.close();
+    right.close();
+  }
+
+  const [httpLeftOuter, httpRightOuter] = framedPair();
+  const httpLeft = createMuxPeer(httpLeftOuter, {
+    accept: async () => new PassThrough(),
+    serviceKind: () => "http",
+  });
+  const httpRight = createMuxPeer(httpRightOuter, {
+    accept: async () => new PassThrough(),
+  });
+  try {
+    const httpStream = await httpRight.open("http");
+    await once(httpStream, "close");
+  } finally {
+    httpLeft.close();
+    httpRight.close();
+  }
+
+  const [unsupportedOuter, unusedOuter] = framedPair();
+  const unsupported = createMuxPeer(unsupportedOuter, {
+    accept: async () => new PassThrough(),
+    capabilityTimeoutMs: 1,
+  });
+  try {
+    assert.equal(await unsupported.capability, "unsupported");
+    await assert.rejects(() => unsupported.open("service"), /reverse byte-stream/i);
+  } finally {
+    unsupported.close();
+    unusedOuter.destroy();
+  }
+});
+
+test("canonical mux tunnels propagate explicit and empty reset reasons", async () => {
+  const [leftOuter, rightOuter] = framedPair();
+  const left = createMuxPeer(leftOuter, {
+    accept: async () => prefixService("left:"),
+  });
+  const right = createMuxPeer(rightOuter, {
+    accept: async () => prefixService("right:"),
+  });
+  try {
+    const explicit = await right.open("explicit-reset");
+    explicit.once("error", () => undefined);
+    const explicitClosed = new Promise<void>((resolve) => {
+      explicit.once("close", () => resolve());
+    });
+    explicit.destroy(new Error("explicit reset"));
+    await explicitClosed;
+    await flushFrames();
+
+    const empty = await right.open("empty-reset");
+    empty.once("error", () => undefined);
+    const emptyClosed = new Promise<void>((resolve) => {
+      empty.once("close", () => resolve());
+    });
+    empty.destroy(new Error());
+    await emptyClosed;
+    await flushFrames();
+  } finally {
+    left.close();
+    right.close();
+  }
 });
 
 test("promotes a pairing candidate to services on the same outer", async () => {

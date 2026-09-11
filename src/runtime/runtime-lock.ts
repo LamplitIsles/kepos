@@ -13,41 +13,23 @@ export interface AcquireRuntimeLockOptions {
   description?: string;
 }
 
-export function subscriberRuntimeLockPath(stateDir: string): string {
+/** The single lock used by a canonical peer runtime. */
+export function peerRuntimeLockPath(stateDir: string): string {
   const resolvedStateDir = path.resolve(stateDir);
   return path.join(
     path.dirname(resolvedStateDir),
-    `.${path.basename(resolvedStateDir)}.subscriber.runtime.lock`,
+    `.${path.basename(resolvedStateDir)}.peer.runtime.lock`,
   );
 }
 
-export function publisherRuntimeLockPath(stateDir: string): string {
-  const resolvedStateDir = path.resolve(stateDir);
-  return path.join(
-    path.dirname(resolvedStateDir),
-    `.${path.basename(resolvedStateDir)}.publisher.runtime.lock`,
-  );
-}
-
-export async function acquireSubscriberRuntimeLock(
+export async function acquirePeerRuntimeLock(
   stateDir: string,
 ): Promise<RuntimeLock> {
   await mkdir(stateDir, { mode: 0o700, recursive: true });
   return acquireRuntimeLock({
-    lockPath: subscriberRuntimeLockPath(stateDir),
-    conflictMessage: "Subscriber identity is already in use",
-    description: "subscriber runtime lock",
-  });
-}
-
-export async function acquirePublisherRuntimeLock(
-  stateDir: string,
-): Promise<RuntimeLock> {
-  await mkdir(stateDir, { mode: 0o700, recursive: true });
-  return acquireRuntimeLock({
-    lockPath: publisherRuntimeLockPath(stateDir),
-    conflictMessage: "Publisher identity is already in use",
-    description: "publisher runtime lock",
+    lockPath: peerRuntimeLockPath(stateDir),
+    conflictMessage: "Peer identity is already in use",
+    description: "peer runtime lock",
   });
 }
 

@@ -1,34 +1,37 @@
-import { createSocket, type RemoteInfo, type Socket } from "node:dgram";
-
 import b4a from "b4a";
 import crypto from "hypercore-crypto";
+import { createSocket, type RemoteInfo, type Socket } from "node:dgram";
 
 import {
-  decodeUdpEnvelope,
-  encodeUdpDataEnvelopes,
-  decodeUdpFragment,
   boundedError,
+  decodeUdpEnvelope,
+  decodeUdpFragment,
+  encodeUdpDataEnvelopes,
+  nextMessageId,
   DatagramBudget,
+  UdpDatagramReassembler,
   UDP_FLOW_IDLE_TIMEOUT_MS,
   UDP_FLOW_ID_BYTES,
+  UDP_MAX_BYTES_PER_SECOND,
   UDP_MAX_DATAGRAMS_PER_SECOND,
   UDP_MAX_FLOWS_PER_CONNECTION,
   UDP_MAX_PAYLOAD_BYTES,
   UDP_MAX_PENDING_SENDS,
-  UDP_MAX_BYTES_PER_SECOND,
-  nextMessageId,
-  UdpDatagramReassembler,
   type SubscriberDatagramConnection,
   type UdpEnvelope,
 } from "../mux/udp.js";
 
-export interface RunningSubscriberUdpListener {
+export interface RunningPeerUdpBinding {
   kind: "udp";
   port: number;
+  setConnection: (
+    connection: SubscriberDatagramConnection | undefined,
+    generation?: number,
+  ) => void;
   close: () => Promise<void>;
 }
 
-export interface ListenSubscriberUdpServiceOptions {
+export interface PeerUdpBindingOptions {
   now?: () => number;
   schedule?: (delayMs: number, callback: () => void) => () => void;
   idleTimeoutMs?: number;
@@ -43,24 +46,30 @@ export interface ListenSubscriberUdpServiceOptions {
   onDrop?: (reason: string, fields?: Record<string, unknown>) => void;
 }
 
-interface SubscriberUdpFlow {
+interface BindingFlow {
   key: string;
   flowId: Uint8Array;
   sourceAddress: string;
   sourcePort: number;
+  generation: number;
   lastActivity: number;
   closed: boolean;
   cancelExpiry?: () => void;
   nextMessageId: number;
-  reassembler: UdpDatagramReassembler;
+  localReassembler: UdpDatagramReassembler;
+  remoteReassembler: UdpDatagramReassembler;
 }
 
-export async function listenSubscriberUdpService(
+/**
+ * Consume a configured local UDP port and put its datagrams on the currently
+ * authenticated dial-side UDP carrier.  The transport is replaceable so a
+ * reconnect cannot deliver a reply to a flow belonging to an old generation.
+ */
+export async function listenPeerUdpBinding(
   serviceId: string,
   port: number,
-  connection: SubscriberDatagramConnection | undefined,
-  options: ListenSubscriberUdpServiceOptions = {},
-): Promise<RunningSubscriberUdpListener> {
+  options: PeerUdpBindingOptions = {},
+): Promise<RunningPeerUdpBinding> {
   const now = options.now ?? Date.now;
   const schedule = options.schedule ?? defaultSchedule;
   const idleTimeoutMs = options.idleTimeoutMs ?? UDP_FLOW_IDLE_TIMEOUT_MS;
@@ -77,65 +86,76 @@ export async function listenSubscriberUdpService(
     options.maxBytesPerSecond ?? UDP_MAX_BYTES_PER_SECOND,
   );
   const socket = createSocket("udp4");
-  const flowsBySource = new Map<string, SubscriberUdpFlow>();
-  const flowsById = new Map<string, SubscriberUdpFlow>();
+  const flowsBySource = new Map<string, BindingFlow>();
+  const flowsById = new Map<string, BindingFlow>();
+  let connection: SubscriberDatagramConnection | undefined;
+  let generation = 0;
+  let unsubscribeMessage: (() => void) | undefined;
+  let unsubscribeReset: (() => void) | undefined;
   let pendingSends = 0;
   let closed = false;
   let bound = false;
 
-  const onSocketError = (error: Error): void => {
-    if (!bound || closed) return;
-    reportError(`Local UDP listener failed: ${error.message}`);
-  };
-  socket.on("error", onSocketError);
+  socket.on("error", (error: Error) => {
+    if (bound && !closed) reportError(`Local UDP binding failed: ${error.message}`);
+  });
   socket.on("message", (message: Buffer, remote: RemoteInfo) => {
     void receiveLocal(message, remote);
-  });
-
-  const unsubscribeMessage = connection?.onMessage((message) => {
-    void receiveRemote(message);
-  });
-  const unsubscribeReset = connection?.onReset(() => {
-    clearFlows();
-    reportError("UDP outer connection replaced; local flows will reopen");
   });
 
   try {
     await bind(socket, port);
     bound = true;
   } catch (error) {
-    unsubscribeMessage?.();
-    unsubscribeReset?.();
     await closeSocket(socket);
-    throw new Error(
-      `Unable to bind local UDP service ${serviceId}: ${errorMessage(error)}`,
-      { cause: error },
-    );
+    throw new Error(`Unable to bind local UDP service ${serviceId}: ${errorMessage(error)}`, { cause: error });
   }
-
   const address = socket.address();
   if (!address || typeof address === "string") {
     await closeSocket(socket);
-    throw new Error(`Local UDP ${serviceId} listener address is unavailable`);
+    throw new Error(`Local UDP ${serviceId} binding address is unavailable`);
   }
 
   return {
     kind: "udp",
     port: address.port,
+    setConnection(nextConnection, nextGeneration = generation + 1): void {
+      if (closed) return;
+      if (nextConnection === connection && nextGeneration === generation) return;
+      unsubscribeMessage?.();
+      unsubscribeReset?.();
+      unsubscribeMessage = undefined;
+      unsubscribeReset = undefined;
+      clearFlows();
+      connection = nextConnection;
+      generation = nextGeneration;
+      if (!nextConnection) return;
+      const boundGeneration = generation;
+      unsubscribeMessage = nextConnection.onMessage((message) => {
+        if (boundGeneration === generation && nextConnection === connection) {
+          void receiveRemote(message, nextConnection, boundGeneration);
+        }
+      });
+      unsubscribeReset = nextConnection.onReset(() => {
+        if (boundGeneration !== generation || nextConnection !== connection) return;
+        clearFlows();
+        reportError("UDP binding connection was reset; local flows will reopen");
+      });
+    },
     close: async () => {
       if (closed) return;
       closed = true;
       unsubscribeMessage?.();
       unsubscribeReset?.();
+      unsubscribeMessage = undefined;
+      unsubscribeReset = undefined;
+      connection = undefined;
       clearFlows();
       await closeSocket(socket);
     },
   };
 
-  async function receiveLocal(
-    message: Buffer,
-    remote: RemoteInfo,
-  ): Promise<void> {
+  async function receiveLocal(message: Buffer, remote: RemoteInfo): Promise<void> {
     if (closed || remote.address !== "127.0.0.1") return;
     if (message.byteLength > UDP_MAX_PAYLOAD_BYTES) {
       drop("oversize-local-datagram");
@@ -145,11 +165,9 @@ export async function listenSubscriberUdpService(
       drop("local-rate-limit");
       return;
     }
-    if (!connection) {
-      reportError("UDP datagram transport is unavailable on this connection");
-      return;
-    }
-    if (!connection.available()) {
+    const currentConnection = connection;
+    const currentGeneration = generation;
+    if (!currentConnection || !currentConnection.available()) {
       reportError("UDP datagram transport is unavailable on this connection");
       return;
     }
@@ -166,10 +184,19 @@ export async function listenSubscriberUdpService(
         flowId,
         sourceAddress: remote.address,
         sourcePort: remote.port,
+        generation: currentGeneration,
         lastActivity: now(),
         closed: false,
         nextMessageId: 0,
-        reassembler: new UdpDatagramReassembler({
+        localReassembler: new UdpDatagramReassembler({
+          now,
+          schedule,
+          timeoutMs: options.reassemblyTimeoutMs,
+          maxMessages: options.maxReassemblyMessages,
+          maxBytes: options.maxReassemblyBytes,
+          onDrop: (reason) => drop(reason),
+        }),
+        remoteReassembler: new UdpDatagramReassembler({
           now,
           schedule,
           timeoutMs: options.reassemblyTimeoutMs,
@@ -180,6 +207,10 @@ export async function listenSubscriberUdpService(
       };
       flowsBySource.set(sourceKey, flow);
       flowsById.set(flowKey(serviceId, flowId), flow);
+    } else if (flow.generation !== currentGeneration) {
+      removeFlow(flow);
+      drop("stale-generation");
+      return;
     }
     touch(flow);
     let encoded: Uint8Array[];
@@ -200,7 +231,9 @@ export async function listenSubscriberUdpService(
     }
     pendingSends += encoded.length;
     try {
-      const results = await Promise.all(encoded.map((fragment) => connection.send(fragment)));
+      if (connection !== currentConnection || generation !== currentGeneration || flow.closed) return;
+      const results = await Promise.all(encoded.map((fragment) => currentConnection.send(fragment)));
+      if (connection !== currentConnection || generation !== currentGeneration || flow.closed) return;
       for (const result of results) {
         if (!result.ok) reportError(result.error ?? "UDP datagram was dropped");
       }
@@ -209,8 +242,12 @@ export async function listenSubscriberUdpService(
     }
   }
 
-  async function receiveRemote(message: Uint8Array): Promise<void> {
-    if (closed) return;
+  async function receiveRemote(
+    message: Uint8Array,
+    currentConnection: SubscriberDatagramConnection,
+    currentGeneration: number,
+  ): Promise<void> {
+    if (closed || connection !== currentConnection || generation !== currentGeneration) return;
     let envelope: UdpEnvelope;
     try {
       envelope = decodeUdpEnvelope(message);
@@ -223,15 +260,13 @@ export async function listenSubscriberUdpService(
       return;
     }
     const flow = flowsById.get(flowKey(serviceId, envelope.flowId));
-    if (!flow || flow.closed) {
+    if (!flow || flow.closed || flow.generation !== currentGeneration) {
       drop("unknown-flow");
       return;
     }
     touch(flow);
     if (envelope.type === "error") {
-      reportError(
-        `Publisher rejected UDP flow: ${b4a.toString(envelope.payload, "utf8")}`,
-      );
+      reportError(`Peer rejected UDP flow: ${b4a.toString(envelope.payload, "utf8")}`);
       removeFlow(flow);
       return;
     }
@@ -242,7 +277,7 @@ export async function listenSubscriberUdpService(
     let payload = envelope.payload;
     if (envelope.type === "fragment") {
       try {
-        const reassembled = flow.reassembler.push(decodeUdpFragment(envelope));
+        const reassembled = flow.remoteReassembler.push(decodeUdpFragment(envelope));
         if (reassembled === undefined) return;
         payload = reassembled;
       } catch (error) {
@@ -250,27 +285,18 @@ export async function listenSubscriberUdpService(
         return;
       }
     }
-    if (pendingSends >= maxPendingSends) {
+    if (pendingSends >= maxPendingSends || !egressBudget.accept(payload.byteLength)) {
       drop("local-reply-limit");
-      return;
-    }
-    if (!egressBudget.accept(payload.byteLength)) {
-      drop("local-rate-limit");
       return;
     }
     pendingSends++;
     try {
       await new Promise<void>((resolve) => {
         try {
-          socket.send(
-            payload,
-            flow.sourcePort,
-            flow.sourceAddress,
-            (error) => {
-              if (error) reportError(`Local UDP reply failed: ${error.message}`);
-              resolve();
-            },
-          );
+          socket.send(payload, flow.sourcePort, flow.sourceAddress, (error) => {
+            if (error) reportError(`Local UDP reply failed: ${error.message}`);
+            resolve();
+          });
         } catch (error) {
           reportError(`Local UDP reply failed: ${errorMessage(error)}`);
           resolve();
@@ -281,12 +307,12 @@ export async function listenSubscriberUdpService(
     }
   }
 
-  function touch(flow: SubscriberUdpFlow): void {
+  function touch(flow: BindingFlow): void {
     flow.lastActivity = now();
     armExpiry(flow);
   }
 
-  function armExpiry(flow: SubscriberUdpFlow): void {
+  function armExpiry(flow: BindingFlow): void {
     flow.cancelExpiry?.();
     flow.cancelExpiry = schedule(idleTimeoutMs, () => {
       if (flow.closed) return;
@@ -295,12 +321,13 @@ export async function listenSubscriberUdpService(
     });
   }
 
-  function removeFlow(flow: SubscriberUdpFlow): void {
+  function removeFlow(flow: BindingFlow): void {
     if (flow.closed) return;
     flow.closed = true;
     flow.cancelExpiry?.();
     flow.cancelExpiry = undefined;
-    flow.reassembler.clear();
+    flow.localReassembler.clear();
+    flow.remoteReassembler.clear();
     flowsBySource.delete(`${flow.sourceAddress}:${flow.sourcePort}`);
     flowsById.delete(flowKey(serviceId, flow.flowId));
   }
@@ -318,22 +345,24 @@ export async function listenSubscriberUdpService(
   }
 }
 
-async function bind(socket: Socket, port: number): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
+function bind(socket: Socket, port: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     const onError = (error: Error): void => {
       socket.off("error", onError);
       reject(error);
     };
-    socket.once("error", onError);
-    socket.bind(port, "127.0.0.1", () => {
+    const onListening = (): void => {
       socket.off("error", onError);
       resolve();
-    });
+    };
+    socket.once("error", onError);
+    socket.once("listening", onListening);
+    socket.bind(port, "127.0.0.1");
   });
 }
 
-async function closeSocket(socket: Socket): Promise<void> {
-  await new Promise<void>((resolve) => {
+function closeSocket(socket: Socket): Promise<void> {
+  return new Promise<void>((resolve) => {
     try {
       socket.close(() => resolve());
     } catch {

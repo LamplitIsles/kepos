@@ -2,7 +2,7 @@
   "name": "@lamplitisles/kepos-android-worklet",
   "version": "0.0.0",
   "private": true,
-  "description": "Kepos subscriber entry point for an Android Bare Worklet",
+  "description": "Kepos canonical peer entry point for an Android Bare Worklet",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/main.js",

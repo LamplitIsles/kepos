@@ -1,6 +1,7 @@
 # ADR 0005: Centralize built-in service presentation
 
-Status: Accepted
+Status: Accepted (historical role-specific presentation model; canonical
+peer surface superseded by ADR 0013 and `src/services/presentation.ts`)
 
 Date: 2026-07-24
 
@@ -9,12 +10,19 @@ BookOrbit/Mihomo presentations.
 
 ## Context
 
+The role-specific resolver described here was superseded by the canonical
+peer service snapshot in ADR 0013. `src/runtime/service-handlers.ts` is no
+longer a production module; the remaining text records the earlier
+presentation decision and its durable service-action intent. The implemented
+owner is now `src/services/presentation.ts`, which carries the same action
+policy through canonical peer status to desktop and Android.
+
 The publisher registry describes service identity and transport, but it does
 not say whether a client should open a service, copy an address, copy a command,
 or only show it. Android and desktop need the same product behavior without
 duplicating service-id checks in Kotlin and WebView code.
 
-## Decision
+## Historical decision
 
 `src/runtime/service-handlers.ts` is the single source of truth for built-in
 service presentation. It maps a service id to its action, icon, and sort group,
@@ -48,6 +56,21 @@ The Android Worklet sends the resolved action, icon, URL, and copy text through
 the existing snapshot protocol. Kotlin renders those values and does not infer
 behavior from service ids. The desktop runtime calls the same resolver before
 sending its snapshot to the WebView.
+
+## Current superseding contract
+
+`src/services/presentation.ts` is the single source of truth for built-in
+service presentation in the canonical peer runtime. It retains the action,
+icon, URL, and endpoint/command mapping above, adds explicit UDP endpoint
+presentation for hosts that support forward UDP bindings, and gives unknown raw
+TCP services a copy-endpoint action instead of a blind HTTP URL. Canonical
+status carries the resulting metadata to both shipped clients. Android filters
+UDP entries because its supported client boundary has no local UDP operation.
+Peer identity/state ownership is defined by
+[ADR 0013](0013-separate-connection-roles-from-service-roles.md); the older
+publisher identity/state decision in
+[ADR 0010](0010-publisher-identity-state-and-toml-policy.md) remains historical
+and is not another runtime or configuration source.
 
 SSH remains platform-aware. Desktop can copy a command when its subscriber has
 an explicit local SSH port. Android currently exposes no local SSH listener, so

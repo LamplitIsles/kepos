@@ -7,63 +7,58 @@ import type { DesktopSnapshot } from "../apps/desktop/src/protocol.js";
 const initial: DesktopSnapshot = {
   type: "snapshot",
   appPhase: "running",
-  subscriber: {
+  peer: {
     phase: "running",
-    connection: "connected",
-    subscriberKey: "cd".repeat(32),
-    remotePublisher: {
-      displayName: "kosmos",
-      publisherKey: "e4".repeat(32),
-      keyFingerprint: "e499c38286e33f48",
-    },
+    peerKey: "cd".repeat(32),
     gatewayPort: 17_480,
+    connections: [],
     services: [
       {
         id: "forgejo",
         name: "Forgejo",
+        kind: "http",
+        source: { localPort: 8080 },
+        available: true,
         access: "http",
         action: "open",
         icon: "git",
-        available: true,
         url: "http://forgejo.localhost:17480/",
-      },
-      {
-        id: "navidrome",
-        name: "Navidrome",
-        access: "http",
-        action: "copy-url",
-        icon: "music",
-        available: true,
-        url: "http://navidrome.localhost:17480",
-        copyText: "http://navidrome.localhost:17480",
       },
       {
         id: "ssh",
         name: "SSH",
-        access: "ssh",
-        action: "copy-command",
-        icon: "terminal",
+        kind: "tcp",
+        source: { localPort: 22 },
         available: true,
-        copyText: "ssh -p 2222 127.0.0.1",
       },
     ],
+    bindings: [
+      {
+        peer: "nuc",
+        service: "forgejo",
+        listen: { localPort: 0 },
+        available: true,
+      },
+    ],
+    pairing: { phase: "idle" },
   },
 };
 
-const pairingActions = {
-  approvePairing: async (): Promise<void> => undefined,
-  cancelPairing: async (): Promise<void> => undefined,
-  createPairingInvitation: async (): Promise<void> => undefined,
-  denyPairing: async (): Promise<void> => undefined,
-  setSubscriberPublisher: async (): Promise<void> => undefined,
-  copyDiagnostics: async (): Promise<string> => "",
-};
+function actions(events: string[] = []) {
+  return {
+    approvePairing: async (): Promise<void> => { events.push("approve"); },
+    cancelPairing: async (): Promise<void> => { events.push("cancel"); },
+    createPairingInvitation: async (): Promise<void> => { events.push("create"); },
+    denyPairing: async (): Promise<void> => { events.push("deny"); },
+    copyDiagnostics: async (): Promise<string> => "",
+  };
+}
 
-test("desktop controller sends the latest snapshot after page readiness", async () => {
+test("desktop controller sends the latest canonical snapshot after page readiness", async () => {
   const sent: string[] = [];
   const controller = createDesktopController({
     initialSnapshot: initial,
-    ...pairingActions,
+    ...actions(),
     send: (message) => sent.push(message),
     openService: async () => {},
     quit: async () => {},
@@ -71,123 +66,125 @@ test("desktop controller sends the latest snapshot after page readiness", async 
 
   controller.publish({
     ...initial,
-    subscriber: { ...initial.subscriber!, connection: "reconnecting" },
+    peer: { ...initial.peer!, connections: [{
+      label: "phone",
+      publicKey: "ef".repeat(32),
+      connection: "accept",
+      status: "reconnecting",
+      generation: 2,
+      capability: "ready",
+      services: 0,
+    }] },
   });
   assert.deepEqual(sent, []);
-
   await controller.receive('{"type":"ready"}');
-  assert.deepEqual(sent.map((message) => JSON.parse(message)), [
-    {
-      ...initial,
-      subscriber: { ...initial.subscriber!, connection: "reconnecting" },
-    },
-  ]);
-
+  assert.deepEqual(JSON.parse(sent[0] ?? "null"), JSON.parse(JSON.stringify({
+    ...initial,
+    peer: { ...initial.peer!, connections: [{
+      label: "phone",
+      publicKey: "ef".repeat(32),
+      connection: "accept",
+      status: "reconnecting",
+      generation: 2,
+      capability: "ready",
+      services: 0,
+    }] },
+  })));
   controller.publish(initial);
   assert.equal(sent.length, 2);
-  assert.deepEqual(JSON.parse(sent.at(-1) ?? "null"), initial);
   controller.publish(initial);
   assert.equal(sent.length, 2);
-
-  await controller.receive('{"type":"ready"}');
-  assert.equal(sent.length, 3);
-  assert.deepEqual(JSON.parse(sent.at(-1) ?? "null"), initial);
 });
 
-test("desktop controller opens only a current validated HTTP service", async () => {
+test("desktop controller opens only an available canonical HTTP service", async () => {
   const opened: string[] = [];
   const controller = createDesktopController({
     initialSnapshot: initial,
-    ...pairingActions,
+    ...actions(),
     send: () => {},
-    openService: async (url) => {
-      opened.push(url);
+    openService: async (url) => { opened.push(url); },
+    quit: async () => {},
+  });
+  await controller.receive('{"type":"openService","serviceId":"forgejo"}');
+  assert.deepEqual(opened, ["http://forgejo.localhost:17480/"]);
+  await assert.rejects(controller.receive('{"type":"openService","serviceId":"ssh"}'), /does not provide an open action/);
+  await assert.rejects(controller.receive('{"type":"openService","serviceId":"missing"}'), /not available/);
+});
+
+test("desktop controller preserves canonical service selection errors", async () => {
+  const conflict: DesktopSnapshot = {
+    ...initial,
+    peer: {
+      ...initial.peer!,
+      services: [{
+        id: "docs",
+        name: "Docs",
+        kind: "http",
+        source: { peer: "peer-one", service: "docs" },
+        available: false,
+        action: "open",
+        icon: "web",
+        url: "http://docs.localhost:17480/",
+        error: "Service is ambiguous: docs; configure one explicit binding",
+      }],
     },
+  };
+  const controller = createDesktopController({
+    initialSnapshot: conflict,
+    ...actions(),
+    send: () => {},
+    openService: async () => {},
     quit: async () => {},
   });
 
-  await controller.receive(
-    '{"type":"openService","serviceId":"forgejo"}',
-  );
-  assert.deepEqual(opened, ["http://forgejo.localhost:17480/"]);
-
   await assert.rejects(
-    controller.receive('{"type":"openService","serviceId":"navidrome"}'),
-    /not an available HTTP service/,
-  );
-
-  await assert.rejects(
-    controller.receive('{"type":"openService","serviceId":"ssh"}'),
-    /not an available HTTP service/,
-  );
-  await assert.rejects(
-    controller.receive('{"type":"openService","serviceId":"missing"}'),
-    /not an available HTTP service/,
+    controller.receive('{"type":"openService","serviceId":"docs"}'),
+    /Service is ambiguous: docs/,
   );
 });
 
 test("desktop controller serializes commands and quits once", async () => {
   const events: string[] = [];
   let releaseOpen: (() => void) | undefined;
-  const opening = new Promise<void>((resolve) => {
-    releaseOpen = resolve;
-  });
+  const opening = new Promise<void>((resolve) => { releaseOpen = resolve; });
   const controller = createDesktopController({
     initialSnapshot: initial,
-    ...pairingActions,
+    ...actions(events),
     send: () => {},
     openService: async () => {
       events.push("open:start");
       await opening;
       events.push("open:end");
     },
-    quit: async () => {
-      events.push("quit");
-    },
+    quit: async () => { events.push("quit"); },
   });
-
-  const first = controller.receive(
-    '{"type":"openService","serviceId":"forgejo"}',
-  );
+  const first = controller.receive('{"type":"openService","serviceId":"forgejo"}');
   const second = controller.receive('{"type":"quit"}');
   const third = controller.receive('{"type":"quit"}');
-
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.deepEqual(events, ["open:start"]);
   releaseOpen?.();
   await Promise.all([first, second, third]);
-
   assert.deepEqual(events, ["open:start", "open:end", "quit"]);
 });
 
-test("desktop controller forwards pairing actions in command order", async () => {
+test("desktop controller forwards canonical pairing and diagnostics actions in order", async () => {
   const events: string[] = [];
+  const sent: string[] = [];
   const controller = createDesktopController({
     initialSnapshot: initial,
-    send: () => undefined,
-    openService: async () => undefined,
-    createPairingInvitation: async () => {
-      events.push("create");
-    },
-    cancelPairing: async () => {
-      events.push("cancel");
-    },
-    approvePairing: async () => {
-      events.push("approve");
-    },
-    denyPairing: async () => {
-      events.push("deny");
-    },
-    setSubscriberPublisher: async () => undefined,
-    copyDiagnostics: async () => "",
-    quit: async () => undefined,
+    ...actions(events),
+    send: (message) => sent.push(message),
+    openService: async () => {},
+    quit: async () => {},
   });
-
   await Promise.all([
     controller.receive('{"type":"createPairingInvitation"}'),
     controller.receive('{"type":"cancelPairing"}'),
     controller.receive('{"type":"approvePairing"}'),
     controller.receive('{"type":"denyPairing"}'),
+    controller.receive('{"type":"copyDiagnostics"}'),
   ]);
   assert.deepEqual(events, ["create", "cancel", "approve", "deny"]);
+  assert.deepEqual(JSON.parse(sent.at(-1) ?? "null"), { type: "diagnosticsResult", ok: true, summary: "" });
 });

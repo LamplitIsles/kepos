@@ -29,15 +29,14 @@ export function defaultKeposConfigPath(
   );
 }
 
-export function defaultKeposRoleStatePath(
-  role: "publisher" | "subscriber",
+export function defaultKeposPeerStatePath(
   environment: PlatformEnvironment = process.env,
   homeDirectory = os.homedir(),
   platform: NodeJS.Platform = process.platform,
 ): string {
   return pathForPlatform(platform).join(
     defaultKeposStateRoot(environment, homeDirectory, platform),
-    role,
+    "peer",
   );
 }
 

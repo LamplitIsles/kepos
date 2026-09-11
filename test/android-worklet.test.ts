@@ -5,7 +5,7 @@ import { FrameDecoder, encodeFrame } from "../packages/bare-host-protocol/src/fr
 import type { HostEnvelope } from "../packages/bare-host-protocol/src/messages.js";
 import { WorkletController } from "../packages/kepos-android-worklet/src/controller.js";
 
-test("Android Worklet controller answers ping and status", async () => {
+test("canonical Android Worklet answers ping and publishes peer status", async () => {
   const output: HostEnvelope[] = [];
   const decoder = new FrameDecoder();
   const controller = new WorkletController({
@@ -14,16 +14,21 @@ test("Android Worklet controller answers ping and status", async () => {
     write(frame) {
       output.push(...decoder.push(frame));
     },
+    status() {
+      return {
+        role: "peer",
+        peerKey: "ab".repeat(32),
+        connections: [],
+        services: [],
+        bindings: [],
+      };
+    },
     async stopEcho() {},
   });
 
   controller.start();
-  await controller.receive(
-    encodeFrame({ version: 1, kind: "request", id: 1, method: "ping" }),
-  );
-  await controller.receive(
-    encodeFrame({ version: 1, kind: "request", id: 2, method: "status" }),
-  );
+  await controller.receive(encodeFrame({ version: 1, kind: "request", id: 1, method: "ping" }));
+  await controller.receive(encodeFrame({ version: 1, kind: "request", id: 2, method: "status" }));
 
   assert.deepEqual(output, [
     {
@@ -34,6 +39,11 @@ test("Android Worklet controller answers ping and status", async () => {
         state: "running",
         runtimeId: "runtime-1",
         echoUrl: "http://127.0.0.1:17482/",
+        role: "peer",
+        peerKey: "ab".repeat(32),
+        connections: [],
+        services: [],
+        bindings: [],
       },
     },
     {
@@ -50,15 +60,50 @@ test("Android Worklet controller answers ping and status", async () => {
         state: "running",
         runtimeId: "runtime-1",
         echoUrl: "http://127.0.0.1:17482/",
+        role: "peer",
+        peerKey: "ab".repeat(32),
+        connections: [],
+        services: [],
+        bindings: [],
       },
     },
   ]);
 });
 
-test("Android Worklet controller closes echo before acknowledging stop", async () => {
+test("Android Worklet republishes status only while running", () => {
   const output: HostEnvelope[] = [];
   const decoder = new FrameDecoder();
-  let echoStopped = false;
+  const controller = new WorkletController({
+    runtimeId: "runtime-1",
+    echoUrl: "http://127.0.0.1:17482/",
+    write(frame) {
+      output.push(...decoder.push(frame));
+    },
+    async stopEcho() {},
+  });
+
+  controller.publishStatus();
+  assert.deepEqual(output, []);
+  controller.start();
+  output.length = 0;
+  controller.publishStatus();
+  assert.deepEqual(output, [{
+    version: 1,
+    kind: "event",
+    event: "runtime.stateChanged",
+    data: {
+      state: "running",
+      runtimeId: "runtime-1",
+      echoUrl: "http://127.0.0.1:17482/",
+    },
+  }]);
+  controller.start();
+});
+
+test("Android Worklet closes the canonical peer before acknowledging stop", async () => {
+  const output: HostEnvelope[] = [];
+  const decoder = new FrameDecoder();
+  let peerStopped = false;
   const controller = new WorkletController({
     runtimeId: "runtime-1",
     echoUrl: "http://127.0.0.1:17482/",
@@ -66,28 +111,33 @@ test("Android Worklet controller closes echo before acknowledging stop", async (
       output.push(...decoder.push(frame));
     },
     async stopEcho() {
-      echoStopped = true;
+      peerStopped = true;
     },
   });
   controller.start();
+  await controller.receive(encodeFrame({ version: 1, kind: "request", id: 3, method: "stop" }));
 
-  await controller.receive(
-    encodeFrame({ version: 1, kind: "request", id: 3, method: "stop" }),
-  );
-
-  assert.equal(echoStopped, true);
+  assert.equal(peerStopped, true);
   assert.deepEqual(output.slice(1), [
     {
       version: 1,
       kind: "event",
       event: "runtime.stateChanged",
-      data: { state: "stopping", runtimeId: "runtime-1" },
+      data: {
+        state: "stopping",
+        runtimeId: "runtime-1",
+        echoUrl: "http://127.0.0.1:17482/",
+      },
     },
     {
       version: 1,
       kind: "event",
       event: "runtime.stateChanged",
-      data: { state: "stopped", runtimeId: "runtime-1" },
+      data: {
+        state: "stopped",
+        runtimeId: "runtime-1",
+        echoUrl: "http://127.0.0.1:17482/",
+      },
     },
     {
       version: 1,
@@ -98,199 +148,115 @@ test("Android Worklet controller closes echo before acknowledging stop", async (
   ]);
 });
 
-test("Android Worklet controller configures one publisher without stopping", async () => {
+test("Android Worklet forwards canonical configuration and pairing operations", async () => {
   const output: HostEnvelope[] = [];
   const decoder = new FrameDecoder();
-  let configuredKey: string | undefined;
-  let stopped = false;
+  const configured: unknown[] = [];
+  const paired: unknown[] = [];
   const controller = new WorkletController({
     runtimeId: "runtime-1",
     echoUrl: "http://127.0.0.1:17482/",
     write(frame) {
       output.push(...decoder.push(frame));
     },
-    async stopEcho() {
-      stopped = true;
+    async configurePeer(publicKey, label, connection) {
+      configured.push({ publicKey, label, connection });
+      return { configured: true };
     },
-    async configurePublisher(publisherKey: string) {
-      configuredKey = publisherKey;
-      return { connection: "connecting" };
-    },
-    status() {
-      return {
-        subscriberPublicKey: "cd".repeat(32),
-        connection: configuredKey ? "connecting" : "offline",
-        homeUrl: "http://home.localhost:17480/",
-        navidromeUrl: "http://navidrome.localhost:17480/",
-      };
-    },
-  });
-  controller.start();
-
-  await controller.receive(
-    encodeFrame({
-      version: 1,
-      kind: "request",
-      id: 4,
-      method: "configure",
-      params: { publisherKey: "ab".repeat(32) },
-    }),
-  );
-
-  assert.equal(configuredKey, "ab".repeat(32));
-  assert.equal(stopped, false);
-  assert.deepEqual(output.at(-2), {
-    version: 1,
-    kind: "event",
-    event: "runtime.stateChanged",
-    data: {
-      state: "running",
-      runtimeId: "runtime-1",
-      echoUrl: "http://127.0.0.1:17482/",
-      subscriberPublicKey: "cd".repeat(32),
-      connection: "connecting",
-      homeUrl: "http://home.localhost:17480/",
-      navidromeUrl: "http://navidrome.localhost:17480/",
-    },
-  });
-  assert.deepEqual(output.at(-1), {
-    version: 1,
-    kind: "response",
-    id: 4,
-    result: { connection: "connecting" },
-  });
-
-  await controller.receive(
-    encodeFrame({ version: 1, kind: "request", id: 5, method: "status" }),
-  );
-  assert.deepEqual(output.at(-1), {
-    version: 1,
-    kind: "response",
-    id: 5,
-    result: {
-      state: "running",
-      runtimeId: "runtime-1",
-      echoUrl: "http://127.0.0.1:17482/",
-      subscriberPublicKey: "cd".repeat(32),
-      connection: "connecting",
-      homeUrl: "http://home.localhost:17480/",
-      navidromeUrl: "http://navidrome.localhost:17480/",
-    },
-  });
-
-  configuredKey = undefined;
-  controller.publishStatus();
-  assert.equal(
-    (output.at(-1) as { data?: { connection?: string } }).data?.connection,
-    "offline",
-  );
-});
-
-test("Android Worklet controller forwards one pairing invitation", async () => {
-  const output: HostEnvelope[] = [];
-  const decoder = new FrameDecoder();
-  let received: unknown;
-  const controller = new WorkletController({
-    runtimeId: "runtime-1",
-    echoUrl: "http://127.0.0.1:17482/",
-    write(frame) {
-      output.push(...decoder.push(frame));
+    async pairPeer(invitation, deviceLabel, platform) {
+      paired.push({ invitation, deviceLabel, platform });
+      return { paired: true };
     },
     async stopEcho() {},
-    async pairPublisher(invitation, deviceLabel, platform) {
-      received = { invitation, deviceLabel, platform };
-      return { connection: "connected" };
-    },
   });
   controller.start();
+  output.length = 0;
+  await controller.receive(encodeFrame({
+    version: 1,
+    kind: "request",
+    id: 9,
+    method: "configure",
+    params: {
+      publicKey: "ab".repeat(32),
+      label: "phone",
+      connection: "dial",
+    },
+  }));
+  await controller.receive(encodeFrame({
+    version: 1,
+    kind: "request",
+    id: 10,
+    method: "pair",
+    params: {
+      invitation: "kepos://pair?v=1",
+      deviceLabel: "Pixel",
+      platform: "android",
+    },
+  }));
 
-  const textEncoder = globalThis.TextEncoder;
-  Object.defineProperty(globalThis, "TextEncoder", {
-    configurable: true,
-    value: undefined,
-  });
-  try {
-    await controller.receive(
-      encodeFrame({
-        version: 1,
-        kind: "request",
-        id: 5,
-        method: "pair",
-        params: {
-          invitation: "kepos://pair?v=1&token=one-time",
-          deviceLabel: "Neil's Pixel",
-          platform: "android",
-        },
-      }),
-    );
-  } finally {
-    Object.defineProperty(globalThis, "TextEncoder", {
-      configurable: true,
-      value: textEncoder,
-    });
-  }
-
-  assert.deepEqual(received, {
-    invitation: "kepos://pair?v=1&token=one-time",
-    deviceLabel: "Neil's Pixel",
+  assert.deepEqual(configured, [{
+    publicKey: "ab".repeat(32),
+    label: "phone",
+    connection: "dial",
+  }]);
+  assert.deepEqual(paired, [{
+    invitation: "kepos://pair?v=1",
+    deviceLabel: "Pixel",
     platform: "android",
-  });
-  assert.deepEqual(output.at(-1), {
-    version: 1,
-    kind: "response",
-    id: 5,
-    result: { connection: "connected" },
-  });
+  }]);
+  assert.deepEqual(
+    output.filter((envelope) => envelope.kind === "response"),
+    [
+      {
+        version: 1,
+        kind: "response",
+        id: 9,
+        result: { configured: true },
+      },
+      {
+        version: 1,
+        kind: "response",
+        id: 10,
+        result: { paired: true },
+      },
+    ],
+  );
 });
 
-test("Android Worklet controller serializes concurrent publisher configuration", async () => {
+test("Android Worklet rejects the obsolete role-specific configure field", async () => {
+  const output: HostEnvelope[] = [];
   const decoder = new FrameDecoder();
-  const configured: string[] = [];
-  let releaseFirst: (() => void) | undefined;
-  const firstBlocked = new Promise<void>((resolve) => {
-    releaseFirst = resolve;
-  });
+  let configured = false;
   const controller = new WorkletController({
     runtimeId: "runtime-1",
     echoUrl: "http://127.0.0.1:17482/",
     write(frame) {
-      decoder.push(frame);
+      output.push(...decoder.push(frame));
+    },
+    async configurePeer() {
+      configured = true;
     },
     async stopEcho() {},
-    async configurePublisher(publisherKey) {
-      configured.push(publisherKey);
-      if (configured.length === 1) await firstBlocked;
-      return { connection: "connecting" };
-    },
   });
   controller.start();
+  output.length = 0;
 
-  const first = controller.receive(
-    encodeFrame({
-      version: 1,
-      kind: "request",
-      id: 6,
-      method: "configure",
-      params: { publisherKey: "ab".repeat(32) },
-    }),
-  );
-  await Promise.resolve();
-  const second = controller.receive(
-    encodeFrame({
-      version: 1,
-      kind: "request",
-      id: 7,
-      method: "configure",
-      params: { publisherKey: "cd".repeat(32) },
-    }),
-  );
-  await Promise.resolve();
+  await controller.receive(encodeFrame({
+    version: 1,
+    kind: "request",
+    id: 11,
+    method: "configure",
+    params: { publisherKey: "ab".repeat(32) },
+  }));
 
-  try {
-    assert.deepEqual(configured, ["ab".repeat(32)]);
-  } finally {
-    releaseFirst?.();
-    await Promise.all([first, second]);
-  }
-  assert.deepEqual(configured, ["ab".repeat(32), "cd".repeat(32)]);
+  assert.equal(configured, false);
+  assert.deepEqual(output, [{
+    version: 1,
+    kind: "error",
+    id: 11,
+    error: {
+      code: "invalid_configuration",
+      message: "publicKey must be 32 bytes of lowercase hex",
+    },
+  }]);
 });

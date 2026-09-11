@@ -1,14 +1,10 @@
 import * as b4a from "b4a";
 
-import type {
-  DesktopConnection,
-  DesktopSnapshot,
-} from "./protocol.js";
+import type { DesktopConnection, DesktopSnapshot } from "./protocol.js";
 
 const maximumMessageBytes = 64 * 1024;
 const smokeRenderMessageType = "windows-smoke-rendered" as const;
 const connections: readonly DesktopConnection[] = [
-  "unconfigured",
   "connecting",
   "connected",
   "reconnecting",
@@ -17,33 +13,23 @@ const connections: readonly DesktopConnection[] = [
 
 export interface DesktopSmokeRenderAcknowledgement {
   type: typeof smokeRenderMessageType;
+  role: "peer";
   connection: DesktopConnection;
   serviceCount: number;
-  subscriberKeyPresent: boolean;
-  connectFormVisible: boolean;
+  peerKeyPresent: boolean;
+  connectFormVisible: false;
 }
 
 export function isHealthySmokeSnapshot(
   snapshot: DesktopSnapshot | undefined,
 ): snapshot is DesktopSnapshot {
-  if (!snapshot || snapshot.appPhase !== "running") return false;
-  if (snapshot.publisher && snapshot.publisher.phase !== "running") return false;
-  if (snapshot.subscriber && snapshot.subscriber.phase !== "running") return false;
-  return Boolean(snapshot.publisher || snapshot.subscriber);
-}
-
-export function isHealthyUnconfiguredSmokeSnapshot(
-  snapshot: DesktopSnapshot | undefined,
-): snapshot is DesktopSnapshot & {
-  subscriber: NonNullable<DesktopSnapshot["subscriber"]>;
-} {
-  return (
-    isHealthySmokeSnapshot(snapshot) &&
-    snapshot.subscriber !== undefined &&
-    snapshot.subscriber.phase === "running" &&
-    snapshot.subscriber.connection === "unconfigured" &&
-    typeof snapshot.subscriber.subscriberKey === "string" &&
-    snapshot.subscriber.subscriberKey.length > 0
+  return Boolean(
+    snapshot &&
+      snapshot.appPhase === "running" &&
+      snapshot.peer &&
+      snapshot.peer.phase === "running" &&
+      typeof snapshot.peer.peerKey === "string" &&
+      snapshot.peer.peerKey.length > 0,
   );
 }
 
@@ -53,7 +39,6 @@ export function parseDesktopSmokeRenderAcknowledgement(
   if (b4a.byteLength(source, "utf8") > maximumMessageBytes) {
     throw new Error("desktop smoke acknowledgement exceeds 64 KiB");
   }
-
   let value: unknown;
   try {
     value = JSON.parse(source);
@@ -63,14 +48,15 @@ export function parseDesktopSmokeRenderAcknowledgement(
     });
   }
   if (!isRecord(value) || value.type !== smokeRenderMessageType) return undefined;
-
   rejectUnknownFields(value, [
     "type",
+    "role",
     "connection",
     "serviceCount",
-    "subscriberKeyPresent",
+    "peerKeyPresent",
     "connectFormVisible",
   ]);
+  if (value.role !== "peer") throw new Error("desktop smoke acknowledgement role is invalid");
   if (
     typeof value.connection !== "string" ||
     !connections.includes(value.connection as DesktopConnection)
@@ -84,23 +70,19 @@ export function parseDesktopSmokeRenderAcknowledgement(
   ) {
     throw new Error("desktop smoke acknowledgement service count is invalid");
   }
-  if (typeof value.subscriberKeyPresent !== "boolean") {
-    throw new Error(
-      "desktop smoke acknowledgement subscriber key presence is invalid",
-    );
+  if (typeof value.peerKeyPresent !== "boolean") {
+    throw new Error("desktop smoke acknowledgement peer key presence is invalid");
   }
-  if (typeof value.connectFormVisible !== "boolean") {
-    throw new Error(
-      "desktop smoke acknowledgement connect form visibility is invalid",
-    );
+  if (value.connectFormVisible !== false) {
+    throw new Error("desktop smoke acknowledgement connect form must be hidden");
   }
-
   return {
     type: smokeRenderMessageType,
+    role: "peer",
     connection: value.connection as DesktopConnection,
     serviceCount: value.serviceCount,
-    subscriberKeyPresent: value.subscriberKeyPresent,
-    connectFormVisible: value.connectFormVisible,
+    peerKeyPresent: value.peerKeyPresent,
+    connectFormVisible: false,
   };
 }
 
@@ -114,7 +96,5 @@ function rejectUnknownFields(
 ): void {
   const allowedFields = new Set(allowed);
   const unknown = Object.keys(value).find((field) => !allowedFields.has(field));
-  if (unknown) {
-    throw new Error(`desktop smoke acknowledgement has unknown field: ${unknown}`);
-  }
+  if (unknown) throw new Error(`desktop smoke acknowledgement has unknown field: ${unknown}`);
 }

@@ -5,6 +5,7 @@ export type ServiceAction =
   | "copy-command"
   | "copy-url"
   | "copy-endpoint";
+
 export type ServiceIcon =
   | "book"
   | "build"
@@ -29,6 +30,23 @@ export interface ServicePresentation {
   copyText?: string;
 }
 
+export interface LocalServiceMapping {
+  kind: "tcp" | "udp";
+  port?: number;
+  /** A Unix endpoint is copied as a named endpoint instead of as a port. */
+  endpoint?: string;
+}
+
+export interface ServicePresentationInput {
+  id: string;
+  name: string;
+  kind: "tcp" | "http" | "udp";
+  /** Access metadata retained when a legacy-compatible registry says tcp. */
+  access?: "http" | "tcp";
+  available?: boolean;
+  error?: string;
+}
+
 interface BuiltInServiceHandler {
   action: ServiceAction;
   httpUrl?: "open" | "origin";
@@ -40,6 +58,11 @@ interface BuiltInServiceHandler {
   sortGroup: 0 | 1 | 2;
 }
 
+/**
+ * The service catalog is deliberately data-only.  Both shipped clients use
+ * this same mapping, while the peer runtime supplies the actual port or Unix
+ * endpoint learned from its canonical binding state.
+ */
 export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
   bookorbit: {
     action: "open",
@@ -64,7 +87,7 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
     icon: "terminal",
     localCommand: {
       access: "http",
-      format: (localPort) => `http://127.0.0.1:${localPort}/`,
+      format: (localPort: number) => `http://127.0.0.1:${localPort}/`,
     },
     sortGroup: 0,
   },
@@ -73,7 +96,7 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
     icon: "dagger",
     localCommand: {
       access: "tcp",
-      format: (localPort) =>
+      format: (localPort: number) =>
         `export _EXPERIMENTAL_DAGGER_RUNNER_HOST=tcp://127.0.0.1:${localPort}`,
     },
     sortGroup: 1,
@@ -84,7 +107,7 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
     icon: "proxy",
     localCommand: {
       access: "tcp",
-      format: (localPort) => `socks5://127.0.0.1:${localPort}`,
+      format: (localPort: number) => `socks5://127.0.0.1:${localPort}`,
     },
     sortGroup: 1,
   },
@@ -105,7 +128,7 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
     icon: "terminal",
     localCommand: {
       access: "ssh",
-      format: (localPort) => `ssh -p ${localPort} 127.0.0.1`,
+      format: (localPort: number) => `ssh -p ${localPort} 127.0.0.1`,
     },
     sortGroup: 1,
   },
@@ -124,6 +147,12 @@ const DEFAULT_HTTP_SERVICE_HANDLER = Object.freeze({
   sortGroup: 0,
 } satisfies BuiltInServiceHandler);
 
+const DEFAULT_TCP_SERVICE_HANDLER = Object.freeze({
+  action: "copy-endpoint",
+  icon: "port",
+  sortGroup: 1,
+} satisfies BuiltInServiceHandler);
+
 export function createServicePresentations(
   services: readonly HomeRegistryService[],
   gatewayPort: number,
@@ -135,62 +164,49 @@ export function createServicePresentations(
     .filter(({ id }) => id !== "home")
     .flatMap((service, registryIndex) => {
       if (service.kind === "udp" && !supportsUdp) return [];
-      const handler = handlerFor(service.id);
-      const presentation = createPresentation(
+      const presentation = createServicePresentation(
         service,
-        handler,
         gatewayPort,
         localMapping(localPorts.get(service.id)),
+        options,
       );
       if (presentation === undefined) return [];
       return [{
         presentation,
         registryIndex,
-        sortGroup: handler.sortGroup,
+        sortGroup: handlerFor(service.id, presentationKind(service)).sortGroup,
       }];
     })
     .sort(
       (left, right) =>
-        left.sortGroup - right.sortGroup ||
-        left.registryIndex - right.registryIndex,
+        left.sortGroup - right.sortGroup || left.registryIndex - right.registryIndex,
     )
     .map(({ presentation }) => presentation);
 }
 
-function handlerFor(id: string): BuiltInServiceHandler {
-  if (!Object.prototype.hasOwnProperty.call(BUILT_IN_SERVICE_HANDLERS, id)) {
-    return DEFAULT_HTTP_SERVICE_HANDLER;
-  }
-  return BUILT_IN_SERVICE_HANDLERS[
-    id as keyof typeof BUILT_IN_SERVICE_HANDLERS
-  ];
-}
-
-function createPresentation(
-  service: HomeRegistryService,
-  handler: BuiltInServiceHandler,
+/** Build one stable action contract for a local or remote catalog entry. */
+export function createServicePresentation(
+  service: ServicePresentationInput,
   gatewayPort: number,
   mapping?: LocalServiceMapping,
+  options: { supportsUdp?: boolean } = {},
 ): ServicePresentation | undefined {
   if (service.kind === "udp") {
+    if (options.supportsUdp === false) return undefined;
     return {
       id: service.id,
       name: service.name,
       access: "udp",
       action: "copy-endpoint",
       icon: "port",
-      ...(mapping?.kind === "udp"
-        ? { copyText: `127.0.0.1:${mapping.port}` }
-        : {}),
+      ...(mapping?.kind === "udp" ? copyMapping(mapping) : {}),
     };
   }
-  if (mapping?.kind === "udp") return;
+  if (mapping?.kind === "udp") return undefined;
+
+  const handler = handlerFor(service.id, presentationKind(service));
   if (handler.httpUrl !== undefined) {
-    const url = serviceUrl(
-      service.id,
-      gatewayPort,
-      handler.httpUrl === "open",
-    );
+    const url = serviceUrl(service.id, gatewayPort, handler.httpUrl === "open");
     return {
       id: service.id,
       name: service.name,
@@ -201,22 +217,60 @@ function createPresentation(
       ...(handler.action === "copy-url" ? { copyText: url } : {}),
     };
   }
-  if (handler.localCommand === undefined || mapping === undefined) return;
+
+  if (mapping?.endpoint !== undefined) {
+    return {
+      id: service.id,
+      name: service.name,
+      access: handler.localCommand?.access ?? "tcp",
+      action: "copy-endpoint",
+      icon: handler.localCommand === undefined ? "port" : handler.icon,
+      copyText: mapping.endpoint,
+    };
+  }
+
+  if (handler.localCommand !== undefined) {
+    return {
+      id: service.id,
+      name: service.name,
+      access: handler.localCommand.access,
+      action: handler.action,
+      icon: handler.icon,
+      ...(mapping?.port === undefined
+        ? {}
+        : handler.action === "open"
+          ? { url: handler.localCommand.format(mapping.port) }
+          : { copyText: handler.localCommand.format(mapping.port) }),
+    };
+  }
+
   return {
     id: service.id,
     name: service.name,
-    access: handler.localCommand.access,
-    action: handler.action,
-    icon: handler.icon,
-    ...(handler.action === "open"
-      ? { url: handler.localCommand.format(mapping.port) }
-      : { copyText: handler.localCommand.format(mapping.port) }),
+    access: "tcp",
+    action: "copy-endpoint",
+    icon: "port",
+    ...(mapping?.kind === "tcp" ? copyMapping(mapping) : {}),
   };
 }
 
-interface LocalServiceMapping {
-  port: number;
-  kind: "tcp" | "udp";
+function handlerFor(
+  id: string,
+  kind: "tcp" | "http" | "udp",
+): BuiltInServiceHandler {
+  if (Object.prototype.hasOwnProperty.call(BUILT_IN_SERVICE_HANDLERS, id)) {
+    return BUILT_IN_SERVICE_HANDLERS[
+      id as keyof typeof BUILT_IN_SERVICE_HANDLERS
+    ];
+  }
+  return kind === "http" ? DEFAULT_HTTP_SERVICE_HANDLER : DEFAULT_TCP_SERVICE_HANDLER;
+}
+
+function presentationKind(
+  service: Pick<ServicePresentationInput, "kind" | "access">,
+): "tcp" | "http" | "udp" {
+  if (service.kind === "udp") return "udp";
+  return service.access === "http" ? "http" : service.kind;
 }
 
 function localMapping(
@@ -224,6 +278,12 @@ function localMapping(
 ): LocalServiceMapping | undefined {
   if (typeof value === "number") return { port: value, kind: "tcp" };
   return value;
+}
+
+function copyMapping(mapping: LocalServiceMapping): { copyText: string } | Record<string, never> {
+  if (mapping.endpoint !== undefined) return { copyText: mapping.endpoint };
+  if (mapping.port !== undefined) return { copyText: `127.0.0.1:${mapping.port}` };
+  return {};
 }
 
 function serviceUrl(

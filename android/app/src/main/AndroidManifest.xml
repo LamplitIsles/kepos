@@ -33,7 +33,7 @@
       android:foregroundServiceType="specialUse">
       <property
         android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-        android:value="Keeps the user-requested P2P subscriber and localhost services available" />
+        android:value="Keeps the user-requested peer network and localhost services available" />
     </service>
   </application>
 </manifest>

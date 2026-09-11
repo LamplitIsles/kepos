@@ -7,6 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RuntimeStateMachineTest {
+  private val peerKey = "11".repeat(32)
+
   @Test
   fun duplicateStartReusesOneRuntime() {
     var nextId = 0
@@ -14,7 +16,7 @@ class RuntimeStateMachineTest {
 
     val first = machine.start()
     val duplicateWhileStarting = machine.start()
-    machine.running(first.runtimeId, "http://127.0.0.1:17482/")
+    machine.running(first.runtimeId, "http://127.0.0.1:17482/", peerKey = peerKey)
     val duplicateWhileRunning = machine.start()
 
     assertTrue(first.shouldCreate)
@@ -28,6 +30,7 @@ class RuntimeStateMachineTest {
         RuntimeState.RUNNING,
         runtimeId = first.runtimeId,
         echoUrl = "http://127.0.0.1:17482/",
+        peerKey = peerKey,
       ),
       machine.snapshot(),
     )
@@ -37,7 +40,7 @@ class RuntimeStateMachineTest {
   fun stopIsBoundToTheCurrentRuntime() {
     val machine = RuntimeStateMachine { "runtime-1" }
     val runtime = machine.start()
-    machine.running(runtime.runtimeId, "http://127.0.0.1:17482/")
+    machine.running(runtime.runtimeId, "http://127.0.0.1:17482/", peerKey = peerKey)
 
     machine.stopping(runtime.runtimeId)
     assertEquals(RuntimeState.STOPPING, machine.snapshot().state)
@@ -53,7 +56,7 @@ class RuntimeStateMachineTest {
     val runtime = machine.start()
 
     assertThrows(IllegalArgumentException::class.java) {
-      machine.running("stale-runtime", "http://127.0.0.1:17482/")
+      machine.running("stale-runtime", "http://127.0.0.1:17482/", peerKey = peerKey)
     }
     machine.failed(runtime.runtimeId, "boom")
 

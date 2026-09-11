@@ -23,9 +23,7 @@ export interface TrayLabels {
 export function buildDesktopTray(tray: DesktopTray): DesktopTray {
   return tray
     .addItem(trayItemIds.status, "Kepos — Starting…", { enabled: false })
-    .addItem(trayItemIds.detail, "Preparing network roles…", {
-      enabled: false,
-    })
+    .addItem(trayItemIds.detail, "Preparing peer network…", { enabled: false })
     .addSeparator()
     .addItem(trayItemIds.open, "Open Kepos")
     .addSeparator()
@@ -43,60 +41,26 @@ export function updateDesktopTray(
 
 export function formatTraySnapshot(snapshot: DesktopSnapshot): TrayLabels {
   if (snapshot.appPhase === "starting") {
-    return {
-      status: "Kepos — Starting…",
-      detail: "Preparing network roles…",
-    };
+    return { status: "Kepos — Starting…", detail: "Preparing peer network…" };
   }
   if (snapshot.appPhase === "stopping") {
-    return {
-      status: "Kepos — Stopping…",
-      detail: "Stopping network roles…",
-    };
+    return { status: "Kepos — Stopping…", detail: "Stopping peer network…" };
   }
   if (snapshot.appPhase === "stopped") {
-    return {
-      status: "Kepos — Stopped",
-      detail: "Network roles stopped",
-    };
+    return { status: "Kepos — Stopped", detail: "Peer network stopped" };
   }
 
-  const roles = [snapshot.publisher, snapshot.subscriber].filter(
-    (role) => role !== undefined,
-  );
-  if (
-    roles.some((role) => role.phase === "failed" || role.phase === "stopped")
-  ) {
-    return {
-      status: "Kepos — Attention needed",
-      detail: "Open Kepos for details",
-    };
+  const peer = snapshot.peer;
+  if (!peer || peer.phase === "failed" || peer.phase === "stopped") {
+    return { status: "Kepos — Attention needed", detail: "Open Kepos for details" };
   }
-  if (
-    roles.some((role) => role.phase === "starting" || role.phase === "stopping")
-  ) {
-    return {
-      status: "Kepos — Online",
-      detail: "Updating network roles…",
-    };
+  if (peer.phase === "starting" || peer.phase === "stopping") {
+    return { status: "Kepos — Online", detail: "Updating peer network…" };
   }
-  if (snapshot.publisher) {
-    return {
-      status: "Kepos — Online",
-      detail: `${snapshot.publisher.services.length} shared · ${snapshot.publisher.activeSubscribers} connected`,
-    };
+  if (peer.pairing?.phase === "inviting") {
+    return { status: "Kepos — Waiting for pairing", detail: "Peer invitation ready" };
   }
-  if (snapshot.subscriber?.connection === "unconfigured") {
-    return {
-      status: "Kepos — Waiting for pairing",
-      detail: "Subscriber key ready",
-    };
-  }
-  if (snapshot.subscriber) {
-    return {
-      status: "Kepos — Online",
-      detail: `Remote ${snapshot.subscriber.connection}`,
-    };
-  }
-  return { status: "Kepos — Online", detail: "Not sharing yet" };
+  const connected = peer.connections.filter(({ status }) => status === "connected").length;
+  const available = peer.services.filter(({ available: ready }) => ready).length;
+  return { status: "Kepos — Online", detail: `${available} services · ${connected} peers` };
 }

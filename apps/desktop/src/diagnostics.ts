@@ -65,15 +65,12 @@ const defaultFileSystem: DesktopDiagnosticFileSystem = {
 export interface DesktopDiagnosticRoleSummary {
   phase: "starting" | "running" | "failed" | "stopping" | "stopped";
   serviceCount?: number;
-  activeSubscribers?: number;
-  acceptedConnections?: number;
-  connection?:
-    "unconfigured" | "connecting" | "connected" | "reconnecting" | "stopped";
+  connectionCount?: number;
+  bindingCount?: number;
 }
 
 interface DesktopDiagnosticRoleSummaries {
-  publisher?: DesktopDiagnosticRoleSummary;
-  subscriber?: DesktopDiagnosticRoleSummary;
+  peer?: DesktopDiagnosticRoleSummary;
 }
 
 export interface DesktopDiagnosticSink {
@@ -262,8 +259,7 @@ export function createDesktopDiagnosticSink(
       platform,
       droppedEvents,
       roles: {
-        ...(roles.publisher ? { publisher: { ...roles.publisher } } : {}),
-        ...(roles.subscriber ? { subscriber: { ...roles.subscriber } } : {}),
+        ...(roles.peer ? { peer: { ...roles.peer } } : {}),
       },
       events: [] as DesktopDiagnosticEvent[],
     };
@@ -353,27 +349,16 @@ function updateRoleSummaries(
   roles: DesktopDiagnosticRoleSummaries,
   snapshot: DesktopSnapshot,
 ): void {
-  const nextPublisher = snapshot.publisher;
-  if (nextPublisher) {
-    roles.publisher = {
-      phase: normalizeRolePhase(nextPublisher.phase),
-      serviceCount: boundedArrayLength(nextPublisher.services),
-      activeSubscribers: boundedCount(nextPublisher.activeSubscribers) ?? 0,
-      acceptedConnections: boundedCount(nextPublisher.acceptedConnections) ?? 0,
+  const nextPeer = snapshot.peer;
+  if (nextPeer) {
+    roles.peer = {
+      phase: normalizeRolePhase(nextPeer.phase),
+      serviceCount: boundedArrayLength(nextPeer.services),
+      connectionCount: boundedArrayLength(nextPeer.connections),
+      bindingCount: boundedArrayLength(nextPeer.bindings),
     };
   } else {
-    delete roles.publisher;
-  }
-
-  const nextSubscriber = snapshot.subscriber;
-  if (nextSubscriber) {
-    roles.subscriber = {
-      phase: normalizeRolePhase(nextSubscriber.phase),
-      connection: normalizeConnection(nextSubscriber.connection),
-      serviceCount: boundedArrayLength(nextSubscriber.services),
-    };
-  } else {
-    delete roles.subscriber;
+    delete roles.peer;
   }
 }
 
@@ -454,18 +439,6 @@ function normalizeRolePhase(
     value === "stopped"
     ? value
     : "failed";
-}
-
-function normalizeConnection(
-  value: unknown,
-): NonNullable<DesktopDiagnosticRoleSummary["connection"]> {
-  return value === "unconfigured" ||
-    value === "connecting" ||
-    value === "connected" ||
-    value === "reconnecting" ||
-    value === "stopped"
-    ? value
-    : "stopped";
 }
 
 function normalizePlatform(value: string): string {

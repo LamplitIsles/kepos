@@ -74,14 +74,14 @@ class MainActivity : ComponentActivity() {
         snapshot = snapshot,
         onStart = { startRuntime() },
         onStop = { KeposForegroundService.stop(this) },
-        onConfigure = { publisherKey ->
-          service?.configurePublisher(publisherKey)
+        onConfigure = { publicKey ->
+          service?.configurePeer(publicKey, "peer", "dial")?.whenComplete { _, error ->
+            if (error != null) showError(error, "Configuration failed")
+          }
         },
         onScanPairing = { scanPairingInvitation.launch(pairingScanOptions()) },
         onCopyText = { text -> copyText(text) },
-        onOpenUrl = { url ->
-          startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-        },
+        onOpenUrl = { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
       )
     }
     acceptDeepLink(intent)
@@ -106,12 +106,6 @@ class MainActivity : ComponentActivity() {
     super.onStop()
   }
 
-  override fun onNewIntent(intent: Intent) {
-    super.onNewIntent(intent)
-    acceptDeepLink(intent)
-    setIntent(intent)
-  }
-
   private fun startRuntime() {
     if (
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -125,8 +119,14 @@ class MainActivity : ComponentActivity() {
 
   private fun copyText(text: String) {
     getSystemService(ClipboardManager::class.java).setPrimaryClip(
-      ClipData.newPlainText("Kepos service address", text),
+      ClipData.newPlainText("Kepos peer value", text),
     )
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    acceptDeepLink(intent)
+    setIntent(intent)
   }
 
   private fun acceptDeepLink(intent: Intent?) {
@@ -149,15 +149,8 @@ class MainActivity : ComponentActivity() {
     if (snapshot.state != RuntimeState.RUNNING) return
     val binder = service ?: return
     pairingInvitation.take()
-    binder.pairPublisher(invitation, Build.MODEL, "android").whenComplete { _, error ->
-      if (error == null) return@whenComplete
-      runOnUiThread {
-        Toast.makeText(
-          applicationContext,
-          error.cause?.message ?: error.message ?: "Pairing failed",
-          Toast.LENGTH_LONG,
-        ).show()
-      }
+    binder.pairPeer(invitation, Build.MODEL, "android").whenComplete { _, error ->
+      if (error != null) showError(error, "Pairing failed")
     }
   }
 
@@ -166,6 +159,16 @@ class MainActivity : ComponentActivity() {
     .setPrompt("Scan a Kepos invitation")
     .setBeepEnabled(false)
     .setOrientationLocked(false)
+
+  private fun showError(error: Throwable, prefix: String) {
+    runOnUiThread {
+      Toast.makeText(
+        applicationContext,
+        "$prefix: ${error.cause?.message ?: error.message ?: "unknown error"}",
+        Toast.LENGTH_LONG,
+      ).show()
+    }
+  }
 }
 
 internal class PairingInvitationViewModel : ViewModel() {

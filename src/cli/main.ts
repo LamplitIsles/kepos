@@ -1,142 +1,69 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import process from "node:process";
 
-import type {
-  Observation,
-  Observe,
-} from "../mux/observability.js";
-import {
-  startPublisher,
-  type PublisherRuntimeStatus,
-  type StartPublisherOptions,
-} from "../runtime/publisher.js";
-import {
-  startSubscriber,
-  type StartSubscriberOptions,
-  type SubscriberRuntimeStatus,
-} from "../runtime/subscriber.js";
-import {
-  startDevice,
-  type StartDeviceOptions,
-} from "../runtime/device.js";
-import {
-  getPublisherPublicKey,
-  setupPublisher,
-  type SetupPublisherOptions,
-  type SetupPublisherResult,
-} from "../state/publisher.js";
-import {
-  setSubscriberPublisher,
-  setupSubscriber,
-  type SetSubscriberPublisherOptions,
-  type SetupSubscriberOptions,
-  type SetupSubscriberResult,
-} from "../state/subscriber.js";
-import {
-  observationMode,
-  parseBootstrapOptions,
-  parseGatewayPortOption,
-  parseGatewayHostOption,
-  parseGatewayDomainOption,
-  parseMetricsListenOption,
-  parseOptions,
-  parseRouteOption,
-  parseSubscriberService,
-  repeatedOption,
-  requiredOption,
-  requiredState,
-  singleOption,
-} from "./options.js";
-import {
-  acquirePublisherRuntimeLock,
-  acquireSubscriberRuntimeLock,
-  type RuntimeLock,
-} from "../runtime/runtime-lock.js";
-import { waitForSignal } from "./signals.js";
 import {
   loadKeposConfig,
+  saveKeposConfig,
   type KeposConfig,
 } from "../app-config.js";
-import { HOME_REGISTRY_PATH } from "../home/registry.js";
-
-interface CliPublisher {
-  home: { url: string };
-  publisherKey: string;
-  applyPolicy: (
-    policy: NonNullable<KeposConfig["publisher"]>,
-  ) => Promise<boolean>;
-  status: () => PublisherRuntimeStatus;
-  stop: () => Promise<void>;
-}
-
-interface CliSubscriber {
-  home: { url: string };
-  publisherKey: string;
-  services: Array<{ id: string; port: number }>;
-  status: () => SubscriberRuntimeStatus;
-  stop: () => Promise<void>;
-}
-
-interface CliDevice {
-  publisher?: CliPublisher;
-  subscriber?: CliSubscriber;
-  stop: () => Promise<void>;
-}
+import {
+  parsePeerConfig,
+  type PeerConfig,
+  type PeerConnectionDirection,
+} from "../config.js";
+import {
+  getPeerPublicKey,
+  setupPeer,
+  convertPeerIdentity,
+  type SetupPeerResult,
+} from "../state/peer.js";
+import {
+  defaultKeposConfigPath,
+  defaultKeposPeerStatePath,
+} from "../platform/paths.js";
+import {
+  acquirePeerRuntimeLock,
+  type RuntimeLock,
+} from "../runtime/runtime-lock.js";
+import {
+  startPeer,
+  type RunningPeer,
+  type StartPeerOptions,
+} from "../runtime/peer.js";
+import type { Observation, Observe } from "../mux/observability.js";
+import { waitForSignal } from "./signals.js";
+import { parseMetricsListenValue } from "./options.js";
 
 export interface CliDependencies {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
   loadConfig: (configPath?: string) => Promise<KeposConfig | undefined>;
-  setupPublisher: (
-    options: SetupPublisherOptions,
-  ) => Promise<SetupPublisherResult>;
-  setupSubscriber: (
-    options: SetupSubscriberOptions,
-  ) => Promise<SetupSubscriberResult>;
-  setSubscriberPublisher: (
-    options: SetSubscriberPublisherOptions,
-  ) => Promise<string>;
-  getPublisherPublicKey: (stateDir: string) => Promise<string>;
-  startPublisher: (
-    options: StartPublisherOptions,
-  ) => Promise<CliPublisher>;
-  startSubscriber: (
-    options: StartSubscriberOptions,
-  ) => Promise<CliSubscriber>;
-  startDevice: (options: StartDeviceOptions) => Promise<CliDevice>;
-  acquireSubscriberRuntimeLock: (
-    stateDir: string,
-  ) => Promise<RuntimeLock>;
-  acquirePublisherRuntimeLock: (
-    stateDir: string,
-  ) => Promise<RuntimeLock>;
+  saveConfig: (config: PeerConfig, configPath: string) => Promise<void>;
+  setupPeer: (options: { stateDir: string }) => Promise<SetupPeerResult>;
+  getPeerPublicKey: (stateDir: string) => Promise<string>;
+  convertPeerIdentity: typeof convertPeerIdentity;
+  startPeer: (options: StartPeerOptions) => Promise<RunningPeer>;
+  acquirePeerRuntimeLock: (stateDir: string) => Promise<RuntimeLock>;
   waitForSignal: (stop: () => Promise<void>) => Promise<void>;
-  schedulePolicyReload: (
-    callback: () => void,
-    intervalMs: number,
-  ) => () => void;
+  scheduleConfigReload: (callback: () => void, intervalMs: number) => () => void;
 }
 
 export function createDefaultCliDependencies(
-  output: Partial<
-    Pick<CliDependencies, "stdout" | "stderr">
-  > = {},
+  output: Partial<Pick<CliDependencies, "stdout" | "stderr">> = {},
 ): CliDependencies {
   return {
     stdout: output.stdout ?? console.log,
     stderr: output.stderr ?? console.error,
     loadConfig: loadKeposConfig,
-    setupPublisher,
-    setupSubscriber,
-    setSubscriberPublisher,
-    getPublisherPublicKey,
-    startPublisher,
-    startSubscriber,
-    startDevice,
-    acquirePublisherRuntimeLock,
-    acquireSubscriberRuntimeLock,
+    saveConfig: saveKeposConfig,
+    setupPeer,
+    getPeerPublicKey,
+    convertPeerIdentity,
+    startPeer,
+    acquirePeerRuntimeLock,
     waitForSignal,
-    schedulePolicyReload: (callback, intervalMs) => {
+    scheduleConfigReload: (callback, intervalMs) => {
       const timer = setInterval(callback, intervalMs);
       return () => clearInterval(timer);
     },
@@ -145,17 +72,16 @@ export function createDefaultCliDependencies(
 
 const defaultDependencies = createDefaultCliDependencies();
 
-const CLI_USAGE = [
+export const CLI_USAGE = [
   "Usage: kepos <command> [options]",
   "",
   "Commands:",
-  "  setup publisher",
-  "  setup subscriber",
-  "  publisher key",
-  "  publisher run",
-  "  subscriber set-publisher",
-  "  subscriber run",
-  "  device run",
+  "  setup peer       Initialize one canonical peer identity",
+  "  peer key         Print the public key for a peer state directory",
+  "  peer status      Inspect canonical configuration and runtime state",
+  "  peer pair        Add an explicitly approved peer to the config",
+  "  peer convert     Offline-convert one selected legacy identity",
+  "  peer run         Run the canonical peer runtime",
 ].join("\n");
 
 export async function runCli(
@@ -171,413 +97,268 @@ export async function runCli(
     return;
   }
   const [group, action, ...rest] = arguments_;
-  if (group === "setup" && action === "publisher") {
-    await setupPublisherCommand(rest, dependencies);
+  if (group === "setup" && action === "peer") {
+    await setupPeerCommand(rest, dependencies);
     return;
   }
-  if (group === "setup" && action === "subscriber") {
-    await setupSubscriberCommand(rest, dependencies);
+  if (group === "peer" && action === "key") {
+    await peerKeyCommand(rest, dependencies);
     return;
   }
-  if (group === "subscriber" && action === "set-publisher") {
-    await setSubscriberPublisherCommand(rest, dependencies);
+  if (group === "peer" && action === "status") {
+    await peerStatusCommand(rest, dependencies);
     return;
   }
-  if (group === "publisher" && action === "key") {
-    await getPublisherPublicKeyCommand(rest, dependencies);
+  if (group === "peer" && (action === "pair" || action === "trust")) {
+    await peerPairCommand(rest, dependencies);
     return;
   }
-  if (group === "publisher" && action === "run") {
-    await runPublisherCommand(rest, dependencies);
+  if (group === "peer" && action === "convert") {
+    await peerConvertCommand(rest, dependencies);
     return;
   }
-  if (group === "subscriber" && action === "run") {
-    await runSubscriberCommand(rest, dependencies);
+  if (group === "peer" && action === "run") {
+    await peerRunCommand(rest, dependencies);
     return;
   }
-  if (group === "device" && action === "run") {
-    await runDeviceCommand(rest, dependencies);
-    return;
+  throw new Error(`unknown command: ${arguments_.join(" ")}\n\n${CLI_USAGE}`);
+}
+
+async function setupPeerCommand(
+  arguments_: readonly string[],
+  dependencies: CliDependencies,
+): Promise<void> {
+  const options = parseArguments(arguments_, ["--state", "--config"]);
+  const stateDir = path.resolve(
+    options.get("--state") ?? defaultKeposPeerStatePath(),
+  );
+  const result = await dependencies.setupPeer({ stateDir });
+  const configPath = path.resolve(
+    options.get("--config") ?? defaultKeposConfigPath(),
+  );
+  let existing: KeposConfig | undefined;
+  try {
+    existing = await dependencies.loadConfig(configPath);
+  } catch (error) {
+    if (!isMissingConfigError(error)) throw error;
   }
-  throw new Error(
-    `unknown command: ${arguments_.join(" ")}\n\n${CLI_USAGE}`,
+  if (!existing) {
+    await dependencies.saveConfig(emptyPeerConfig(), configPath);
+  }
+  dependencies.stdout(`Peer key: ${result.publicKey}`);
+}
+
+async function peerKeyCommand(
+  arguments_: readonly string[],
+  dependencies: CliDependencies,
+): Promise<void> {
+  const options = parseArguments(arguments_, ["--state"]);
+  const stateDir = path.resolve(
+    options.get("--state") ?? defaultKeposPeerStatePath(),
+  );
+  dependencies.stdout(`Peer key: ${await dependencies.getPeerPublicKey(stateDir)}`);
+}
+
+async function peerStatusCommand(
+  arguments_: readonly string[],
+  dependencies: CliDependencies,
+): Promise<void> {
+  const options = parseArguments(arguments_, ["--state", "--config"]);
+  const configPath = path.resolve(
+    options.get("--config") ?? defaultKeposConfigPath(),
+  );
+  const config = await dependencies.loadConfig(configPath);
+  const stateDir = path.resolve(
+    options.get("--state") ?? defaultKeposPeerStatePath(),
+  );
+  const peerKey = await dependencies.getPeerPublicKey(stateDir);
+  const canonical = config === undefined ? undefined : parsePeerConfig(config);
+  dependencies.stdout(
+    JSON.stringify({
+      role: "peer",
+      state: "stopped",
+      peerKey,
+      config: canonical
+        ? {
+            peers: canonical.peers.length,
+            services: canonical.services.length,
+            bindings: canonical.bindings.length,
+          }
+        : { peers: 0, services: 0, bindings: 0 },
+    }),
   );
 }
 
-async function setupPublisherCommand(
+async function peerPairCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
 ): Promise<void> {
-  const options = parseOptions(arguments_, ["--state"]);
-  const result = await dependencies.setupPublisher({
-    stateDir: requiredState(options),
-  });
-  dependencies.stdout(`Publisher key: ${result.publisherKey}`);
-}
-
-async function setupSubscriberCommand(
-  arguments_: readonly string[],
-  dependencies: CliDependencies,
-): Promise<void> {
-  const options = parseOptions(arguments_, ["--state"]);
-  const result = await dependencies.setupSubscriber({
-    stateDir: requiredState(options),
-  });
-  dependencies.stdout(`Subscriber key: ${result.publicKey}`);
-}
-
-async function setSubscriberPublisherCommand(
-  arguments_: readonly string[],
-  dependencies: CliDependencies,
-): Promise<void> {
-  const options = parseOptions(arguments_, [
-    "--state",
+  const options = parseArguments(arguments_, [
+    "--config",
     "--label",
-    "--publisher-key",
+    "--public-key",
+    "--connection",
   ]);
-  await dependencies.setSubscriberPublisher({
-    stateDir: requiredState(options),
-    label: requiredOption(options, "--label"),
-    publisherKey: requiredOption(options, "--publisher-key"),
-  });
-  dependencies.stdout("Publisher contact updated");
-}
-
-async function getPublisherPublicKeyCommand(
-  arguments_: readonly string[],
-  dependencies: CliDependencies,
-): Promise<void> {
-  const options = parseOptions(arguments_, ["--state"]);
-  const publisherKey = await dependencies.getPublisherPublicKey(
-    requiredState(options),
+  const configPath = path.resolve(
+    options.get("--config") ?? defaultKeposConfigPath(),
   );
-  dependencies.stdout(`Publisher key: ${publisherKey}`);
+  const label = required(options, "--label");
+  const publicKey = required(options, "--public-key");
+  const connection = (options.get("--connection") ?? "accept") as PeerConnectionDirection;
+  if (connection !== "dial" && connection !== "accept") {
+    throw new Error("--connection must be dial or accept");
+  }
+  const existing = await dependencies.loadConfig(configPath);
+  const next = parsePeerConfig({
+    ...(existing?.network ? { network: existing.network } : {}),
+    ...(existing?.gateway ? { gateway: existing.gateway } : {}),
+    ...(existing?.metrics ? { metrics: existing.metrics } : {}),
+    peers: [
+      ...(existing?.peers ?? []).filter(
+        (peer) => peer.publicKey !== publicKey && peer.label !== label,
+      ),
+      { label, publicKey, connection },
+    ],
+    services: existing?.services ?? [],
+    bindings: existing?.bindings ?? [],
+  });
+  await dependencies.saveConfig(next, configPath);
+  dependencies.stdout(`Peer approved: ${label} (${publicKey})`);
 }
 
-async function runPublisherCommand(
+async function peerConvertCommand(
   arguments_: readonly string[],
   dependencies: CliDependencies,
 ): Promise<void> {
-  const options = parseOptions(arguments_, [
+  const options = parseArguments(arguments_, [
+    "--source",
+    "--destination",
+    "--expected-public-key",
+  ]);
+  const result = await dependencies.convertPeerIdentity({
+    source: required(options, "--source"),
+    destination: required(options, "--destination"),
+    expectedPublicKey: required(options, "--expected-public-key"),
+  });
+  dependencies.stdout(`Peer key: ${result.publicKey}`);
+}
+
+async function peerRunCommand(
+  arguments_: readonly string[],
+  dependencies: CliDependencies,
+): Promise<void> {
+  const options = parseArguments(arguments_, [
     "--state",
+    "--config",
     "--observations",
     "--metrics-listen",
-    "--bootstrap",
-    "--config",
   ]);
-  const mode = observationMode(options);
-  const config = await dependencies.loadConfig(configPath(options));
-  const policy = requirePublisherPolicy(config, "publisher run");
-  const stateDir = requiredState(options);
-  const lock = await dependencies.acquirePublisherRuntimeLock(stateDir);
-  let stopPolicyReload: (() => void) | undefined;
-  let policyReloads = Promise.resolve();
+  const mode = options.get("--observations") ?? "human";
+  if (mode !== "human" && mode !== "ndjson") {
+    throw new Error("--observations must be human or ndjson");
+  }
+  const configPath = path.resolve(
+    options.get("--config") ?? defaultKeposConfigPath(),
+  );
+  const stateDir = path.resolve(
+    options.get("--state") ?? defaultKeposPeerStatePath(),
+  );
+  const config = requireConfig(await dependencies.loadConfig(configPath));
+  const metricsListen = options.get("--metrics-listen");
+  const lock = await dependencies.acquirePeerRuntimeLock(stateDir);
+  let cancelReload: (() => void) | undefined;
+  let reloadTask = Promise.resolve();
+  let running: RunningPeer | undefined;
   try {
-    const running = await dependencies.startPublisher({
+    const started = await dependencies.startPeer({
       stateDir,
-      bootstrap: resolvedBootstrap(options, config),
-      policy,
+      config,
+      persistConfig: (nextConfig) => dependencies.saveConfig(nextConfig, configPath),
       observe: observationWriter(mode, dependencies),
-      metricsListen: parseMetricsListenOption(options),
+      ...(metricsListen === undefined
+        ? {}
+        : { metricsListen: parseMetricsListenValue(metricsListen) }),
     });
-    let polling = true;
-    let pollingStopped = false;
-    const pollPolicy = (): void => {
-      if (!polling) return;
-      policyReloads = policyReloads.then(async () => {
+    running = started;
+    const writeStatus = (line: string): void => {
+      if (mode === "ndjson") dependencies.stderr(line);
+      else dependencies.stdout(line);
+    };
+    writeStatus(
+      `Peer running: key=${started.peerKey} gateway=${started.gateway.url}`,
+    );
+    cancelReload = dependencies.scheduleConfigReload(() => {
+      reloadTask = reloadTask.then(async () => {
         try {
-          const nextConfig = await dependencies.loadConfig(configPath(options));
-          const nextPolicy = requirePublisherPolicy(
-            nextConfig,
-            "publisher policy reload",
-          );
-          await running.applyPolicy(nextPolicy);
+          const nextConfig = requireConfig(await dependencies.loadConfig(configPath));
+          await started.applyConfig(nextConfig);
         } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          dependencies.stderr(`Publisher policy reload failed: ${message}`);
+          dependencies.stderr(`Peer config reload failed: ${errorMessage(error)}`);
         }
       });
+    }, 1_000);
+    const stop = async (): Promise<void> => {
+      cancelReload?.();
+      cancelReload = undefined;
+      await reloadTask;
+      await running?.stop();
     };
-    const cancel = dependencies.schedulePolicyReload(pollPolicy, 1_000);
-    stopPolicyReload = (): void => {
-      if (pollingStopped) return;
-      pollingStopped = true;
-      polling = false;
-      cancel();
-    };
-    const stop = (() => {
-      let stopping: Promise<void> | undefined;
-      return (): Promise<void> => {
-        stopping ??= (async () => {
-          stopPolicyReload?.();
-          await policyReloads;
-          await running.stop();
-        })();
-        return stopping;
-      };
-    })();
-    statusWriter(mode, dependencies)(
-      `Publisher running: key=${running.publisherKey} registry=${running.home.url}${HOME_REGISTRY_PATH}`,
-    );
     await dependencies.waitForSignal(stop);
   } finally {
-    stopPolicyReload?.();
-    await policyReloads;
+    cancelReload?.();
+    await reloadTask;
+    await running?.stop();
     await lock.release();
   }
 }
 
-async function runSubscriberCommand(
+function emptyPeerConfig(): PeerConfig {
+  return { peers: [], services: [], bindings: [] };
+}
+
+function requireConfig(config: KeposConfig | undefined): PeerConfig {
+  if (!config) throw new Error("peer run requires a canonical config.toml");
+  return parsePeerConfig(config);
+}
+
+function parseArguments(
   arguments_: readonly string[],
-  dependencies: CliDependencies,
-): Promise<void> {
-  const options = parseOptions(arguments_, [
-    "--state",
-    "--service",
-    "--gateway-port",
-    "--gateway-host",
-    "--gateway-domain",
-    "--route",
-    "--observations",
-    "--bootstrap",
-    "--config",
-  ]);
-  const mode = observationMode(options);
-  const config = await dependencies.loadConfig(configPath(options));
-  const services = options.has("--service")
-    ? repeatedOption(options, "--service").map(parseSubscriberService)
-    : (config?.subscriber?.services ?? []);
-  if (new Set(services.map(({ id }) => id)).size !== services.length) {
-    throw new Error("subscriber services must have unique ids");
-  }
-  const stateDir = requiredState(options);
-  const lock = await dependencies.acquireSubscriberRuntimeLock(stateDir);
-  try {
-    const running = await dependencies.startSubscriber({
-      stateDir,
-      bootstrap: resolvedBootstrap(options, config),
-      gatewayPort:
-        parseGatewayPortOption(options) ?? config?.subscriber?.gatewayPort,
-      gatewayHost:
-        parseGatewayHostOption(options) ?? config?.subscriber?.gatewayHost,
-      gatewayDomain:
-        parseGatewayDomainOption(options) ?? config?.subscriber?.gatewayDomain,
-      services,
-      route: options.has("--route")
-        ? parseRouteOption(options)
-        : (config?.subscriber?.route ?? "auto"),
-      observe: observationWriter(mode, dependencies),
-      waitForPublisher: false,
-    });
-    statusWriter(mode, dependencies)(
-      `Subscriber running: publisher=${running.publisherKey} registry=${running.home.url}${HOME_REGISTRY_PATH}`,
-    );
-    for (const service of running.services) {
-      statusWriter(mode, dependencies)(
-        `Local service: ${service.id}=127.0.0.1:${service.port}`,
-      );
+  allowed: readonly string[],
+): Map<string, string> {
+  const values = new Map<string, string>();
+  const allowedSet = new Set(allowed);
+  for (let index = 0; index < arguments_.length; index += 2) {
+    const option = arguments_[index];
+    if (!option || !allowedSet.has(option)) {
+      throw new Error(`unknown option: ${option ?? ""}`);
     }
-    await dependencies.waitForSignal(running.stop);
-  } finally {
-    await lock.release();
-  }
-}
-
-async function runDeviceCommand(
-  arguments_: readonly string[],
-  dependencies: CliDependencies,
-): Promise<void> {
-  const options = parseOptions(arguments_, [
-    "--publisher-state",
-    "--subscriber-state",
-    "--subscriber-service",
-    "--gateway-port",
-    "--gateway-host",
-    "--gateway-domain",
-    "--route",
-    "--observations",
-    "--metrics-listen",
-    "--bootstrap",
-    "--config",
-  ]);
-  const mode = observationMode(options);
-  const config = await dependencies.loadConfig(configPath(options));
-  const publisherState = resolvedState(options, "--publisher-state");
-  const subscriberState = resolvedState(options, "--subscriber-state");
-  if (!publisherState && !subscriberState) {
-    throw new Error(
-      "device run requires --publisher-state or --subscriber-state",
-    );
-  }
-  const publisherPolicy = publisherState
-    ? requirePublisherPolicy(config, "device run")
-    : undefined;
-  if (
-    !subscriberState &&
-    [
-      "--subscriber-service",
-      "--gateway-port",
-      "--gateway-host",
-      "--gateway-domain",
-      "--route",
-    ].some((name) => options.has(name))
-  ) {
-    throw new Error("subscriber options require --subscriber-state");
-  }
-  if (!publisherState && options.has("--metrics-listen")) {
-    throw new Error("--metrics-listen requires --publisher-state");
-  }
-  const services = options.has("--subscriber-service")
-    ? repeatedOption(options, "--subscriber-service").map(
-        parseSubscriberService,
-      )
-    : (config?.subscriber?.services ?? []);
-  if (new Set(services.map(({ id }) => id)).size !== services.length) {
-    throw new Error("subscriber services must have unique ids");
-  }
-  const observe = observationWriter(mode, dependencies);
-  const publisherLock = publisherState
-    ? await dependencies.acquirePublisherRuntimeLock(publisherState)
-    : undefined;
-  let subscriberLock: RuntimeLock | undefined;
-  try {
-    subscriberLock = subscriberState
-      ? await dependencies.acquireSubscriberRuntimeLock(subscriberState)
-      : undefined;
-    const running = await dependencies.startDevice({
-      bootstrap: resolvedBootstrap(options, config),
-      ...(publisherState
-        ? {
-            publisher: {
-              stateDir: publisherState,
-              policy: publisherPolicy!,
-              observe,
-              metricsListen: parseMetricsListenOption(options),
-            },
-          }
-        : {}),
-      ...(subscriberState
-        ? {
-            subscriber: {
-              stateDir: subscriberState,
-              gatewayPort:
-                parseGatewayPortOption(options) ??
-                config?.subscriber?.gatewayPort,
-              gatewayHost:
-                parseGatewayHostOption(options) ??
-                config?.subscriber?.gatewayHost,
-              gatewayDomain:
-                parseGatewayDomainOption(options) ??
-                config?.subscriber?.gatewayDomain,
-              services,
-              route: options.has("--route")
-                ? parseRouteOption(options)
-                : (config?.subscriber?.route ?? "auto"),
-              observe,
-              waitForPublisher: false,
-            },
-          }
-        : {}),
-    });
-    if (running.publisher) {
-      statusWriter(mode, dependencies)(
-        `Publisher running: key=${running.publisher.publisherKey} registry=${running.publisher.home.url}${HOME_REGISTRY_PATH}`,
-      );
+    const value = arguments_[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error(`${option} requires a value`);
     }
-    if (running.subscriber) {
-      statusWriter(mode, dependencies)(
-        `Subscriber running: publisher=${running.subscriber.publisherKey} registry=${running.subscriber.home.url}${HOME_REGISTRY_PATH}`,
-      );
-      for (const service of running.subscriber.services) {
-        statusWriter(mode, dependencies)(
-          `Local service: ${service.id}=127.0.0.1:${service.port}`,
-        );
-      }
-    }
-    await dependencies.waitForSignal(running.stop);
-  } finally {
-    await releaseRuntimeLocks(subscriberLock, publisherLock);
+    if (values.has(option)) throw new Error(`${option} may be used only once`);
+    values.set(option, value);
   }
+  return values;
 }
 
-function resolvedState(
-  options: ReturnType<typeof parseOptions>,
-  name: "--publisher-state" | "--subscriber-state",
-): string | undefined {
-  const value = singleOption(options, name);
-  return value === undefined ? undefined : path.resolve(value);
-}
-
-async function releaseRuntimeLocks(
-  ...locks: Array<RuntimeLock | undefined>
-): Promise<void> {
-  let firstError: unknown;
-  for (const lock of locks) {
-    if (!lock) continue;
-    try {
-      await lock.release();
-    } catch (error) {
-      firstError ??= error;
-    }
-  }
-  if (firstError !== undefined) throw firstError;
-}
-
-function resolvedBootstrap(
-  options: ReturnType<typeof parseOptions>,
-  config: KeposConfig | undefined,
-) {
-  const bootstrap =
-    parseBootstrapOptions(options) ?? config?.network?.bootstrap;
-  return bootstrap && bootstrap.length > 0 ? bootstrap : undefined;
-}
-
-function configPath(
-  options: ReturnType<typeof parseOptions>,
-): string | undefined {
-  const value = singleOption(options, "--config");
-  return value === undefined ? undefined : path.resolve(value);
-}
-
-function requirePublisherPolicy(
-  config: KeposConfig | undefined,
-  command: string,
-): NonNullable<KeposConfig["publisher"]> {
-  if (!config?.publisher) {
-    throw new Error(
-      `${command} requires a complete [publisher] policy in TOML`,
-    );
-  }
-  return config.publisher;
+function required(options: Map<string, string>, option: string): string {
+  const value = options.get(option);
+  if (!value) throw new Error(`${option} is required`);
+  return value;
 }
 
 function observationWriter(
   mode: "human" | "ndjson",
   dependencies: CliDependencies,
 ): Observe {
-  if (mode === "ndjson") {
-    return (observation) =>
-      dependencies.stdout(JSON.stringify(observation));
-  }
-  return (observation) =>
-    dependencies.stdout(formatObservation(observation));
-}
-
-function statusWriter(
-  mode: "human" | "ndjson",
-  dependencies: CliDependencies,
-): (line: string) => void {
-  return mode === "ndjson" ? dependencies.stderr : dependencies.stdout;
+  return mode === "ndjson"
+    ? (observation) => dependencies.stdout(JSON.stringify(observation))
+    : (observation) => dependencies.stdout(formatObservation(observation));
 }
 
 function formatObservation(observation: Observation): string {
-  const {
-    component: _component,
-    event,
-    timestamp: _timestamp,
-    ...fields
-  } = observation;
+  const { component: _component, event, timestamp: _timestamp, ...fields } = observation;
   const details = Object.entries(fields)
     .map(([key, value]) => `${key}=${formatObservationValue(value)}`)
     .join(" ");
@@ -586,14 +367,25 @@ function formatObservation(observation: Observation): string {
 
 function formatObservationValue(value: unknown): string {
   if (typeof value === "string") return value;
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    value === null
-  ) {
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
     return String(value);
   }
   return JSON.stringify(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingConfigError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const cause = error.cause;
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    cause.code === "ENOENT"
+  );
 }
 
 const invokedPath = process.argv[1];
@@ -602,7 +394,7 @@ if (
   import.meta.url === pathToFileURL(path.resolve(invokedPath)).href
 ) {
   runCli(process.argv.slice(2)).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(errorMessage(error));
     process.exitCode = 1;
   });
 }

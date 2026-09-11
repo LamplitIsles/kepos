@@ -16,11 +16,9 @@ import { fileURLToPath } from "node:url";
 import { test, type TestContext } from "node:test";
 
 import {
-  acquirePublisherRuntimeLock,
+  acquirePeerRuntimeLock,
   acquireRuntimeLock,
-  acquireSubscriberRuntimeLock,
-  publisherRuntimeLockPath,
-  subscriberRuntimeLockPath,
+  peerRuntimeLockPath,
 } from "../src/runtime/runtime-lock.js";
 
 const repository = fileURLToPath(new URL("..", import.meta.url));
@@ -28,66 +26,55 @@ const childScript = fileURLToPath(
   new URL("./fixtures/runtime-lock-child.ts", import.meta.url),
 );
 
-test("runtime lock scopes preserve stable paths and inodes", async () => {
+test("peer runtime lock preserves its stable path and inode", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "kepos-runtime-lock-"));
-  const stateDir = path.join(root, "subscriber");
-  const subscriberPath = subscriberRuntimeLockPath(stateDir);
-  const publisherPath = publisherRuntimeLockPath(stateDir);
+  const stateDir = path.join(root, "peer");
+  const peerPath = peerRuntimeLockPath(stateDir);
   const desktopPath = path.join(root, "desktop.runtime.lock");
   await mkdir(stateDir, { recursive: true });
 
   // Existing bytes, including a stale PID-shaped record, are not ownership.
-  await writeFile(subscriberPath, '{"pid":1,"ownerToken":"stale"}\n', {
+  await writeFile(peerPath, '{"pid":1,"ownerToken":"stale"}\n', {
     mode: 0o600,
   });
-  const original = await stat(subscriberPath);
-  const subscriber = await acquireSubscriberRuntimeLock(stateDir);
-  const claimed = await stat(subscriberPath);
+  const original = await stat(peerPath);
+  const peer = await acquirePeerRuntimeLock(stateDir);
+  const claimed = await stat(peerPath);
 
-  let publisher:
-    Awaited<ReturnType<typeof acquirePublisherRuntimeLock>> | undefined;
   let desktop: Awaited<ReturnType<typeof acquireRuntimeLock>> | undefined;
   try {
     assert.equal(claimed.ino, original.ino);
     assert.equal(claimed.dev, original.dev);
     assert.equal(claimed.mode & 0o777, 0o600);
-    assert.equal(path.dirname(subscriberPath), path.dirname(stateDir));
+    assert.equal(path.dirname(peerPath), path.dirname(stateDir));
     assert.equal(
-      path.basename(subscriberPath),
-      `.${path.basename(stateDir)}.subscriber.runtime.lock`,
-    );
-    assert.equal(
-      path.basename(publisherPath),
-      `.${path.basename(stateDir)}.publisher.runtime.lock`,
+      path.basename(peerPath),
+      `.${path.basename(stateDir)}.peer.runtime.lock`,
     );
 
     await assert.rejects(
-      () => acquireSubscriberRuntimeLock(stateDir),
-      /Subscriber identity is already in use/,
+      () => acquirePeerRuntimeLock(stateDir),
+      /Peer identity is already in use/,
     );
 
-    // Subscriber, publisher, and desktop singleton scopes are independent.
-    publisher = await acquirePublisherRuntimeLock(stateDir);
+    // The desktop singleton is a separate, test-owned lock scope.
     desktop = await acquireRuntimeLock({
       lockPath: desktopPath,
       conflictMessage: "Kepos desktop is already running",
     });
-    assert.equal((await stat(subscriberPath)).ino, original.ino);
-    assert.equal((await stat(publisherPath)).mode & 0o777, 0o600);
+    assert.equal((await stat(peerPath)).ino, original.ino);
+    assert.equal((await stat(peerRuntimeLockPath(stateDir))).mode & 0o777, 0o600);
     assert.equal((await stat(desktopPath)).mode & 0o777, 0o600);
   } finally {
     await desktop?.release().catch(() => undefined);
-    await publisher?.release().catch(() => undefined);
-    await subscriber.release().catch(() => undefined);
+    await peer.release().catch(() => undefined);
     assert.equal(
-      (await stat(subscriberPath)).ino,
+      (await stat(peerPath)).ino,
       original.ino,
       "release keeps the persistent lock inode",
     );
     await rm(root, { recursive: true, force: true });
   }
-
-  assert.equal(await pathExists(subscriberPath), false);
 });
 
 test("normal release is idempotent and concurrent callers share completion", async () => {
