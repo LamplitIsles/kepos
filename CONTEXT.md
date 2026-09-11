@@ -1,40 +1,60 @@
 # Kepos
 
-Kepos connects trusted devices so one device can consume named services
-published by another.
+Kepos connects trusted peers so either end of an established connection can
+consume named services explicitly made available by the other.
 
 ## Language
 
-**Publisher**:
-A Kepos device that makes named services available to trusted subscriber
-devices, with service sources on that device or at an authorized upstream
-publisher.
+**Peer**:
+A Kepos participant with one persistent identity that can provide and consume
+authorized services over its connections to other peers.
 
-**Subscriber Device**:
-A persistently identified Kepos device that a publisher may trust to consume
-its services.
-_Avoid_: Sub, client
+**Peer Identity**:
+The persistent cryptographic identity used both to establish and to accept
+connections. Different identities are not equivalent merely because the same
+device owns them.
+_Avoid_: Publisher identity, subscriber identity (for the new peer model)
 
-**Subscriber Device Label**:
-A publisher operator's local, human-readable name for a subscriber device. It
-identifies the device in management and observability surfaces, not a person.
+**Dialing Peer**:
+The peer that initiates a particular connection. This role does not determine
+which peer provides services over that connection.
+
+**Accepting Peer**:
+The peer that accepts a particular connection. The same peer may dial other
+peers using the same identity.
+
+**Peer Label**:
+An operator's local, human-readable name for a peer. It identifies the peer in
+configuration, management, and observability surfaces, not a person.
 _Avoid_: Person name, account name
 
+**Service Provider**:
+The peer that makes a named service available and owns its source and access
+policy, independently of which peer established the connection.
+
+**Service Consumer**:
+The peer authorized to open a service channel or UDP flow to a service provider.
+
 **Published Service**:
-A named service that a publisher intentionally makes available through Kepos.
+A named service intentionally made available through Kepos. Its identity is
+the providing peer together with the service name.
 
 **Service Source**:
-The local service or upstream published service that supplies a published
-service. It is exactly one of a fixed local loopback port, or a pair of an
-upstream publisher public key and its named service ID.
+The fixed local endpoint or authorized upstream published service that supplies
+a published service.
 
-**Upstream Publisher**:
-A publisher whose service another publisher consumes as a service source.
+**Service Binding**:
+A locally owned entry point for consuming one named service from one peer.
+Creating a binding does not publish that service to other peers.
+
+**Upstream Service Provider**:
+A peer whose service another service provider consumes as a service source.
 Upstream and downstream describe a service relationship between devices.
 
 **Service Republication**:
-A publisher's intentional publication of an authorized upstream service under
-its own service name and downstream access policy.
+A service provider's intentional publication of an authorized upstream service
+under its own service name and downstream access policy. Its upstream and
+downstream connections need not have opposite establishment directions.
 _Avoid_: Blind relay, automatic service discovery
 
 **Service Availability**:
@@ -50,10 +70,14 @@ _Avoid_: Virtual LAN, reliable UDP tunnel
 
 **UDP Flow**:
 One local application's datagram exchange with a UDP service through a
-subscriber device. Separate local senders have separate flows and replies.
+service consumer. Separate local senders have separate flows and replies.
 _Avoid_: Active Service Channel
 
 **Active Service Channel**:
-One live byte stream opened by a subscriber device to a published service.
+One live byte stream opened by a service consumer to a published service.
 Multiple active service channels may use the same published service.
 _Avoid_: Active service
+
+**Reverse Service Channel**:
+An active service channel initiated by the accepting peer over a connection
+established by the dialing peer. It does not require a new reverse connection.
