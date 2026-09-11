@@ -2,7 +2,6 @@ package io.github.ttalab.kepos.ui
 
 import io.github.ttalab.barekit.host.BindingSnapshot
 import io.github.ttalab.barekit.host.PeerConnectionSnapshot
-import io.github.ttalab.barekit.host.PublisherSnapshot
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 import io.github.ttalab.barekit.host.ServiceSnapshot
@@ -35,7 +34,6 @@ class KeposUiModelTest {
         peerKey = "ab".repeat(32),
         configured = true,
         connection = "connected",
-        publisher = PublisherSnapshot("desktop", "cd".repeat(32)),
         connections = listOf(
           PeerConnectionSnapshot(
             label = "desktop",
@@ -59,6 +57,7 @@ class KeposUiModelTest {
 
     assertEquals(KeposDestination.SERVICES, model.destination)
     assertEquals("ab".repeat(32), model.peerKey)
+    assertEquals("desktop", model.peerLabel)
     assertEquals("connected", model.connection)
     assertEquals(listOf("ssh", "photos"), model.services.map { it.id })
     assertEquals(1, model.bindings)
@@ -84,7 +83,17 @@ class KeposUiModelTest {
         state = RuntimeState.RUNNING,
         configured = true,
         connection = "connected",
-        publisher = PublisherSnapshot("desktop", "cd".repeat(32)),
+        connections = listOf(
+          PeerConnectionSnapshot(
+            label = "desktop",
+            publicKey = "cd".repeat(32),
+            connection = "dial",
+            status = "connected",
+            generation = 1,
+            capability = "ready",
+            services = 1,
+          ),
+        ),
         services = listOf(
           ServiceSnapshot(
             "game",

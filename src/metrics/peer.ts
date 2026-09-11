@@ -11,20 +11,16 @@ export const peerMetricNames = [
 ] as const;
 
 /** Existing dashboard and Kosmos scrape names are intentionally unchanged. */
-export const publisherMetricNames = peerMetricNames;
 export type PeerMetricName = (typeof peerMetricNames)[number];
-export type PublisherMetricName = PeerMetricName;
 
 export type PeerMetricsDirection =
   | "publisher_to_subscriber"
   | "subscriber_to_publisher";
-export type PublisherMetricsDirection = PeerMetricsDirection;
 
 export interface PeerMetricsContext {
   subscriberKey: string;
   connectionId: string;
 }
-export type PublisherMetricsContext = PeerMetricsContext;
 
 export interface PeerMetricsHooks {
   connectionActivated: (context: PeerMetricsContext) => void;
@@ -38,7 +34,6 @@ export interface PeerMetricsHooks {
     bytes: number,
   ) => void;
 }
-export type PublisherMetricsHooks = PeerMetricsHooks;
 
 export interface PeerMetricsPolicy {
   peers: readonly Pick<PeerDefinition, "publicKey" | "label">[];

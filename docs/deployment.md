@@ -84,10 +84,11 @@ Service sources select one of `localPort`, `unixSocket`, or a complete
 `peer`/`service` pair. Service `allow` values are immediate peer public keys;
 the default empty list denies access. Bindings select one `localPort` (zero is
 ephemeral) or `unixSocket`; set `kind = "udp"` for a forward UDP binding,
-which requires a local port. A binding consumes a remote service; it does not
-publish it. `metrics.enable` adds the read-only Prometheus `/metrics` listener
-with the configured host and port; port `0` is allowed for an ephemeral
-listener.
+which requires a local port and a dial-side target peer. An accept-side UDP
+binding remains unavailable; reverse UDP is not provided. A binding consumes a
+remote service; it does not publish it. `metrics.enable` adds the read-only
+Prometheus `/metrics` listener with the configured host and port; port `0` is
+allowed for an ephemeral listener.
 
 The module's generated TOML is written into the Nix store, but `peer.json`
 is created at `stateDir` by `ExecStartPre` with `0700/0600` permissions. The

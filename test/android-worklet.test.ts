@@ -222,3 +222,41 @@ test("Android Worklet forwards canonical configuration and pairing operations", 
     ],
   );
 });
+
+test("Android Worklet rejects the obsolete role-specific configure field", async () => {
+  const output: HostEnvelope[] = [];
+  const decoder = new FrameDecoder();
+  let configured = false;
+  const controller = new WorkletController({
+    runtimeId: "runtime-1",
+    echoUrl: "http://127.0.0.1:17482/",
+    write(frame) {
+      output.push(...decoder.push(frame));
+    },
+    async configurePeer() {
+      configured = true;
+    },
+    async stopEcho() {},
+  });
+  controller.start();
+  output.length = 0;
+
+  await controller.receive(encodeFrame({
+    version: 1,
+    kind: "request",
+    id: 11,
+    method: "configure",
+    params: { publisherKey: "ab".repeat(32) },
+  }));
+
+  assert.equal(configured, false);
+  assert.deepEqual(output, [{
+    version: 1,
+    kind: "error",
+    id: 11,
+    error: {
+      code: "invalid_configuration",
+      message: "publicKey must be 32 bytes of lowercase hex",
+    },
+  }]);
+});

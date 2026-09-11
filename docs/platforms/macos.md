@@ -106,6 +106,8 @@ and Unix bindings expose their configured local endpoint. If several peers
 offer the same HTTP service ID, the UI/runtime reports an ambiguity and the
 operator must configure an explicit binding; it never selects by reconnect
 order. UDP service cards copy a loopback endpoint and do not open a browser.
+Those cards are actionable only for forward bindings targeting a dial-side
+peer; accept-side UDP bindings remain unavailable.
 
 For the DSH use case, the canonical Mac service can publish the cua-driver Unix
 socket. A NUC-side binding to that service carries the NDJSON byte stream and

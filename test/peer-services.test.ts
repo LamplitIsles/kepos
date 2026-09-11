@@ -202,6 +202,172 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
   }
 });
 
+test("canonical service actions select an explicit same-ID peer without fallback", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-service-selection-"));
+  const testnet = await createHyperDhtTestnet(4);
+  let oneDht: DhtNode | undefined;
+  let twoDht: DhtNode | undefined;
+  let consumerDht: DhtNode | undefined;
+  let onePeer: RunningPeer | undefined;
+  let twoPeer: RunningPeer | undefined;
+  let consumerPeer: RunningPeer | undefined;
+  let oneSource: Server | undefined;
+  let twoSource: Server | undefined;
+  try {
+    const oneState = path.join(root, "one", "peer");
+    const twoState = path.join(root, "two", "peer");
+    const consumerState = path.join(root, "consumer", "peer");
+    const oneSetup = await setupPeer({ stateDir: oneState });
+    const twoSetup = await setupPeer({ stateDir: twoState });
+    const consumerSetup = await setupPeer({ stateDir: consumerState });
+    oneDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(oneState)).seed),
+    });
+    twoDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(twoState)).seed),
+    });
+    consumerDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(consumerState)).seed),
+    });
+
+    oneSource = createServer((socket) => {
+      socket.once("data", () => {
+        socket.end(
+          "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\none",
+        );
+      });
+    });
+    twoSource = createServer((socket) => {
+      socket.once("data", () => {
+        socket.end(
+          "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\ntwo",
+        );
+      });
+    });
+    await listenTcp(oneSource);
+    await listenTcp(twoSource);
+    const oneAddress = oneSource.address();
+    const twoAddress = twoSource.address();
+    if (
+      !oneAddress ||
+      typeof oneAddress === "string" ||
+      !twoAddress ||
+      typeof twoAddress === "string"
+    ) {
+      throw new Error("same-ID HTTP sources did not receive addresses");
+    }
+
+    const providerConfig = (
+      key: string,
+      port: number,
+    ) => parsePeerConfig({
+      gateway: { port: 0 },
+      peers: [{ label: "consumer", publicKey: consumerSetup.publicKey, connection: "accept" }],
+      services: [{
+        id: "docs",
+        name: "Docs",
+        kind: "http",
+        source: { localPort: port },
+        allow: [key],
+      }],
+      bindings: [],
+    });
+    const consumerConfig = (bindings: PeerConfig["bindings"]) => parsePeerConfig({
+      gateway: { port: 0 },
+      peers: [
+        { label: "peer-one", publicKey: oneSetup.publicKey, connection: "dial" },
+        { label: "peer-two", publicKey: twoSetup.publicKey, connection: "dial" },
+      ],
+      services: [],
+      bindings,
+    });
+
+    onePeer = await startPeer({
+      stateDir: oneState,
+      dht: oneDht,
+      config: providerConfig(consumerSetup.publicKey, oneAddress.port),
+    });
+    twoPeer = await startPeer({
+      stateDir: twoState,
+      dht: twoDht,
+      config: providerConfig(consumerSetup.publicKey, twoAddress.port),
+    });
+    consumerPeer = await startPeer({
+      stateDir: consumerState,
+      dht: consumerDht,
+      serviceAcquisitionTimeoutMs: 100,
+      config: consumerConfig([{
+        peer: "peer-one",
+        service: "docs",
+        listen: { localPort: 0 },
+      }]),
+    });
+
+    await waitFor(() => {
+      const status = consumerPeer?.status();
+      return (
+        status?.connections.length === 2 &&
+        status.connections.every(({ status: connectionStatus }) => connectionStatus === "connected") &&
+        status.services.find(({ id }) => id === "docs")?.available === true
+      );
+    });
+    let docs = consumerPeer.status().services.find(({ id }) => id === "docs");
+    assert.equal(consumerPeer.status().services.filter(({ id }) => id === "docs").length, 1);
+    assert.equal(docs?.name, "Docs");
+    assert.equal(docs?.peer, "peer-one");
+    assert.equal(docs?.action, "open");
+    assert.deepEqual(
+      await requestGatewayBody(consumerPeer.gateway.port, "docs"),
+      { status: 200, body: "one" },
+    );
+
+    await consumerPeer.applyConfig(consumerConfig([]));
+    await waitFor(() => {
+      docs = consumerPeer?.status().services.find(({ id }) => id === "docs");
+      return docs?.available === false && /ambiguous/i.test(docs.error ?? "");
+    });
+    assert.equal(consumerPeer.status().services.filter(({ id }) => id === "docs").length, 1);
+    assert.equal(await requestGateway(consumerPeer.gateway.port, "docs"), 502);
+
+    await consumerPeer.applyConfig(consumerConfig([{
+      peer: "peer-one",
+      service: "docs",
+      listen: { localPort: 0 },
+    }]));
+    await waitFor(() =>
+      consumerPeer?.status().services.find(({ id }) => id === "docs")?.available === true,
+    );
+    await onePeer.stop();
+    onePeer = undefined;
+    await waitFor(() => {
+      docs = consumerPeer?.status().services.find(({ id }) => id === "docs");
+      return (
+        docs?.available === false &&
+        docs.peer === "peer-one" &&
+        /offline|unavailable|catalog/i.test(docs.error ?? "")
+      );
+    });
+    assert.equal(
+      consumerPeer.status().services.find(({ id }) => id === "docs")?.available,
+      false,
+    );
+  } finally {
+    await consumerPeer?.stop().catch(() => undefined);
+    await twoPeer?.stop().catch(() => undefined);
+    await onePeer?.stop().catch(() => undefined);
+    await consumerDht?.destroy({ force: true }).catch(() => undefined);
+    await twoDht?.destroy({ force: true }).catch(() => undefined);
+    await oneDht?.destroy({ force: true }).catch(() => undefined);
+    await closeServer(oneSource);
+    await closeServer(twoSource);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("canonical UDP bindings round-trip through a dial connection and recover after revocation", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-udp-binding-"));
   const testnet = await createHyperDhtTestnet(3);
@@ -318,6 +484,109 @@ test("canonical UDP bindings round-trip through a dial connection and recover af
     await provider?.stop().catch(() => undefined);
     await consumerDht?.destroy({ force: true }).catch(() => undefined);
     await providerDht?.destroy({ force: true }).catch(() => undefined);
+    await closeUdp(local);
+    await closeUdp(target);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical UDP bindings stay unavailable when their peer direction is accept", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-udp-direction-"));
+  const testnet = await createHyperDhtTestnet(3);
+  let acceptDht: DhtNode | undefined;
+  let dialDht: DhtNode | undefined;
+  let acceptPeer: RunningPeer | undefined;
+  let dialPeer: RunningPeer | undefined;
+  let target: Socket | undefined;
+  let local: Socket | undefined;
+  try {
+    const acceptState = path.join(root, "accept", "peer");
+    const dialState = path.join(root, "dial", "peer");
+    const acceptSetup = await setupPeer({ stateDir: acceptState });
+    const dialSetup = await setupPeer({ stateDir: dialState });
+    acceptDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(acceptState)).seed),
+    });
+    dialDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(dialState)).seed),
+    });
+    target = createSocket("udp4");
+    await bindUdpSocket(target);
+    target.on("message", (message, remote) => {
+      target!.send(Buffer.concat([Buffer.from("accept-direction:"), message]), remote.port, remote.address);
+    });
+    const targetAddress = target.address();
+    if (!targetAddress || typeof targetAddress === "string") {
+      throw new Error("accept-direction UDP target did not receive an address");
+    }
+
+    acceptPeer = await startPeer({
+      stateDir: acceptState,
+      dht: acceptDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "dial", publicKey: dialSetup.publicKey, connection: "accept" }],
+        services: [],
+        bindings: [{
+          peer: "dial",
+          service: "game",
+          kind: "udp",
+          listen: { localPort: 0 },
+        }],
+      }),
+    });
+    dialPeer = await startPeer({
+      stateDir: dialState,
+      dht: dialDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "accept", publicKey: acceptSetup.publicKey, connection: "dial" }],
+        services: [{
+          id: "game",
+          name: "Game",
+          kind: "udp",
+          source: { localPort: targetAddress.port },
+          allow: [acceptSetup.publicKey],
+        }],
+        bindings: [],
+      }),
+    });
+
+    await waitFor(() => {
+      const status = acceptPeer?.status();
+      return (
+        status?.connections[0]?.status === "connected" &&
+        status.services.find(({ id }) => id === "game")?.available === false &&
+        status.bindings[0]?.available === false
+      );
+    });
+    assert.equal(
+      acceptPeer.status().bindings[0]?.error,
+      "UDP bindings require a dial-side peer connection",
+    );
+    assert.equal(
+      acceptPeer.status().services.find(({ id }) => id === "game")?.error,
+      "UDP bindings require a dial-side peer connection",
+    );
+
+    local = createSocket("udp4");
+    await bindUdpSocket(local);
+    const bindingPort = acceptPeer.status().bindings[0]?.port;
+    if (typeof bindingPort !== "number") {
+      throw new Error("accept-direction binding has no port");
+    }
+    await assert.rejects(
+      sendUdpDatagram(local, bindingPort!, Buffer.from("must-not-forward"), 100),
+      /timed out|unavailable/i,
+    );
+  } finally {
+    await dialPeer?.stop().catch(() => undefined);
+    await acceptPeer?.stop().catch(() => undefined);
+    await dialDht?.destroy({ force: true }).catch(() => undefined);
+    await acceptDht?.destroy({ force: true }).catch(() => undefined);
     await closeUdp(local);
     await closeUdp(target);
     await testnet.destroy();
@@ -1568,6 +1837,28 @@ function requestGateway(port: number, serviceId: string): Promise<number> {
     }, (response) => {
       response.resume();
       response.once("end", () => resolve(response.statusCode ?? 0));
+    });
+    request.once("error", reject);
+    request.end();
+  });
+}
+
+function requestGatewayBody(
+  port: number,
+  serviceId: string,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host: "127.0.0.1",
+      port,
+      headers: { host: `${serviceId}.localhost:${port}` },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.once("end", () => resolve({
+        status: response.statusCode ?? 0,
+        body: Buffer.concat(chunks).toString("utf8"),
+      }));
     });
     request.once("error", reject);
     request.end();

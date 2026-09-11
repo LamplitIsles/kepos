@@ -46,8 +46,9 @@ a published service.
 **Service Binding**:
 A locally owned TCP, UDP, or Unix entry point for consuming one named service
 from one peer. UDP bindings are forward datagram listeners over the
-authenticated connection and require a local loopback port. Creating a binding
-does not publish that service to other peers.
+authenticated connection and require a local loopback port plus a dial-side
+peer relationship. An accept-side UDP binding remains unavailable; creating a
+binding does not publish that service to other peers.
 
 **Upstream Service Provider**:
 A peer whose service another service provider consumes as a service source.

@@ -44,7 +44,8 @@
 - A peer has one seed-only `peer.json` identity. Keep service grants explicit
   for the authenticated immediate peer. A `bindings` entry consumes a remote
   service and never republishes it; its default `kind` is a TCP/byte-stream
-  listener and `kind = "udp"` owns a forward loopback datagram listener.
+  listener and `kind = "udp"` owns a forward loopback datagram listener for a
+  dial-side peer only; accept-side UDP bindings remain unavailable.
   Republication requires a separate local service with an explicit
   peer/service source and allowlist. The optional `metrics` table and
   `--metrics-listen` override expose the existing read-only Prometheus

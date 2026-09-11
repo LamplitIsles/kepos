@@ -18,8 +18,8 @@ The canonical configuration keeps those concerns separate:
 - `services` publishes a fixed loopback TCP/UDP port, Unix socket, or explicitly
   selected peer/service source with an immediate-peer `allow` list;
 - `bindings` owns local TCP/UDP or Unix entry points for services on another
-  peer. Set `kind = "udp"` for a datagram binding; its listener is always a
-  local loopback port.
+  peer. Set `kind = "udp"` for a forward datagram binding; its listener is
+  always a local loopback port and its target must be a dial-side peer.
 
 Service republication is explicit. A peer/service source gets a new local
 service ID and its own downstream allowlist. A binding by itself never

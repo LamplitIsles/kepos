@@ -7,7 +7,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import io.github.ttalab.barekit.host.BindingSnapshot
 import io.github.ttalab.barekit.host.PeerConnectionSnapshot
-import io.github.ttalab.barekit.host.PublisherSnapshot
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 import io.github.ttalab.barekit.host.ServiceSnapshot
@@ -34,6 +33,7 @@ class KeposScreenTest {
     }
 
     compose.onNodeWithText("Peer services").assertIsDisplayed()
+    compose.onNodeWithText("Peer: desktop").assertIsDisplayed()
     compose.onNodeWithText("1 connected · 1 configured").assertIsDisplayed()
     compose.onNodeWithText("SSH").assertIsDisplayed()
     compose.onNodeWithText("Photos").assertIsDisplayed()
@@ -94,7 +94,6 @@ class KeposScreenTest {
     peerKey = "ab".repeat(32),
     configured = true,
     connection = "connected",
-    publisher = PublisherSnapshot("desktop", "cd".repeat(32)),
     connections = listOf(
       PeerConnectionSnapshot(
         label = "desktop",

@@ -212,14 +212,7 @@ class BareRuntime(
       bindings = data["bindings"]?.jsonArray?.map { parseBinding(it.jsonObject) } ?: emptyList(),
       error = data["error"]?.jsonPrimitive?.content,
       configured = data["configured"]?.jsonPrimitive?.booleanOrNull ?: false,
-      subscriberPublicKey = data["subscriberPublicKey"]?.jsonPrimitive?.content,
       connection = data["connection"]?.jsonPrimitive?.content,
-      publisher = data["publisher"]?.jsonObject?.let { publisher ->
-        io.github.ttalab.barekit.host.PublisherSnapshot(
-          displayName = publisher.getValue("displayName").jsonPrimitive.content,
-          publisherKey = publisher.getValue("publisherKey").jsonPrimitive.content,
-        )
-      },
     )
     notifyObservers()
   }

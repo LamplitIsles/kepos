@@ -82,10 +82,12 @@ Canonical service sources are exactly one of:
 Bindings own a local loopback TCP/UDP port or Unix socket for one remote peer
 and service. Set the binding kind to `udp` for a forward datagram listener;
 UDP bindings require a loopback port and use the authenticated connection's
-existing bounded UDP envelopes. A byte-stream binding is the default and Unix
-endpoints remain byte-stream only. The endpoint is selected locally; remote
-messages cannot choose it. An imported service is not published merely because
-it has a binding.
+existing bounded UDP envelopes. A UDP binding is usable only for a configured
+`dial` peer; a binding targeting an `accept` peer remains unavailable because
+local UDP consumption is forward-only. A byte-stream binding is the default
+and Unix endpoints remain byte-stream only. The endpoint is selected locally;
+remote messages cannot choose it. An imported service is not published merely
+because it has a binding.
 
 Republication is a new local service entry:
 

@@ -100,7 +100,10 @@ export function createDesktopController(
     }
     const service = available[0];
     if (!service) {
-      throw new Error(`${command.serviceId} is not available`);
+      throw new Error(
+        services.find(({ error }) => error)?.error ??
+          `${command.serviceId} is not available`,
+      );
     }
     if (service.action !== "open" || !service.url) {
       throw new Error(`${command.serviceId} does not provide an open action`);

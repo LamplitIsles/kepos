@@ -123,8 +123,8 @@ private fun PeerHome(
       Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Column {
           Text("Peer services", style = MaterialTheme.typography.headlineMedium)
-          snapshot.publisher?.displayName?.let {
-            Text("Publisher: $it", style = MaterialTheme.typography.bodyMedium)
+          model.peerLabel?.let {
+            Text("Peer: $it", style = MaterialTheme.typography.bodyMedium)
           }
           Text(snapshot.connectionsSummary(), style = MaterialTheme.typography.bodyMedium)
         }
@@ -196,7 +196,7 @@ private fun SetupScreen(
   onScanPairing: () -> Unit,
   onCopyText: (String) -> Unit,
 ) {
-  var publisherKey by rememberSaveable { mutableStateOf("") }
+  var peerKey by rememberSaveable { mutableStateOf("") }
   Column(
     modifier = Modifier.fillMaxSize().padding(28.dp),
     verticalArrangement = Arrangement.Center,
@@ -209,7 +209,7 @@ private fun SetupScreen(
       snapshot.error ?: "Choose a trusted peer by scanning its invitation or entering its public key.",
       style = MaterialTheme.typography.bodyLarge,
     )
-    snapshot.subscriberPublicKey?.let { key ->
+    snapshot.peerKey?.let { key ->
       Spacer(Modifier.height(18.dp))
       Text("Your peer key", style = MaterialTheme.typography.labelMedium)
       Text(
@@ -226,9 +226,9 @@ private fun SetupScreen(
     }
     Spacer(Modifier.height(12.dp))
     OutlinedTextField(
-      value = publisherKey,
+      value = peerKey,
       onValueChange = { value ->
-        publisherKey = value.lowercase()
+        peerKey = value.lowercase()
           .filter { character -> character in '0'..'9' || character in 'a'..'f' }
           .take(64)
       },
@@ -241,8 +241,8 @@ private fun SetupScreen(
       singleLine = true,
     )
     Button(
-      onClick = { onConfigure(publisherKey) },
-      enabled = publisherKey.length == 64,
+      onClick = { onConfigure(peerKey) },
+      enabled = peerKey.length == 64,
       modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
     ) { Text("Connect with key") }
   }

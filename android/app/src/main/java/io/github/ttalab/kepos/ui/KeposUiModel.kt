@@ -47,7 +47,7 @@ data class ServiceUiModel(
 
 data class KeposUiModel(
   val destination: KeposDestination,
-  val publisherName: String? = null,
+  val peerLabel: String? = null,
   val peerKey: String? = null,
   val connection: String? = null,
   val services: List<ServiceUiModel> = emptyList(),
@@ -69,35 +69,36 @@ data class KeposUiModel(
       if (!snapshot.configured) {
         return KeposUiModel(
           destination = KeposDestination.SETUP,
-          peerKey = snapshot.subscriberPublicKey ?: snapshot.peerKey,
+          peerKey = snapshot.peerKey,
           error = snapshot.error,
         )
       }
-      val publisher = snapshot.publisher
-        ?: return KeposUiModel(
+      val connection = snapshot.connections.firstOrNull { it.status == "connected" }
+        ?: snapshot.connections.firstOrNull()
+      if (connection == null) {
+        return KeposUiModel(
           destination = KeposDestination.CONNECTING,
-          peerKey = snapshot.subscriberPublicKey ?: snapshot.peerKey,
+          peerKey = snapshot.peerKey,
           connection = snapshot.connection,
           error = snapshot.error,
         )
+      }
+      val connectionStatus = snapshot.connection ?: connection.status
       return KeposUiModel(
         destination = KeposDestination.SERVICES,
-        publisherName = publisher.displayName,
-        peerKey = snapshot.subscriberPublicKey ?: snapshot.peerKey,
-        connection = snapshot.connection
-          ?: snapshot.connections.firstOrNull { it.status == "connected" }?.status
-          ?: snapshot.connections.firstOrNull()?.status,
+        peerLabel = connection.label,
+        peerKey = snapshot.peerKey,
+        connection = connectionStatus,
         services = snapshot.services.mapNotNull(::serviceUiModel),
         bindings = snapshot.bindings.size,
-        available = snapshot.connection == "connected" && snapshot.services.any { it.available },
+        available = connectionStatus == "connected" && snapshot.services.any { it.available },
         error = snapshot.error,
       )
     }
 
     private fun serviceUiModel(service: io.github.ttalab.barekit.host.ServiceSnapshot): ServiceUiModel? {
-      // Android keeps the shipped subscriber boundary: it has no local UDP
-      // operation, so a canonical UDP catalog entry is not presented as an
-      // action the host cannot complete.
+      // Android has no local UDP operation, so a canonical UDP catalog entry
+      // is not presented as an action the host cannot complete.
       if (service.kind == "udp") return null
       val action = when (service.action) {
         "open" -> ServiceAction.OPEN

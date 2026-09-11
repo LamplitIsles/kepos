@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
         onStart = { startRuntime() },
         onStop = { KeposForegroundService.stop(this) },
         onConfigure = { publicKey ->
-          service?.configurePeer(publicKey, "publisher", "dial")?.whenComplete { _, error ->
+          service?.configurePeer(publicKey, "peer", "dial")?.whenComplete { _, error ->
             if (error != null) showError(error, "Configuration failed")
           }
         },

@@ -44,16 +44,7 @@ const status = (): Record<string, unknown> => {
   return {
     ...current,
     configured: configuredPeer !== undefined,
-    subscriberPublicKey: current.peerKey,
     connection: pairingConnection ?? connection?.status ?? "offline",
-    ...(configuredPeer
-      ? {
-          publisher: {
-            displayName: configuredPeer.label,
-            publisherKey: configuredPeer.publicKey,
-          },
-        }
-      : {}),
     ...(connection?.error ? { error: connection.error } : {}),
   };
 };

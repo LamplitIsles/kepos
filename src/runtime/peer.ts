@@ -230,6 +230,12 @@ interface PeerEntry {
   pairingRequest?: PairingRequest;
 }
 
+interface RemoteServiceCandidate {
+  entry: PeerEntry;
+  service: HomeRegistry["services"][number];
+  catalogAvailable: boolean;
+}
+
 interface CanonicalUdpMapping {
   connection: PeerConnection;
   remote: CanonicalUdpRemote;
@@ -1377,37 +1383,24 @@ export async function startPeer(
     serviceId: string,
     signal?: CancellationSignal,
   ): Promise<Duplex> {
-    const candidates = [...peerEntries.values()].filter((entry) => {
-      const service = entry.current?.catalog?.services.find(
-        ({ id }) => id === serviceId,
-      );
-      return service !== undefined && service.kind === "tcp" && service.available !== false;
-    });
-    const explicit = [...bindings.values()].filter(({ service }) => service === serviceId);
-    let selected: PeerEntry | undefined;
-    if (candidates.length === 1) {
-      selected = candidates[0];
-    } else if (candidates.length > 1) {
-      if (explicit.length === 1) selected = peerEntries.get(resolvePeerKey(explicit[0]!.peer));
-      if (!selected) {
-        throw new Error(
-          `Service is ambiguous: ${serviceId}; configure one explicit binding`,
-        );
-      }
-    }
+    const candidates = remoteServiceCandidates(serviceId).filter(
+      ({ catalogAvailable }) => catalogAvailable,
+    );
+    const selection = selectRemoteService(serviceId, candidates);
+    if (selection.error) throw new Error(selection.error);
+    let selected = selection.peerKey
+      ? peerEntries.get(selection.peerKey)
+      : undefined;
     if (!selected) {
       if (serviceId === "home" && peerEntries.size === 1) {
         selected = [...peerEntries.values()][0];
       } else {
         // Let the normal acquisition path wait for a dialing peer and produce
         // the stable offline/unsupported error category.
-        const configured = explicit.length === 1
-          ? peerEntries.get(resolvePeerKey(explicit[0]!.peer))
-          : undefined;
-        if (!configured) {
+        if (!selection.peerKey) {
           throw new Error(`Service is offline or unauthorized: ${serviceId}`);
         }
-        selected = configured;
+        throw new Error(`Peer is not configured: ${selection.peerKey}`);
       }
     }
     return openPeerService(selected.definition.publicKey, serviceId, signal);
@@ -1590,6 +1583,7 @@ export async function startPeer(
         ({ id }) => id === runtime.binding.service,
       );
       const usable = Boolean(
+        entry?.definition.connection === "dial" &&
         connection &&
           !connection.closed &&
           connection.capability === "ready" &&
@@ -1753,56 +1747,157 @@ export async function startPeer(
   }
 
   function remoteServiceStatuses(): PeerRuntimeServiceStatus[] {
-    const statuses: PeerRuntimeServiceStatus[] = [];
+    const serviceIds = new Set<string>();
+    for (const entry of peerEntries.values()) {
+      const catalog = entry.current?.catalog ?? entry.lastCatalog;
+      for (const service of catalog?.services ?? []) {
+        if (service.id !== "home") serviceIds.add(service.id);
+      }
+    }
+
+    return [...serviceIds].sort().flatMap((serviceId) => {
+      const candidates = remoteServiceCandidates(serviceId);
+      const selection = selectRemoteService(serviceId, candidates);
+      let candidate = selection.peerKey
+        ? candidates.find(
+            ({ entry }) => entry.definition.publicKey === selection.peerKey,
+          )
+        : undefined;
+      let unavailableReason: string | undefined;
+      if (!candidate && selection.peerKey && candidates.length > 0) {
+        const selectedEntry = peerEntries.get(selection.peerKey);
+        if (selectedEntry) {
+          candidate = {
+            ...candidates[0]!,
+            entry: selectedEntry,
+            catalogAvailable: false,
+          };
+          unavailableReason = selectedEntry.current
+            ? "Service is unauthorized or unavailable"
+            : "Peer is offline";
+        }
+      }
+      candidate ??= candidates[0];
+      if (!candidate) return [];
+
+      const mapping = selection.error
+        ? undefined
+        : remoteBindingMappingFor(candidate.entry, serviceId);
+      const presentation = presentationFor(candidate.service, mapping);
+      const available =
+        selection.error === undefined &&
+        unavailableReason === undefined &&
+        candidate.catalogAvailable &&
+        candidate.service.available !== false &&
+        remoteServiceBindingError(candidate.entry, serviceId) === undefined;
+      const error =
+        selection.error ??
+        unavailableReason ??
+        remoteServiceBindingError(candidate.entry, serviceId) ??
+        remoteServiceError(candidate);
+      return [{
+        kind: candidate.service.kind,
+        source: { peer: candidate.entry.definition.label, service: serviceId },
+        peer: candidate.entry.definition.label,
+        available,
+        ...presentation,
+        ...(available ? {} : { error: error ?? "Service is unavailable" }),
+      }];
+    });
+  }
+
+  function remoteServiceCandidates(serviceId: string): RemoteServiceCandidate[] {
     const entries = [...peerEntries.values()].sort((left, right) =>
       left.definition.label.localeCompare(right.definition.label) ||
       left.definition.publicKey.localeCompare(right.definition.publicKey),
     );
-    for (const entry of entries) {
+    return entries.flatMap((entry) => {
       const catalog = entry.current?.catalog ?? entry.lastCatalog;
-      const catalogAvailable = entry.current?.catalog !== undefined;
-      for (const remote of catalog?.services ?? []) {
-        if (remote.id === "home") continue;
-        const presentation = presentationFor(
-          remote,
-          remoteBindingMappingFor(entry, remote.id),
-        );
-        const available = catalogAvailable && remote.available !== false;
-        statuses.push({
-          kind: remote.kind,
-          source: { peer: entry.definition.label, service: remote.id },
-          peer: entry.definition.label,
-          available,
-          ...presentation,
-          ...(available
-            ? {}
-            : {
-                error: remote.available === false
-                  ? remote.error ?? "Service is unavailable"
-                  : entry.current
-                    ? entry.error ?? "Peer service catalog is unavailable"
-                    : "Peer is offline",
-              }),
-        });
+      const service = catalog?.services.find(({ id }) => id === serviceId);
+      return service === undefined
+        ? []
+        : [{
+            entry,
+            service,
+            catalogAvailable: entry.current?.catalog !== undefined,
+          }];
+    });
+  }
+
+  function selectRemoteService(
+    serviceId: string,
+    candidates: readonly RemoteServiceCandidate[],
+  ): { peerKey?: string; error?: string } {
+    const visibleCandidates = candidates.filter(({ catalogAvailable }) => catalogAvailable);
+    const explicitPeerKeys = new Set<string>();
+    for (const binding of bindings.values()) {
+      if (binding.service !== serviceId) continue;
+      try {
+        explicitPeerKeys.add(resolvePeerKey(binding.peer));
+      } catch {
+        // Runtime configuration validation rejects this before it is installed.
       }
     }
-    return statuses;
+    if (
+      explicitPeerKeys.size > 1 ||
+      (explicitPeerKeys.size === 0 && visibleCandidates.length > 1)
+    ) {
+      return {
+        error: `Service is ambiguous: ${serviceId}; configure one explicit binding`,
+      };
+    }
+    const peerKey =
+      [...explicitPeerKeys][0] ??
+      visibleCandidates[0]?.entry.definition.publicKey ??
+      candidates[0]?.entry.definition.publicKey;
+    return peerKey === undefined ? {} : { peerKey };
+  }
+
+  function remoteServiceError(candidate: RemoteServiceCandidate): string | undefined {
+    if (candidate.catalogAvailable && candidate.service.available === false) {
+      return candidate.service.error ?? "Service is unavailable";
+    }
+    if (candidate.catalogAvailable) return undefined;
+    return candidate.entry.current
+      ? candidate.entry.error ?? "Peer service catalog is unavailable"
+      : "Peer is offline";
+  }
+
+  function remoteServiceBindingError(
+    entry: PeerEntry,
+    serviceId: string,
+  ): string | undefined {
+    const binding = remoteBindingFor(entry, serviceId);
+    return binding !== undefined &&
+      peerBindingKind(binding) === "udp" &&
+      entry.definition.connection !== "dial"
+      ? "UDP bindings require a dial-side peer connection"
+      : undefined;
+  }
+
+  function remoteBindingFor(
+    entry: PeerEntry,
+    serviceId: string,
+  ): PeerBinding | undefined {
+    return [...bindings.values()]
+      .filter((candidate) => candidate.service === serviceId)
+      .sort((left, right) =>
+        bindingKey(left, resolvePeerKey).localeCompare(bindingKey(right, resolvePeerKey)),
+      )
+      .find((candidate) => {
+        try {
+          return resolvePeerKey(candidate.peer) === entry.definition.publicKey;
+        } catch {
+          return false;
+        }
+      });
   }
 
   function remoteBindingMappingFor(
     entry: PeerEntry,
     serviceId: string,
   ): LocalServiceMapping | undefined {
-    const binding = [...bindings.values()].find((candidate) => {
-      try {
-        return (
-          candidate.service === serviceId &&
-          resolvePeerKey(candidate.peer) === entry.definition.publicKey
-        );
-      } catch {
-        return false;
-      }
-    });
+    const binding = remoteBindingFor(entry, serviceId);
     if (!binding) return undefined;
     const runtime = bindingRuntimes.get(bindingKey(binding, resolvePeerKey));
     if (runtime?.kind === "udp") {
@@ -1859,7 +1954,10 @@ export async function startPeer(
           ({ id }) => id === binding.service,
         );
         const kind = peerBindingKind(binding);
-        const unavailable = !entry?.current
+        const unavailable =
+          kind === "udp" && entry?.definition.connection !== "dial"
+          ? "UDP bindings require a dial-side peer connection"
+          : !entry?.current
           ? "Peer is offline"
           : !remote
             ? "Service is unauthorized or unavailable"

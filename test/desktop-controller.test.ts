@@ -111,6 +111,38 @@ test("desktop controller opens only an available canonical HTTP service", async 
   await assert.rejects(controller.receive('{"type":"openService","serviceId":"missing"}'), /not available/);
 });
 
+test("desktop controller preserves canonical service selection errors", async () => {
+  const conflict: DesktopSnapshot = {
+    ...initial,
+    peer: {
+      ...initial.peer!,
+      services: [{
+        id: "docs",
+        name: "Docs",
+        kind: "http",
+        source: { peer: "peer-one", service: "docs" },
+        available: false,
+        action: "open",
+        icon: "web",
+        url: "http://docs.localhost:17480/",
+        error: "Service is ambiguous: docs; configure one explicit binding",
+      }],
+    },
+  };
+  const controller = createDesktopController({
+    initialSnapshot: conflict,
+    ...actions(),
+    send: () => {},
+    openService: async () => {},
+    quit: async () => {},
+  });
+
+  await assert.rejects(
+    controller.receive('{"type":"openService","serviceId":"docs"}'),
+    /Service is ambiguous: docs/,
+  );
+});
+
 test("desktop controller serializes commands and quits once", async () => {
   const events: string[] = [];
   let releaseOpen: (() => void) | undefined;

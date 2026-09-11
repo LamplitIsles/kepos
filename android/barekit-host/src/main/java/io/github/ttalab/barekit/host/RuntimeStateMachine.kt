@@ -42,11 +42,6 @@ data class BindingSnapshot(
   val kind: String = "tcp",
 )
 
-data class PublisherSnapshot(
-  val displayName: String,
-  val publisherKey: String,
-)
-
 data class RuntimeSnapshot(
   val state: RuntimeState,
   val runtimeId: String? = null,
@@ -57,9 +52,7 @@ data class RuntimeSnapshot(
   val services: List<ServiceSnapshot> = emptyList(),
   val bindings: List<BindingSnapshot> = emptyList(),
   val configured: Boolean = false,
-  val subscriberPublicKey: String? = null,
   val connection: String? = null,
-  val publisher: PublisherSnapshot? = null,
 )
 
 data class StartDecision(val runtimeId: String, val shouldCreate: Boolean)
@@ -96,9 +89,7 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
     bindings: List<BindingSnapshot> = emptyList(),
     error: String? = null,
     configured: Boolean = false,
-    subscriberPublicKey: String? = null,
     connection: String? = null,
-    publisher: PublisherSnapshot? = null,
   ) {
     requireCurrent(runtimeId)
     check(current.state == RuntimeState.STARTING || current.state == RuntimeState.RUNNING) {
@@ -114,9 +105,7 @@ class RuntimeStateMachine(private val createRuntimeId: () -> String) {
       services = services,
       bindings = bindings,
       configured = configured,
-      subscriberPublicKey = subscriberPublicKey,
       connection = connection,
-      publisher = publisher,
     )
   }
 

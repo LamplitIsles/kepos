@@ -320,10 +320,13 @@ kind = "udp"
 listen = { local_port = 0 }
 ```
 
-The selected local port is included in status. Flow limits, datagram/fragment
-limits, authorization, revocation, source outage, and reconnect are handled by
-the same canonical runtime; bytes or replies from an old generation are not
-replayed. Reverse UDP remains explicitly unsupported.
+The selected local port is included in status. The target peer must be
+configured with `connection = "dial"`; an accept-side UDP binding is retained
+in configuration but reported unavailable, since reverse UDP is not provided.
+Flow limits, datagram/fragment limits, authorization, revocation, source
+outage, and reconnect are handled by the same canonical runtime; bytes or
+replies from an old generation are not replayed. Reverse UDP remains explicitly
+unsupported.
 
 HTTP services use the existing HTTP/1.1 adapter only when `kind = "http"`.
 Every request has caller-supplied `Authorization` fields removed and exactly

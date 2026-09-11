@@ -130,8 +130,10 @@ reconnect never replays bytes or application actions.
 TCP and Unix byte streams share the same `Duplex` bridge and half-close
 semantics. A UDP binding owns a local loopback datagram listener and maps each
 local flow to the existing bounded forward UDP envelopes on the authenticated
-connection. Local bindings are created even when their peer is offline and are
-reported unavailable until the remote catalog and grant are current. A client
+connection. It is usable only when its configured peer is a `dial` peer;
+accept-side UDP bindings remain unavailable and do not create reverse UDP.
+Local bindings are created even when their peer is offline and are reported
+unavailable until the remote catalog and grant are current. A client
 connection is paused while it waits for acquisition and is destroyed on
 timeout, cancellation, revocation, or source failure.
 

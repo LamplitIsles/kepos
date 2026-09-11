@@ -30,13 +30,6 @@ export interface WorkletControllerOptions {
     deviceLabel: string,
     platform: string,
   ): Promise<unknown>;
-  /** Retained names for the already shipped host adapter; they call the canonical callbacks. */
-  configurePublisher?(publicKey: string): Promise<unknown>;
-  pairPublisher?(
-    invitation: string,
-    deviceLabel: string,
-    platform: string,
-  ): Promise<unknown>;
   status?(): Record<string, unknown>;
 }
 
@@ -102,7 +95,7 @@ export class WorkletController {
   private async configure(request: RequestEnvelope): Promise<void> {
     try {
       const fields = objectParams(request.params, "configuration");
-      const publicKey = fields.publicKey ?? fields.publisherKey;
+      const publicKey = fields.publicKey;
       if (
         typeof publicKey !== "string" ||
         !/^[0-9a-f]{64}$/u.test(publicKey)
@@ -122,11 +115,9 @@ export class WorkletController {
       if (connection !== "dial" && connection !== "accept") {
         throw new Error("connection must be dial or accept");
       }
-      const callback = this.options.configurePeer ?? this.options.configurePublisher;
+      const callback = this.options.configurePeer;
       if (!callback) throw new Error("peer configuration is unavailable");
-      const result = await (this.options.configurePeer
-        ? this.options.configurePeer(publicKey, label, connection)
-        : this.options.configurePublisher!(publicKey));
+      const result = await callback(publicKey, label, connection);
       this.emitState();
       this.respond(request, result);
     } catch (error) {
@@ -157,7 +148,7 @@ export class WorkletController {
       ) {
         throw new Error("pairing parameters are invalid");
       }
-      const callback = this.options.pairPeer ?? this.options.pairPublisher;
+      const callback = this.options.pairPeer;
       if (!callback) throw new Error("peer pairing is unavailable");
       const result = await callback(
         fields.invitation,
