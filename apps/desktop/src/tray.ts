@@ -61,7 +61,7 @@ export function formatTraySnapshot(snapshot: DesktopSnapshot): TrayLabels {
     };
   }
 
-  const roles = [snapshot.publisher, snapshot.subscriber].filter(
+  const roles = [snapshot.publisher, snapshot.subscriber, snapshot.peer].filter(
     (role) => role !== undefined,
   );
   if (
@@ -96,6 +96,24 @@ export function formatTraySnapshot(snapshot: DesktopSnapshot): TrayLabels {
     return {
       status: "Kepos — Online",
       detail: `Remote ${snapshot.subscriber.connection}`,
+    };
+  }
+  if (snapshot.peer) {
+    const connected = snapshot.peer.connections.filter(
+      ({ status }) => status === "connected",
+    ).length;
+    const available = snapshot.peer.services.filter(
+      (service) => service.available,
+    ).length;
+    if (snapshot.peer.pairing?.phase === "inviting") {
+      return {
+        status: "Kepos — Waiting for pairing",
+        detail: "Peer invitation ready",
+      };
+    }
+    return {
+      status: "Kepos — Online",
+      detail: `${available} services · ${connected} peers`,
     };
   }
   return { status: "Kepos — Online", detail: "Not sharing yet" };

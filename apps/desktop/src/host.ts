@@ -10,6 +10,7 @@ import {
   createDesktopLifecycleObservation,
 } from "./diagnostics-contract.js";
 import {
+  acquirePeerRuntimeLock,
   acquirePublisherRuntimeLock,
   acquireSubscriberRuntimeLock,
   type RuntimeLock,
@@ -66,6 +67,7 @@ export interface StartDesktopHostOptions {
 
 export interface DesktopHostDependencies {
   acquireSingleton(homeDirectory: string): Promise<RuntimeLock>;
+  acquirePeerLock?: (stateDir: string) => Promise<RuntimeLock>;
   acquirePublisherLock(stateDir: string): Promise<RuntimeLock>;
   acquireSubscriberLock(stateDir: string): Promise<RuntimeLock>;
   createWindow(width: number, height: number): DesktopNativeWindow;
@@ -138,7 +140,13 @@ export async function startDesktopHost(
   }
   let publisherLock: RuntimeLock | undefined;
   let subscriberLock: RuntimeLock | undefined;
+  let peerLock: RuntimeLock | undefined;
   try {
+    if (startupOptions.peer) {
+      peerLock = await (dependencies.acquirePeerLock ?? acquirePeerRuntimeLock)(
+        startupOptions.peer.stateDir,
+      );
+    }
     if (startupOptions.publisher) {
       publisherLock = await dependencies.acquirePublisherLock(
         startupOptions.publisher.stateDir,
@@ -153,6 +161,7 @@ export async function startDesktopHost(
     for (const release of [
       () => subscriberLock?.release(),
       () => publisherLock?.release(),
+      () => peerLock?.release(),
       () => singleton.release(),
     ]) {
       try {
@@ -179,6 +188,7 @@ export async function startDesktopHost(
       createdTray,
       publisherLock,
       subscriberLock,
+      peerLock,
       singleton,
     );
     await closeDiagnostics();
@@ -351,6 +361,17 @@ export async function startDesktopHost(
             },
           }
         : {}),
+      ...(startupOptions.peer
+        ? {
+            peer: {
+              phase: "starting" as const,
+              peerKey: undefined,
+              connections: [],
+              services: [],
+              bindings: [],
+            },
+          }
+        : {}),
     },
     send: (message) => mainWebView.postMessage(message),
     openService,
@@ -416,6 +437,7 @@ export async function startDesktopHost(
       liveTray,
       publisherLock,
       subscriberLock,
+      peerLock,
       singleton,
     );
     await closeDiagnostics();
@@ -448,6 +470,14 @@ export async function startDesktopHost(
             subscriber: {
               ...startupOptions.subscriber,
               lock: subscriberLock,
+            },
+          }
+        : {}),
+      ...(startupOptions.peer
+        ? {
+            peer: {
+              ...startupOptions.peer,
+              lock: peerLock,
             },
           }
         : {}),
@@ -497,6 +527,7 @@ async function cleanNativeSetup(
   tray: DesktopTray | undefined,
   publisherLock: RuntimeLock | undefined,
   subscriberLock: RuntimeLock | undefined,
+  peerLock: RuntimeLock | undefined,
   singleton: RuntimeLock,
 ): Promise<void> {
   const steps = [
@@ -505,6 +536,7 @@ async function cleanNativeSetup(
     () => mainWindow?.close(),
     () => subscriberLock?.release(),
     () => publisherLock?.release(),
+    () => peerLock?.release(),
     () => singleton.release(),
   ];
   for (const step of steps) {
@@ -518,6 +550,7 @@ async function cleanNativeSetup(
 
 export const defaultDesktopHostDependencies = {
   acquireSingleton: acquireDesktopSingleton,
+  acquirePeerLock: acquirePeerRuntimeLock,
   acquirePublisherLock: acquirePublisherRuntimeLock,
   acquireSubscriberLock: acquireSubscriberRuntimeLock,
   startRuntime: startDesktopRuntime,

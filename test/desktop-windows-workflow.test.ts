@@ -71,17 +71,12 @@ test("Windows host input is sanitized and required generation rejects missing co
   writeFileSync(
     path.join(configDirectory, "config.toml"),
     [
+      "peers = []",
+      "services = []",
+      "bindings = []",
+      "",
       "[network]",
       'bootstrap = ["bootstrap-one.example:49737"]',
-      "",
-      "[publisher]",
-      'display_name = "must not cross the NUC boundary"',
-      "subscribers = []",
-      "services = []",
-      "",
-      "[subscriber]",
-      "enabled = true",
-      "services = []",
       "",
     ].join("\n"),
   );

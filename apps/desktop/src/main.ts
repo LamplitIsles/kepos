@@ -120,7 +120,7 @@ async function main(): Promise<void> {
       await smokeRendered;
       if (!isHealthyUnconfiguredSmokeSnapshot(smokeSnapshot)) {
         throw new Error(
-          "desktop smoke did not observe a healthy unconfigured subscriber snapshot",
+          "desktop smoke did not observe a healthy canonical peer or unconfigured subscriber snapshot",
         );
       }
       if (smokeReadyFile) {

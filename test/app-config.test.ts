@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -7,18 +7,75 @@ import { test } from "node:test";
 import {
   loadKeposConfig,
   parseKeposConfig,
+  saveKeposConfig,
   serializeKeposConfig,
 } from "../src/app-config.js";
+import { parsePeerConfig, type PeerConfig } from "../src/config.js";
 import {
   defaultKeposConfigPath,
   defaultKeposStateRoot,
 } from "../src/platform/paths.js";
 
-test("shared config parses network bootstrap endpoints", () => {
+const peerKey = "11".repeat(32);
+const otherPeerKey = "22".repeat(32);
+
+test("canonical config parses peers, orthogonal transport settings, services, and bindings", () => {
   assert.deepEqual(
     parseKeposConfig(`
 [network]
 bootstrap = ["bootstrap.example:49737", "dht.example.com:49738"]
+route = "public"
+
+[gateway]
+port = 17480
+host = "127.0.0.1"
+domain = "kepos.internal"
+
+[[peers]]
+label = "nuc"
+public_key = "${peerKey}"
+connection = "dial"
+
+[[peers]]
+label = "phone"
+public_key = "${otherPeerKey}"
+connection = "accept"
+
+[[services]]
+id = "cua"
+name = "Cua driver"
+source = { unix_socket = "/tmp/cua.sock" }
+allow = ["${peerKey}"]
+
+[[services]]
+id = "forgejo"
+name = "Forgejo"
+kind = "http"
+source = { local_port = 3000 }
+max_publisher_to_subscriber_bps = 2000000
+
+[[services]]
+id = "game"
+name = "Game"
+kind = "udp"
+source = { local_port = 24642 }
+allow = []
+
+[[services]]
+id = "remote-site"
+name = "Remote site"
+source = { peer = "nuc", service = "site" }
+allow = ["${otherPeerKey}"]
+
+[[bindings]]
+peer = "nuc"
+service = "cua"
+listen = { unix_socket = "/tmp/nuc-cua.sock" }
+
+[[bindings]]
+peer = "phone"
+service = "forgejo"
+listen = { local_port = 0 }
 `),
     {
       network: {
@@ -26,313 +83,195 @@ bootstrap = ["bootstrap.example:49737", "dht.example.com:49738"]
           { host: "bootstrap.example", port: 49_737 },
           { host: "dht.example.com", port: 49_738 },
         ],
+        route: "public",
       },
+      gateway: {
+        port: 17_480,
+        host: "127.0.0.1",
+        domain: "kepos.internal",
+      },
+      peers: [
+        { label: "nuc", publicKey: peerKey, connection: "dial" },
+        { label: "phone", publicKey: otherPeerKey, connection: "accept" },
+      ],
+      services: [
+        {
+          id: "cua",
+          name: "Cua driver",
+          kind: "tcp",
+          source: { unixSocket: "/tmp/cua.sock" },
+          allow: [peerKey],
+        },
+        {
+          id: "forgejo",
+          name: "Forgejo",
+          kind: "http",
+          source: { localPort: 3000 },
+          allow: [],
+          maxPublisherToSubscriberBps: 2_000_000,
+        },
+        {
+          id: "game",
+          name: "Game",
+          kind: "udp",
+          source: { localPort: 24_642 },
+          allow: [],
+        },
+        {
+          id: "remote-site",
+          name: "Remote site",
+          kind: "tcp",
+          source: { peer: "nuc", service: "site" },
+          allow: [otherPeerKey],
+        },
+      ],
+      bindings: [
+        {
+          peer: "nuc",
+          service: "cua",
+          listen: { unixSocket: "/tmp/nuc-cua.sock" },
+        },
+        {
+          peer: "phone",
+          service: "forgejo",
+          listen: { localPort: 0 },
+        },
+      ],
     },
   );
 });
 
-test("shared config parses publisher and subscriber policy", () => {
-  const subscriberKey = "11".repeat(32);
-  assert.deepEqual(
-    parseKeposConfig(`
-[network]
-bootstrap = []
-
-[publisher]
-display_name = "kosmos"
-subscribers = [{ label = "phone", public_key = "${subscriberKey}" }]
-
-[[publisher.services]]
-id = "navidrome"
-name = "Navidrome"
-source = { local_port = 4533 }
-allow = ["${subscriberKey}"]
-
-[subscriber]
-gateway_port = 17480
-gateway_host = "0.0.0.0"
-gateway_domain = "kepos.internal"
-route = "auto"
-
-[[subscriber.services]]
-id = "ssh"
-local_port = 2222
-`),
-    {
-      network: {},
-      publisher: {
-        displayName: "kosmos",
-        subscribers: [{ label: "phone", publicKey: subscriberKey }],
-        services: [
-          {
-            id: "navidrome",
-            name: "Navidrome",
-            source: { localPort: 4533 },
-            allow: [subscriberKey],
-          },
-        ],
+test("canonical config round-trips strict snake_case and defaults TCP and grants", () => {
+  const config: PeerConfig = {
+    network: { bootstrap: [{ host: "bootstrap.example", port: 49_737 }] },
+    gateway: { port: 0 },
+    peers: [{ label: "nuc", publicKey: peerKey, connection: "accept" }],
+    services: [
+      {
+        id: "ssh",
+        name: "SSH",
+        kind: "tcp",
+        source: { localPort: 22 },
+        allow: [],
       },
-      subscriber: {
-        gatewayPort: 17_480,
-        gatewayHost: "0.0.0.0",
-        gatewayDomain: "kepos.internal",
-        route: "auto",
-        services: [{ id: "ssh", localPort: 2_222 }],
-      },
-    },
-  );
+    ],
+    bindings: [],
+  };
+
+  const source = serializeKeposConfig(config);
+  assert.match(source, /public_key = "1{64}"/);
+  assert.match(source, /connection = "accept"/);
+  assert.match(source, /local_port = 22/);
+  assert.doesNotMatch(source, /publisher_key|service_id|display_name|subscriber/);
+  assert.deepEqual(parseKeposConfig(source), config);
 });
 
-test("shared config keeps desktop role enable flags beside each policy", () => {
-  assert.deepEqual(
-    parseKeposConfig(`
-[publisher]
-enabled = false
-display_name = "kosmos"
-subscribers = []
-services = []
-
-[subscriber]
-enabled = true
-gateway_port = 17480
-services = []
-`),
-    {
-      publisher: {
-        enabled: false,
-        displayName: "kosmos",
-        subscribers: [],
-        services: [],
+test("canonical serializer emits every source and binding variant", () => {
+  const config: PeerConfig = {
+    peers: [
+      { label: "nuc", publicKey: peerKey, connection: "accept" },
+      { label: "mac", publicKey: otherPeerKey, connection: "dial" },
+    ],
+    services: [
+      {
+        id: "unix-service",
+        name: "Unix service",
+        kind: "tcp",
+        source: { unixSocket: "/tmp/unix-service.sock" },
+        allow: [peerKey],
       },
-      subscriber: {
-        enabled: true,
-        gatewayPort: 17_480,
-        services: [],
+      {
+        id: "upstream-service",
+        name: "Upstream service",
+        kind: "http",
+        source: { peer: "mac", service: "remote" },
+        allow: [otherPeerKey],
+        maxPublisherToSubscriberBps: 1_000,
       },
-    },
-  );
+    ],
+    bindings: [
+      {
+        peer: "nuc",
+        service: "unix-service",
+        listen: { unixSocket: "/tmp/bound.sock" },
+      },
+      {
+        peer: "mac",
+        service: "upstream-service",
+        listen: { localPort: 0 },
+      },
+    ],
+  };
+  const source = serializeKeposConfig(config);
+  assert.match(source, /unix_socket = "/);
+  assert.match(source, /peer = "mac"/);
+  assert.match(source, /max_publisher_to_subscriber_bps = 1000/);
+  assert.match(source, /local_port = 0/);
+  assert.deepEqual(parseKeposConfig(source), config);
 });
 
-test("shared config keeps deny-all and Home-only publisher policy explicit", () => {
-  assert.deepEqual(
-    parseKeposConfig(`
-[publisher]
-display_name = "kosmos"
-subscribers = []
-services = []
-`),
-    {
-      publisher: {
-        displayName: "kosmos",
-        subscribers: [],
-        services: [],
-      },
-    },
-  );
-});
+test("absent and empty service grants fail closed", () => {
+  const source = (allow: string) => `
+[[peers]]
+label = "nuc"
+public_key = "${peerKey}"
+connection = "accept"
 
-test("shared config preserves an explicit TCP service kind", () => {
-  const config = parseKeposConfig(`
-[publisher]
-display_name = "kosmos"
-subscribers = []
-
-[[publisher.services]]
+[[services]]
 id = "ssh"
 name = "SSH"
-kind = "tcp"
 source = { local_port = 22 }
-`);
+${allow}
 
-  assert.deepEqual(config.publisher?.services, [
-    { id: "ssh", name: "SSH", kind: "tcp", source: { localPort: 22 } },
-  ]);
+[[bindings]]
+peer = "nuc"
+service = "ssh"
+listen = { local_port = 0 }
+`;
+  assert.deepEqual(parseKeposConfig(source("")).services[0]?.allow, []);
+  assert.deepEqual(parseKeposConfig(source("allow = []")).services[0]?.allow, []);
 });
 
-test("shared config round-trips an explicit upstream service source", () => {
-  const publisherKey = "22".repeat(32);
-  const config = parseKeposConfig(`
-[publisher]
-display_name = "republisher"
-subscribers = []
-
-[[publisher.services]]
-id = "remote-site"
-name = "Remote site"
-kind = "http"
-source = { publisher_key = "${publisherKey}", service_id = "site" }
-`);
-
-  assert.deepEqual(config.publisher?.services, [
-    {
-      id: "remote-site",
-      name: "Remote site",
-      kind: "http",
-      source: { publisherKey, serviceId: "site" },
-    },
-  ]);
-  assert.deepEqual(parseKeposConfig(serializeKeposConfig(config)), config);
-});
-
-test("shared config rejects ambiguous or incomplete service sources", () => {
-  const publisherKey = "22".repeat(32);
+test("old role tables and obsolete field casing are rejected instead of translated", () => {
   for (const source of [
-    `{ local_port = 3000, publisher_key = "${publisherKey}", service_id = "site" }`,
-    `{ local_port = 3000, service_id = "site" }`,
-    `{ publisher_key = "${publisherKey}" }`,
-    `{ service_id = "site" }`,
-    `{ }`,
+    `[publisher]\ndisplay_name = "old"\nsubscribers = []\nservices = []`,
+    `[subscriber]\ngateway_port = 17480`,
+    `[[peers]]\nlabel = "nuc"\npublicKey = "${peerKey}"\nconnection = "accept"\nservices = []\nbindings = []`,
+    `peers = []\nservices = []\nbindings = []\nsubscriber = { enabled = true }`,
   ]) {
-    assert.throws(
-      () =>
-        parseKeposConfig(`
-[publisher]
-display_name = "republisher"
-subscribers = []
-
-[[publisher.services]]
-id = "remote-site"
-name = "Remote site"
-source = ${source}
-`),
-      /source|upstream|local/i,
-    );
+    assert.throws(() => parseKeposConfig(source), /unknown|must be an array|peer config/i);
   }
 });
 
-test("shared config round-trips a fixed-target UDP service and mapping", () => {
-  const source = `
-[publisher]
-display_name = "kosmos"
-subscribers = []
-
-[[publisher.services]]
-id = "stardew"
-name = "Stardew direct IP"
-kind = "udp"
-source = { local_port = 24642 }
-
-[subscriber]
-
-[[subscriber.services]]
-id = "stardew"
-kind = "udp"
-local_port = 24642
-`;
-  const config = parseKeposConfig(source);
-  assert.deepEqual(config.publisher?.services, [
-    {
-      id: "stardew",
-      name: "Stardew direct IP",
-      kind: "udp",
-      source: { localPort: 24_642 },
-    },
-  ]);
-  assert.deepEqual(config.subscriber?.services, [
-    { id: "stardew", kind: "udp", localPort: 24_642 },
-  ]);
-  assert.deepEqual(parseKeposConfig(serializeKeposConfig(config)), config);
-});
-
-test("shared config parses and serializes a publisher outbound rate limit", () => {
-  const source = `
-[publisher]
-display_name = "kosmos"
-subscribers = []
-
-[[publisher.services]]
-id = "forgejo"
-name = "Forgejo"
-kind = "http"
-source = { local_port = 3000 }
-max_publisher_to_subscriber_bps = 2000000
-`;
-  const config = parseKeposConfig(source);
-  assert.deepEqual(config.publisher?.services, [
-    {
-      id: "forgejo",
-      name: "Forgejo",
-      kind: "http",
-      source: { localPort: 3000 },
-      maxPublisherToSubscriberBps: 2_000_000,
-    },
-  ]);
-  assert.match(
-    serializeKeposConfig(config),
-    /max_publisher_to_subscriber_bps = 2000000/,
-  );
-  assert.deepEqual(parseKeposConfig(serializeKeposConfig(config)), config);
-});
-
-test("shared config rejects invalid publisher outbound rate limits", () => {
-  for (const value of ["0", "-1", "1.5", "9007199254740992"]) {
-    assert.throws(
-      () =>
-        parseKeposConfig(`
-[publisher]
-display_name = "kosmos"
-subscribers = []
-
-[[publisher.services]]
-id = "forgejo"
-name = "Forgejo"
-source = { local_port = 3000 }
-max_publisher_to_subscriber_bps = ${value}
-`),
-      /max_publisher_to_subscriber_bps|positive|safe|integer|losslessly/i,
-    );
-  }
+test("invalid references, variants, endpoints, and policy values are clear", () => {
+  const base: PeerConfig = {
+    peers: [{ label: "nuc", publicKey: peerKey, connection: "accept" as const }],
+    services: [{ id: "ssh", name: "SSH", kind: "tcp", source: { localPort: 22 }, allow: [] }],
+    bindings: [],
+  };
   assert.throws(
-    () =>
-      parseKeposConfig(`
-[publisher]
-display_name = "kosmos"
-subscribers = []
-
-[[publisher.services]]
-id = "forgejo"
-name = "Forgejo"
-source = { local_port = 3000 }
-max_publisher_to_subscriber_bps = true
-`),
-    /maxPublisherToSubscriberBps|positive|safe|integer/i,
-  );
-});
-
-test("shared config rejects incomplete or invalid role policy", () => {
-  assert.throws(
-    () => parseKeposConfig('[publisher]\ndisplay_name = "kosmos"'),
-    /publisher\.subscribers must be an array/,
+    () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, source: { localPort: 22, unixSocket: "/tmp/x" } }] }),
+    /exactly one|variant|endpoint/i,
   );
   assert.throws(
-    () =>
-      parseKeposConfig(
-        '[publisher]\ndisplay_name = "kosmos"\nsubscribers = []\nservices = []\nextra = true',
-      ),
-    /unknown field: publisher\.extra/,
+    () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, source: { peer: "missing", service: "ssh" } }] }),
+    /unknown peer label/i,
   );
   assert.throws(
-    () => parseKeposConfig("[subscriber]\ngateway_port = 70000"),
-    /subscriber\.gateway_port.*65535/,
+    () => parsePeerConfig({ ...base, bindings: [{ peer: "nuc", service: "ssh", listen: { localPort: 70000 } }] }),
+    /65535/i,
   );
   assert.throws(
-    () => parseKeposConfig('[subscriber]\ngateway_host = "bad host"'),
-    /subscriber\.gateway_host/,
+    () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, source: { unixSocket: "relative.sock" } }] }),
+    /absolute Unix socket/i,
   );
   assert.throws(
-    () => parseKeposConfig('[subscriber]\ngateway_domain = ".internal"'),
-    /subscriber\.gateway_domain/,
-  );
-});
-
-test("shared config rejects unknown fields and malformed endpoints", () => {
-  assert.throws(
-    () => parseKeposConfig("[network]\nbootstraps = []"),
-    /unknown field: network\.bootstraps/,
+    () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, kind: "udp", source: { unixSocket: "/tmp/udp.sock" } }] }),
+    /UDP|Unix.*UDP/i,
   );
   assert.throws(
-    () => parseKeposConfig('[network]\nbootstrap = ["bootstrap.example"]'),
-    /network\.bootstrap.*host:port/,
+    () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, allow: [otherPeerKey] }] }),
+    /unknown peer/i,
   );
 });
 
@@ -355,80 +294,33 @@ test("Windows defaults use AppData while explicit paths remain unchanged", () =>
   );
 });
 
-test("shared config follows the platform config home and distinguishes explicit files", async () => {
+test("config load and atomic save use test-owned platform paths and private permissions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "kepos-config-"));
-  const environment =
-    process.platform === "win32"
-      ? { APPDATA: root }
-      : { XDG_CONFIG_HOME: root };
-  const configPath = path.join(
-    root,
-    process.platform === "win32" ? "Kepos" : "kepos",
-    "config.toml",
-  );
-  assert.equal(defaultKeposConfigPath(environment), configPath);
-  assert.equal(await loadKeposConfig(undefined, environment), undefined);
-  await assert.rejects(
-    () => loadKeposConfig(path.join(root, "missing.toml")),
-    /Cannot read Kepos config/,
-  );
-
-  await mkdir(path.dirname(configPath), { recursive: true });
-  await writeFile(
-    configPath,
-    '[network]\nbootstrap = ["bootstrap.example:49737"]\n',
-  );
-  assert.deepEqual(await loadKeposConfig(undefined, environment), {
-    network: { bootstrap: [{ host: "bootstrap.example", port: 49_737 }] },
-  });
-});
-
-test("shared config atomically persists the validated desktop shape", async () => {
-  const module = (await import("../src/app-config.js")) as Record<
-    string,
-    unknown
-  >;
-  assert.equal(typeof module.serializeKeposConfig, "function");
-  assert.equal(typeof module.saveKeposConfig, "function");
-  const serializeKeposConfig = module.serializeKeposConfig as (
-    config: unknown,
-  ) => string;
-  const saveKeposConfig = module.saveKeposConfig as (
-    config: unknown,
-    configPath: string,
-  ) => Promise<void>;
-  const config = {
-    network: { bootstrap: [{ host: "bootstrap.example", port: 49_737 }] },
-    publisher: {
-      enabled: false,
-      displayName: "Neil",
-      subscribers: [{ label: "phone", publicKey: "11".repeat(32) }],
-      services: [
-        {
-          id: "dagger",
-          name: "Dagger",
-          source: { localPort: 18_080 },
-          allow: ["11".repeat(32)],
-        },
-      ],
-    },
-    subscriber: {
-      enabled: true,
-      gatewayPort: 17_480,
-      gatewayHost: "0.0.0.0",
-      gatewayDomain: "kepos.internal",
-      route: "auto",
-      services: [{ id: "ssh", localPort: 2_222 }],
-    },
-  };
-
-  const source = serializeKeposConfig(config);
-  assert.deepEqual(parseKeposConfig(source), config);
-  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-config-save-"));
-  const configPath = path.join(root, "kepos", "config.toml");
-  await saveKeposConfig(config, configPath);
-  assert.equal(await readFile(configPath, "utf8"), source);
-  if (process.platform !== "win32") {
-    assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+  try {
+    const environment =
+      process.platform === "win32"
+        ? { APPDATA: root }
+        : { XDG_CONFIG_HOME: root };
+    const configPath = defaultKeposConfigPath(environment, root, process.platform);
+    assert.equal(await loadKeposConfig(undefined, environment, root, process.platform), undefined);
+    const config: PeerConfig = {
+      gateway: { port: 0 },
+      peers: [{ label: "nuc", publicKey: peerKey, connection: "accept" }],
+      services: [],
+      bindings: [],
+    };
+    await saveKeposConfig(config, configPath);
+    assert.deepEqual(await loadKeposConfig(undefined, environment, root, process.platform), config);
+    assert.equal(await readFile(configPath, "utf8"), serializeKeposConfig(config));
+    if (process.platform !== "win32") {
+      assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+      assert.equal((await stat(path.dirname(configPath))).mode & 0o777, 0o700);
+    }
+    await assert.rejects(
+      () => loadKeposConfig(path.join(root, "missing.toml")),
+      /Cannot read Kepos config/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

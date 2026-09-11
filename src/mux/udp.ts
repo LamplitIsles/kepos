@@ -594,6 +594,8 @@ export interface UdpPublisherForwarderOptions {
   ) => void;
   onError?: (error: string) => void;
   onDrop?: (reason: string, fields?: Record<string, unknown>) => void;
+  /** Ignore datagrams owned by the local canonical peer-side consumer. */
+  ignoreIncoming?: (envelope: UdpEnvelope) => boolean;
 }
 
 export interface UdpPublisherRemote {
@@ -611,6 +613,7 @@ export interface RunningUdpPublisherForwarder {
   close: () => void;
   closeFlows: (serviceId?: string) => void;
   available: () => boolean;
+  transport: SubscriberDatagramConnection;
   receiveReply: (
     serviceId: string,
     flowId: Uint8Array,
@@ -693,6 +696,7 @@ export function createUdpPublisherForwarder(
     },
     closeFlows,
     available: carrier.available,
+    transport: carrier,
     receiveReply,
   };
 
@@ -705,6 +709,7 @@ export function createUdpPublisherForwarder(
       drop("malformed-envelope", { error: errorMessage(error) });
       return;
     }
+    if (options.ignoreIncoming?.(envelope)) return;
     if (envelope.type === "error" || envelope.type === "close") {
       const flow = flows.get(flowKey(envelope.serviceId, envelope.flowId));
       if (flow) removeFlow(flow);

@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   defaultKeposConfigPath,
   defaultKeposDiagnosticsDirectory,
+  defaultKeposPeerStatePath,
   defaultKeposRoleStatePath,
 } from "../../../src/platform/paths.js";
 
@@ -15,6 +16,7 @@ export interface DesktopPathsContext {
 
 export interface DesktopPaths {
   configPath: string;
+  peerStateDir: string;
   publisherStateDir: string;
   subscriberStateDir: string;
 }
@@ -55,6 +57,11 @@ export function defaultDesktopPaths(
 ): DesktopPaths {
   return {
     configPath: defaultKeposConfigPath(
+      context.environment,
+      context.homeDirectory,
+      context.platform,
+    ),
+    peerStateDir: defaultKeposPeerStatePath(
       context.environment,
       context.homeDirectory,
       context.platform,

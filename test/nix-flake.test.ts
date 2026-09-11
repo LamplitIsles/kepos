@@ -31,15 +31,17 @@ test("Home Manager module owns policy and initializes identity-only state", asyn
   for (const option of [
     "stateDir",
     "bootstrap",
-    "displayName",
-    "subscribers",
+    "peers",
     "services",
+    "bindings",
+    "publicKey",
+    "connection",
   ]) {
     assert.match(moduleSource, new RegExp(option));
   }
   assert.match(moduleSource, /formats\.toml/);
   assert.match(moduleSource, /systemd\.user\.services/);
-  assert.match(moduleSource, /strMatching "\[0-9a-f\]\{64\}"/);
+  assert.match(moduleSource, /strMatching keyPattern/);
   assert.match(moduleSource, /ints\.between 1 65535/);
   assert.match(moduleSource, /serviceIdPattern/);
   assert.match(moduleSource, /id != "home"/);

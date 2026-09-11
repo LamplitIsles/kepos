@@ -29,6 +29,26 @@ export function publisherRuntimeLockPath(stateDir: string): string {
   );
 }
 
+/** The single lock used by a canonical peer runtime. */
+export function peerRuntimeLockPath(stateDir: string): string {
+  const resolvedStateDir = path.resolve(stateDir);
+  return path.join(
+    path.dirname(resolvedStateDir),
+    `.${path.basename(resolvedStateDir)}.peer.runtime.lock`,
+  );
+}
+
+export async function acquirePeerRuntimeLock(
+  stateDir: string,
+): Promise<RuntimeLock> {
+  await mkdir(stateDir, { mode: 0o700, recursive: true });
+  return acquireRuntimeLock({
+    lockPath: peerRuntimeLockPath(stateDir),
+    conflictMessage: "Peer identity is already in use",
+    description: "peer runtime lock",
+  });
+}
+
 export async function acquireSubscriberRuntimeLock(
   stateDir: string,
 ): Promise<RuntimeLock> {

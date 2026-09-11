@@ -1,5 +1,5 @@
 {
-  description = "Kepos P2P service publisher and subscriber";
+  description = "Kepos P2P peer services";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
@@ -72,18 +72,15 @@
               stateVersion = "25.11";
             };
             xdg.enable = true;
-            services.kepos.publisher = {
+            services.kepos.peer = {
               enable = true;
               inherit package;
-              stateDir = "/home/kepos-test/.local/state/kepos-neo/publisher";
+              stateDir = "/home/kepos-test/.local/state/kepos-neo/peer";
               bootstrap = ["bootstrap.example:49737"];
-              displayName = "test-publisher";
-              subscribers = [
-                {
-                  label = "test-nuc";
+              peers.test-nuc = {
                   publicKey = "1111111111111111111111111111111111111111111111111111111111111111";
-                }
-              ];
+                  connection = "accept";
+              };
               services.ssh = {
                 name = "SSH";
                 source.localPort = 22;
@@ -93,7 +90,7 @@
           }
         ];
       };
-      service = home.config.systemd.user.services.kepos-publisher.Service;
+      service = home.config.systemd.user.services.kepos-peer.Service;
       configFile = home.config.xdg.configFile."kepos/config.toml".source;
       dashboard = self.packages.${system}.grafana-dashboard;
       moduleCheck = assert service.Restart == "always";
@@ -101,13 +98,14 @@
         pkgs.runCommand "kepos-home-manager-module-check" {
           nativeBuildInputs = [pkgs.gnugrep];
         } ''
-          grep -F 'display_name = "test-publisher"' ${configFile}
+          grep -F 'label = "test-nuc"' ${configFile}
+          grep -F 'connection = "accept"' ${configFile}
           grep -F 'bootstrap.example:49737' ${configFile}
           grep -F 'local_port = 22' ${configFile}
           grep -F 'public_key = "1111111111111111111111111111111111111111111111111111111111111111"' ${configFile}
           test "$(grep -Fc 'allow = ["1111111111111111111111111111111111111111111111111111111111111111"]' ${configFile})" -eq 1
           grep -F -- '--observations ndjson' ${pkgs.writeText "kepos-exec-start" (toString service.ExecStart)}
-          ${pkgs.lib.getExe package} --help | grep -F 'publisher run'
+          ${pkgs.lib.getExe package} --help | grep -F 'peer run'
           touch "$out"
         '';
       dashboardCheck =

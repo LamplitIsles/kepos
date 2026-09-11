@@ -21,9 +21,10 @@ export function desktopSingletonLockPath(
 
 export function acquireDesktopSingleton(
   homeDirectory: string,
+  environment: Record<string, string | undefined> = process.env,
 ): Promise<RuntimeLock> {
   return acquireRuntimeLock({
-    lockPath: desktopSingletonLockPath(homeDirectory),
+    lockPath: desktopSingletonLockPath(homeDirectory, environment),
     conflictMessage: "Kepos desktop is already running",
     description: "desktop runtime lock",
   });

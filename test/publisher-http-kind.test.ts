@@ -39,18 +39,18 @@ test("publisher identity state contains no service policy", async () => {
 
 test("shared TOML retains explicit HTTP service classification", () => {
   const config = parseKeposConfig(`
-[publisher]
-display_name = "publisher"
-subscribers = [{ label = "subscriber", public_key = "${subscriberKey}" }]
+peers = [{ label = "subscriber", public_key = "${subscriberKey}", connection = "accept" }]
+bindings = []
 
-[[publisher.services]]
+[[services]]
 id = "site"
 name = "Site"
 kind = "http"
 source = { local_port = 8080 }
+allow = ["${subscriberKey}"]
 `);
-  assert.equal(config.publisher?.services[0]?.kind, "http");
+  assert.equal(config.services[0]?.kind, "http");
   const source = serializeKeposConfig(config);
   assert.match(source, /kind = "http"/);
-  assert.equal(parseKeposConfig(source).publisher?.services[0]?.kind, "http");
+  assert.equal(parseKeposConfig(source).services[0]?.kind, "http");
 });

@@ -24,6 +24,7 @@ test("desktop singleton uses one machine-local lock independent of subscriber st
   const homeDirectory = await mkdtemp(
     path.join(tmpdir(), "kepos-desktop-home-"),
   );
+  const environment = {};
   const expected = path.join(
     homeDirectory,
     ".local",
@@ -33,14 +34,14 @@ test("desktop singleton uses one machine-local lock independent of subscriber st
   );
 
   try {
-    assert.equal(desktopSingletonLockPath(homeDirectory), expected);
-    const first = await acquireDesktopSingleton(homeDirectory);
+    assert.equal(desktopSingletonLockPath(homeDirectory, environment), expected);
+    const first = await acquireDesktopSingleton(homeDirectory, environment);
     await assert.rejects(
-      () => acquireDesktopSingleton(homeDirectory),
+      () => acquireDesktopSingleton(homeDirectory, environment),
       /desktop is already running/i,
     );
     await first.release();
-    const next = await acquireDesktopSingleton(homeDirectory);
+    const next = await acquireDesktopSingleton(homeDirectory, environment);
     await next.release();
   } finally {
     await rm(homeDirectory, { recursive: true, force: true });

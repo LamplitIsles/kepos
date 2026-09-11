@@ -79,5 +79,22 @@ Multiple active service channels may use the same published service.
 _Avoid_: Active service
 
 **Reverse Service Channel**:
+
 An active service channel initiated by the accepting peer over a connection
 established by the dialing peer. It does not require a new reverse connection.
+
+## Implemented contract
+
+The canonical TOML names these concepts as `peers`, `services`, and
+`bindings`. A peer entry supplies a public key and this runtime's `dial` or
+`accept` direction. A service source is one fixed loopback port, fixed Unix
+socket, or explicit peer/service source; a binding owns a local TCP or Unix
+endpoint. Missing or empty service grants deny access, and a binding never
+republishes its target.
+
+The runtime stores one seed-only `peer.json` and never probes legacy role state
+at startup. The existing old-client-to-new-server Home/TCP/HTTP/UDP wire
+surface remains available, while reverse byte streams require the negotiated
+`kepos/peer-services/1` capability. Reverse UDP remains unsupported. See
+[ADR 0013](docs/adr/0013-separate-connection-roles-from-service-roles.md) and
+the [CLI contract](docs/cli.md) for operational details.

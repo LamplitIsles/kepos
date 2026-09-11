@@ -1,92 +1,133 @@
 # DeepSeek Harness integration
 
-[DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness)
-is a local-first coding-agent harness with a web interface. Its browser-trust
-fence restricts the configuration plane to loopback origins to defend against
-DNS rebinding. Requests from a LAN address or ordinary tunnel hostname can
-therefore receive an API `403` or use non-persistent settings unless that host
-is explicitly configured with `--trusted-host`.
+[DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) is a
+local-first coding-agent harness with a web interface. Its browser-trust
+boundary expects loopback origins to defend against DNS rebinding. Kepos keeps
+that application boundary intact by presenting authorized services on local
+TCP/HTTP endpoints.
 
-This is a deliberate security boundary, not a dsh defect. Kepos preserves that boundary while making dsh available from another device. For the path that led to this integration, read [Making a remote service look local](../stories/dsh-loopback.md).
+The canonical peer runtime also supports the CUA-driver topology that
+motivated independent connection direction: Mac dials NUC, NUC accepts the
+connection, and NUC opens Mac's authorized Unix-socket service through that
+existing outer connection. No reverse DHT connection, shared filesystem,
+SSH/WebSocket bridge, or application-specific adapter is required.
 
-## Why Kepos works
+## DSH's local boundary
 
-Kepos presents a published service on the subscriber as a loopback endpoint.
-With the explicit local listener used below, dsh receives
-`Host: 127.0.0.1:13080`, so its existing browser-trust check passes unchanged.
-Settings, credentials, and plugin configuration behave as they do when dsh is
-opened directly on its host, including persistence across reloads.
-
-Kepos does not modify dsh, add `--trusted-host` entries, or add an application
-authentication layer. The publisher's labeled subscriber-device policy and
-per-service allowlists still determine which subscriber public keys may open
-the service.
-
-## Setup
-
-First create and pair a Kepos publisher and subscriber as described in
-[CLI, identity, and configuration](../cli.md). On the publisher, add dsh's
-service port to the shared TOML policy:
+For dsh itself, publish its loopback TCP port as a raw `tcp` service when the
+target should see ordinary loopback semantics:
 
 ```toml
-[publisher]
-enabled = true
-display_name = "dev"
-subscribers = [{ label = "dev-phone", public_key = "<subscriber-public-key>" }]
-
-[[publisher.services]]
+[[services]]
 id = "dsh"
 name = "DeepSeek Harness"
 source = { local_port = 3080 }
+allow = ["<client-peer-public-key>"]
 ```
 
-This recipe deliberately omits `kind`, so dsh remains a byte-transparent `tcp`
-service. It preserves dsh's loopback behavior but does not make dsh consume a
-Kepos device-identity header. Use `kind = "http"` only for a target that
-implements the [HTTP service authentication contract](../cli.md#http-service-device-authentication).
-
-The running headless publisher reconciles valid TOML policy changes. The
-subscriber configuration used for dsh is:
+Bind it on the consuming peer:
 
 ```toml
-[subscriber]
-enabled = true
-gateway_port = 17480
-
-[[subscriber.services]]
-id = "dsh"
-local_port = 13080
+[[bindings]]
+peer = "nuc"
+service = "dsh"
+listen = { local_port = 13080 }
 ```
 
-Open dsh at:
+Open `http://127.0.0.1:13080/`. dsh sees the local listener's loopback host
+semantics and no `--trusted-host` change is needed. The canonical gateway is
+also available for HTTP services as `http://dsh.localhost:17480/`.
 
-```text
-http://127.0.0.1:13080/
+Use `kind = "http"` only when the target intentionally consumes Kepos's
+immediate-peer assertion. For each HTTP/1.1 request, Kepos removes caller
+`Authorization` fields and inserts:
+
+```http
+Authorization: Kepos <authenticated-immediate-peer-public-key>
 ```
 
-The explicit listener binds to loopback. `gateway_port` remains enabled for
-other published HTTP services that use Kepos's `*.localhost` gateway.
+This is not applied to raw TCP, and it is not a substitute for target-side
+authentication. HTTPS, HTTP/2, CONNECT, and non-WebSocket upgrades are outside
+the adapter.
 
-On Android, the subscriber includes this mapping by default. Once the paired
-publisher advertises the service with `id = "dsh"`, the app routes it to
-`127.0.0.1:13080` and its service card opens that loopback URL. No phone-side
-TOML configuration is required.
+## Mac CUA source and NUC binding
 
-## Security and behavior
+On Mac, where the CUA driver owns the Unix socket and Mac must initiate the
+network connection:
 
-- The `127.0.0.1:13080` listener preserves dsh's loopback Host semantics. A
-  Kepos `*.localhost` gateway URL does too; an ordinary hostname does not.
-- Unknown devices cannot use the service. Kepos authenticates peers by public
-  key and applies the publisher subscriber-device policy and service allowlists
-  before exposing it.
-- Kepos transports the TCP byte stream over its authenticated, encrypted P2P
-  connection. The service does not need a public IP or inbound port forward.
-- SSH forwarding offers the same loopback semantics, but requires a tunnel and
-  lifecycle management on each client. A reverse proxy or `--trusted-host` can
-  also work, with their own authentication and host-management tradeoffs.
+```toml
+[gateway]
+port = 17480
 
-Kepos is currently a developer preview. Android installation is sideload-only,
-macOS ships an ad-hoc-signed local build, and the dsh recipe above uses the
-TCP service path. Kepos also supports bounded fixed-target UDP services on
-desktop/headless runtimes; Android deliberately remains TCP/HTTP-only and the
-UDP path does not provide a browser or arbitrary-destination transport.
+[[peers]]
+label = "nuc"
+public_key = "<nuc-peer-public-key>"
+connection = "dial"
+
+[[services]]
+id = "cua"
+name = "CUA driver"
+source = { unix_socket = "/run/user/1000/cua-driver.sock" }
+allow = ["<nuc-peer-public-key>"]
+```
+
+On NUC, accept Mac and own the local binding:
+
+```toml
+[[peers]]
+label = "mac"
+public_key = "<mac-peer-public-key>"
+connection = "accept"
+
+[[bindings]]
+peer = "mac"
+service = "cua"
+listen = { unix_socket = "/run/user/1000/kepos-cua.sock" }
+```
+
+The binding is a transparent byte stream. NDJSON requests, including inline
+base64 screenshot bytes, cross the same encrypted Protomux service channel;
+Kepos does not interpret or rewrite the CUA application protocol. If NUC
+needs to share that service onward, add a separate service such as
+`mac-cua` with `source = { peer = "mac", service = "cua" }` and its own
+downstream `allow` list. The local binding alone never republishes it.
+
+## Pairing and policy
+
+The peer that approves a candidate gets a configured peer admission, not
+implicit access to every service. Add the immediate public key to each
+intended service's `allow` list. A source or downstream grant can be revoked
+independently; affected channels close, bindings remain configured, and new
+requests wait for a fresh connection/catalog/ACL check.
+
+Unknown candidates cannot read Home or open services. A legacy Android client
+can still pair with a canonical accept side and consume established TCP,
+HTTP, and UDP services, but cannot initiate reverse CUA service opens because
+it does not advertise the peer-services capability.
+
+## Verification boundary
+
+The repository verifies the transport with temporary Unix/TCP listeners,
+representative NDJSON and large payloads, real local HyperDHT testnets, and
+old-client wire paths. Those automated checks do not install dsh or the
+cua-driver, operate a real Mac desktop, validate a production network path, or
+perform a live GUI trial.
+
+After a separately approved deployment, an operator can perform this smoke
+check:
+
+1. Confirm the Mac and NUC public keys against the deployment record without
+   copying private state into a ticket or log.
+2. Start the CUA driver on Mac and verify that its configured Unix socket is
+   present and owned by the intended user.
+3. Start canonical `peer run` on both sides with Mac `dial` and NUC `accept`.
+4. Confirm the NUC binding reports available and connect the DSH/driver client
+   to the NUC-local socket.
+5. Send one harmless NDJSON request and one representative inline-image
+   response; verify exact response bytes and logs contain no secrets.
+6. Stop the Mac driver and confirm the binding becomes unavailable, then
+   restart it and verify a new request succeeds without replaying the old one.
+
+This procedure is intentionally documented for a later operator run. It was
+not performed as part of this implementation, and no live identity or DSH
+state was inspected.

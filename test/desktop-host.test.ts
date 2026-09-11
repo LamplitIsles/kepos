@@ -18,7 +18,7 @@ import type { DesktopSnapshot } from "../apps/desktop/src/protocol.js";
 import { DEFAULT_GATEWAY_PORT } from "../src/home/gateway.js";
 import { loadDesktopOptions } from "../apps/desktop/src/options.js";
 import { acquireDesktopSingleton } from "../apps/desktop/src/singleton.js";
-import { setupSubscriber } from "../src/state/subscriber.js";
+import { setupPeer } from "../src/state/peer.js";
 import type { RunningDesktopRuntime } from "../apps/desktop/src/runtime.js";
 import type { DesktopTray } from "../apps/desktop/src/tray.js";
 import type { PublisherRuntimePolicy } from "../src/runtime/publisher.js";
@@ -219,7 +219,7 @@ test("desktop singleton serializes bootstrap and preserves an existing config", 
     "kepos",
     "config.toml",
   );
-  const configSource = "[subscriber]\nenabled = true\nservices = []\n";
+  const configSource = "peers = []\nservices = []\nbindings = []\n";
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(configPath, configSource);
 
@@ -237,11 +237,11 @@ test("desktop singleton serializes bootstrap and preserves an existing config", 
       homeDirectory,
       environment,
       platform: "linux",
-      setupSubscriber: async (options) => {
+      ensurePeer: async ({ stateDir }) => {
         setupCount += 1;
         setupEntered();
         await setupGate;
-        return setupSubscriber(options);
+        return setupPeer({ stateDir });
       },
     });
   const harness = createHarness();

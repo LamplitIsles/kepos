@@ -16,9 +16,11 @@ import { fileURLToPath } from "node:url";
 import { test, type TestContext } from "node:test";
 
 import {
+  acquirePeerRuntimeLock,
   acquirePublisherRuntimeLock,
   acquireRuntimeLock,
   acquireSubscriberRuntimeLock,
+  peerRuntimeLockPath,
   publisherRuntimeLockPath,
   subscriberRuntimeLockPath,
 } from "../src/runtime/runtime-lock.js";
@@ -46,6 +48,7 @@ test("runtime lock scopes preserve stable paths and inodes", async () => {
 
   let publisher:
     Awaited<ReturnType<typeof acquirePublisherRuntimeLock>> | undefined;
+  let peer: Awaited<ReturnType<typeof acquirePeerRuntimeLock>> | undefined;
   let desktop: Awaited<ReturnType<typeof acquireRuntimeLock>> | undefined;
   try {
     assert.equal(claimed.ino, original.ino);
@@ -68,15 +71,18 @@ test("runtime lock scopes preserve stable paths and inodes", async () => {
 
     // Subscriber, publisher, and desktop singleton scopes are independent.
     publisher = await acquirePublisherRuntimeLock(stateDir);
+    peer = await acquirePeerRuntimeLock(stateDir);
     desktop = await acquireRuntimeLock({
       lockPath: desktopPath,
       conflictMessage: "Kepos desktop is already running",
     });
     assert.equal((await stat(subscriberPath)).ino, original.ino);
     assert.equal((await stat(publisherPath)).mode & 0o777, 0o600);
+    assert.equal((await stat(peerRuntimeLockPath(stateDir))).mode & 0o777, 0o600);
     assert.equal((await stat(desktopPath)).mode & 0o777, 0o600);
   } finally {
     await desktop?.release().catch(() => undefined);
+    await peer?.release().catch(() => undefined);
     await publisher?.release().catch(() => undefined);
     await subscriber.release().catch(() => undefined);
     assert.equal(

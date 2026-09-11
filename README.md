@@ -6,32 +6,30 @@
 **Share a service, not a network.**
 
 Kepos gives trusted devices access to selected services without exposing a
-public service port or joining every device to a virtual subnet. A publisher
-keeps only its seed-derived identity in durable state; its display name,
-labeled subscriber-device policy, published services, and service allowlists
-live in the shared TOML configuration. A subscriber receives the allowed
-service as an ordinary local URL, TCP port, or bounded UDP endpoint.
+public service port or joining every device to a virtual subnet. Every runtime
+has one persistent peer identity. A peer can dial one configured relationship,
+accept another, provide local services, consume explicitly granted services,
+and bind those services to local endpoints.
 
-Each published service has one explicit source: either a publisher-local
-loopback port or a named service on an authorized upstream publisher. The
-republishing publisher gives that source its own service ID, name, and
-downstream allowlist. Upstream authorization is granted to the republisher's
-publisher key; it is separate from the republisher's subscriber-device policy.
-This is service republication, not a blind relay: the republisher processes
-plaintext at its hop, and operators keep source relationships acyclic.
+The canonical configuration keeps those concerns separate:
 
-Kepos has no hosted account or Kepos-operated control plane. Device keys stay
-on the devices that created them. Kepos carries TCP byte streams and named,
-fixed-target UDP datagrams through an authenticated peer connection whose
-Internet transport uses UDP. Services are raw `tcp` by default; a publisher
-can opt a plaintext HTTP/1.1 target, including a `ws://` upgrade endpoint, into
-`kind = "http"` so the target receives the authenticated subscriber device
-identity. A `kind = "udp"` service is an IPv4-loopback, unicast mapping with a
-1,200-byte application-datagram cap. Carrier fragments are bounded to 1,000
-bytes and reassembled without retransmission; the service does not provide
-arbitrary destinations, broadcast, multicast, or reliable delivery. See the
-[HTTP service contract](docs/cli.md#http-service-device-authentication) and
-[UDP service contract](docs/cli.md#udp-services).
+- `peers` names authenticated peers and says whether this runtime dials or
+  accepts each relationship;
+- `services` publishes a fixed loopback TCP port, Unix socket, or explicitly
+  selected peer/service source with an immediate-peer `allow` list;
+- `bindings` owns local TCP or Unix entry points for services on another peer.
+
+Service republication is explicit. A peer/service source gets a new local
+service ID and its own downstream allowlist. A binding by itself never
+publishes the imported service and never delegates the upstream identity.
+
+Kepos carries raw TCP byte streams, opt-in HTTP/1.1 service traffic, and
+bounded fixed-target UDP datagrams through an authenticated HyperDHT/UDX
+connection. The outer connection is encrypted with Noise SecretStream and
+multiplexed with Protomux. UDP services retain datagram boundaries, cap
+application payloads at 1,200 bytes, and do not provide broadcast, multicast,
+arbitrary destinations, or reliable delivery. See the [CLI and configuration
+contract](docs/cli.md) and [transport boundary](docs/network-transport-and-compatibility.md).
 
 > Kepos is a developer preview. Android APKs, Apple Silicon macOS ZIPs, and
 > Windows x64 portable ZIPs are available for direct download. Android is
@@ -41,61 +39,112 @@ arbitrary destinations, broadcast, multicast, or reliable delivery. See the
 ## Start here
 
 The **[Kepos user documentation](https://kepos.guion.io/docs/)** is the
-primary installation, pairing, publisher, subscriber, trust, comparison, and
-troubleshooting guide.
+primary installation and end-user guide. Repository operators and contributors
+can continue with:
 
-Developers and operators can continue with:
-
-- [Developer architecture](docs/architecture.md)
 - [CLI, identity, and configuration](docs/cli.md)
-- [Platform and release guides](docs/platforms/)
+- [Developer architecture](docs/architecture.md)
 - [Nix, container, and Kubernetes deployment](docs/deployment.md)
 - [Network transport and compatibility](docs/network-transport-and-compatibility.md)
+- [Platform guides](docs/platforms/)
+- [DeepSeek Harness integration](docs/integrations/deepseek-harness.md)
 
-Publisher setup creates or reuses only the strict seed-only `publisher.json`;
-the old publisher manifest and state-policy mutation commands are removed.
-Headless publisher and publisher-enabled device runs require a complete
-`[publisher]` TOML table, while subscriber-only commands remain independent.
-For example, a local service uses `source = { local_port = 4533 }`; an
-upstream-backed service uses
-`source = { publisher_key = "<upstream-public-key>", service_id = "navidrome" }`.
-Upstream-backed entries remain in the catalog while unavailable and recover
-new traffic after the upstream connection and named service return. Existing
-streams are not promised continuity across recovery or source changes.
-Headless publishers can expose an optional read-only Prometheus endpoint with
-`publisher run --metrics-listen 127.0.0.1:9464` (or the same option on a
-publisher-enabled `device run`). It reports bounded subscriber labels and
-short public-key fingerprints, service authorization, active channels, and
-current and cumulative payload bytes. The repository-owned Grafana dashboard
-is available from `packages.<system>.grafana-dashboard` in the Nix flake and
-installs as `share/kepos/grafana/kepos-publisher-observability.json`.
+## Minimal peer configuration
+
+Initialize one canonical identity and an empty config:
+
+```sh
+npm run kepos -- setup peer \
+  --state ~/.local/state/kepos-neo/peer \
+  --config ~/.config/kepos/config.toml
+```
+
+The command prints only the public key. Add the other peer's public key and
+the services that should be visible to it:
+
+```toml
+[gateway]
+port = 17480
+
+[[peers]]
+label = "mac"
+public_key = "<mac-peer-public-key>"
+connection = "accept"
+
+[[services]]
+id = "cua"
+name = "CUA driver"
+source = { unix_socket = "/run/user/1000/cua-driver.sock" }
+allow = ["<nuc-peer-public-key>"]
+
+[[bindings]]
+peer = "mac"
+service = "cua"
+listen = { unix_socket = "/run/user/1000/kepos-cua.sock" }
+```
+
+Use `connection = "dial"` on the side that must establish the connection.
+The service direction is independent: once the connection exists, either
+authorized peer can open a byte-stream service if both ends support the peer
+capability. A legacy client can still use the existing server-side TCP, HTTP,
+and UDP operations, but it cannot provide reverse services.
+
+Start the runtime with:
+
+```sh
+npm run kepos -- peer run \
+  --state ~/.local/state/kepos-neo/peer \
+  --config ~/.config/kepos/config.toml
+```
+
+Inspect the identity or stopped configuration without starting the network:
+
+```sh
+npm run kepos -- peer key --state ~/.local/state/kepos-neo/peer
+npm run kepos -- peer status --state ~/.local/state/kepos-neo/peer \
+  --config ~/.config/kepos/config.toml
+```
+
+The gateway retains the unqualified service convention:
+`http://<service-id>.localhost:17480/`. When several visible peers provide
+the same HTTP service ID, Kepos reports an ambiguity; configure one explicit
+binding instead of relying on timing or peer order.
+
+## Identity and cutover
+
+Peer state is one private, owner-only `peer.json` containing a seed. Startup
+reads only that canonical directory; it does not probe publisher/subscriber
+state, contact files, old TOML tables, or a fallback runtime. `setup peer` is
+idempotent and never rotates an existing key.
+
+For a deliberate deployment cutover, retain NUC's existing publisher public
+key as its peer identity and Mac's active subscriber public key as its peer
+identity. Back up the old state outside the active runtime directory, stop
+the old daemon, run `peer convert` with explicit source and destination paths,
+verify the printed public key, rewrite peer references and immediate service
+grants, then start only `peer run`. The conversion helper refuses overwrite,
+rejects ambiguous or linked sources, writes private state with owner-only
+permissions, and never prints private material. Rollback means stopping the
+new runtime and restoring the separately held backup; there is no runtime
+fallback or dual-identity alias.
+
+See [CLI, identity, and configuration](docs/cli.md#identity-and-deliberate-cutover)
+for the complete ordering and [deployment](docs/deployment.md) for supervised
+operation. This repository has not converted real NUC or Mac state.
 
 ## Supported surfaces
 
-| Surface | Roles | Current boundary |
-| --- | --- | --- |
-| Android | Subscriber | Android 12+, `arm64-v8a`, sideload-only; persistent app-private subscriber identity; TCP/HTTP services only |
-| macOS | Publisher, subscriber, or both | Apple Silicon; native desktop app; ad-hoc-signed direct-download ZIP; TCP/HTTP and bounded UDP services |
-| Windows | Publisher, subscriber, or both | Windows 10 x64 build 19045 (22H2)+ and Windows 11 x64; portable ZIP with optional per-user install; TCP/HTTP and bounded UDP services |
-| Headless CLI | Publisher, subscriber, or both | Node.js 24; local HTTP gateway and explicit raw TCP or UDP listeners |
-| Nix / Home Manager | Publisher and CLI | Declarative publisher policy; private keys stay out of the Nix store |
-| Container | Publisher and subscriber | Non-root `linux/amd64` image; deployment owns state, networking, and supervision |
+| Surface | Canonical boundary |
+| --- | --- |
+| Android | Existing subscriber client and legacy wire target; TCP/HTTP service mappings, no reverse-service UI or UDP listener |
+| macOS | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix byte-stream endpoints |
+| Windows | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix sockets fail clearly |
+| Headless CLI | Node.js 24 `peer` setup/key/status/pair/convert/run commands, gateway, TCP/HTTP/UDP service paths |
+| Nix / Home Manager | Declarative `services.kepos.peer` config and a supervised `kepos peer run` unit |
+| Container | Non-root image; deployment owns the canonical state directory, network, and supervision |
 
-The repository's Kubernetes path is an operator-owned subscriber gateway, not a
-shipped cluster product. See [deployment](docs/deployment.md) for its boundary.
-
-## Direct downloads
-
-These links follow GitHub's latest **stable** release and do not select beta
-prereleases:
-
-- [Android APK](https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-android-arm64.apk) — subscriber only
-- [Apple Silicon macOS ZIP](https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-macos-arm64.zip) — publisher and subscriber
-- [Windows x64 ZIP](https://github.com/LamplitIsles/kepos/releases/latest/download/kepos-windows-x64.zip) — publisher and subscriber
-
-Optional: download `SHA256SUMS` and `SHA256SUMS.minisig` from the same release and
-follow the [public release verification reference](https://kepos.guion.io/docs/verify/).
-The maintainer-only [release procedure](docs/releasing.md) is separate.
+The repository's Kubernetes path is an operator-owned gateway pattern, not a
+shipped cluster product. See [deployment](docs/deployment.md).
 
 ## Develop
 
@@ -126,32 +175,26 @@ npm run desktop:native-check
 ```
 
 `android:install` uses `adb install -r`, preserving app-private state. The
-physical-device gate uses the isolated `io.github.ttalab.kepos.devicetest`
-package so it cannot replace or remove the installed Kepos app.
+device lifecycle check installs the isolated `io.github.ttalab.kepos.devicetest`
+package and uses test ports, so it does not replace or clear the installed
+dogfood app. Run it only with a test device selected by `ANDROID_SERIAL` when
+more than one device is connected.
 
-The website is the `@lamplitisles/kepos-web` npm workspace:
-
-```sh
-npm run web:dev
-npm run web:verify
-npm run web:deploy:dry-run
-```
-
-Cloudflare Git Builds are disabled. Deployment is a local post-merge
+Cloudflare Git Builds are disabled. Website deployment is a local post-merge
 operation; do not use the deploy command for ordinary development.
 
 ## More repository documentation
 
-- [Android subscriber](docs/platforms/android.md)
+- [Android](docs/platforms/android.md)
 - [macOS desktop](docs/platforms/macos.md)
 - [Windows desktop](docs/platforms/windows.md)
 - [Maintainer release procedure](docs/releasing.md)
-- [How Kepos grew from Hypertele](docs/hypertele-provenance.md)
 - [Architecture decisions](docs/adr/)
 - [Physical and field evidence](docs/evidence/)
 
-The evidence directory records environments, commands, failures, and remaining
-gates. It is separate from current product claims.
+Evidence remains historical or environmental context. It is not a claim that
+this implementation run performed deployment, a live GUI test, or real
+identity conversion.
 
 ## License
 

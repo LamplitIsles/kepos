@@ -47,6 +47,10 @@ import type {
 } from "./protocol.js";
 import { persistDesktopPublisherSubscribers } from "./config.js";
 import type { DesktopSubscriberSetup } from "./options.js";
+import {
+  startDesktopPeerRuntime,
+  type StartDesktopPeerRuntimeOptions,
+} from "./peer-runtime.js";
 
 export interface StartDesktopPublisherOptions {
   stateDir: string;
@@ -68,6 +72,7 @@ export interface StartDesktopSubscriberOptions {
 
 export interface StartDesktopRuntimeOptions {
   bootstrap?: DhtAddress[];
+  peer?: StartDesktopPeerRuntimeOptions;
   publisher?: StartDesktopPublisherOptions;
   subscriber?: StartDesktopSubscriberOptions;
   onSnapshot(snapshot: DesktopSnapshot): void;
@@ -76,6 +81,7 @@ export interface StartDesktopRuntimeOptions {
 
 export interface DesktopRuntimeConfiguration {
   bootstrap?: DhtAddress[];
+  peer?: StartDesktopPeerRuntimeOptions;
   publisher?: StartDesktopPublisherOptions;
   subscriber?: StartDesktopSubscriberOptions;
 }
@@ -137,6 +143,13 @@ export async function startDesktopRuntime(
   options: StartDesktopRuntimeOptions,
   dependencies: DesktopRuntimeDependencies = defaultDependencies,
 ): Promise<RunningDesktopRuntime> {
+  if (options.peer) {
+    return startDesktopPeerRuntime(
+      options.peer,
+      options.onSnapshot,
+      options.onObservation,
+    );
+  }
   if (!options.publisher && !options.subscriber) {
     throw new Error("desktop runtime requires at least one role");
   }

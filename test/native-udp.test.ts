@@ -20,6 +20,8 @@ import {
   createUdpPublisherForwarder,
   createUdpSubscriberTransport,
 } from "../src/mux/udp.js";
+import { parsePeerConfig } from "../src/config.js";
+import { createDht, keyPairFromSeed, type DhtNode } from "../src/mux/hyperdht.js";
 import { createAndroidRegistrySnapshot } from "../src/android/services.js";
 import type { HomeRegistry } from "../src/home/registry.js";
 import { createServicePresentations } from "../src/runtime/service-handlers.js";
@@ -36,7 +38,9 @@ import {
   type PublisherRuntimePolicy,
 } from "../src/runtime/publisher.js";
 import { startSubscriber } from "../src/runtime/subscriber.js";
+import { startPeer, type RunningPeer } from "../src/runtime/peer.js";
 import { listenSubscriberUdpService } from "../src/runtime/udp.js";
+import { loadPeerIdentity, setupPeer } from "../src/state/peer.js";
 
 const require = createRequire(import.meta.url);
 const createHyperDhtTestnet = require("hyperdht/testnet") as (
@@ -543,6 +547,127 @@ test("real desktop runtime exchanges UDP and TCP over one authenticated outer", 
     await closeServer(tcpTarget.server);
     await closeUdp(targetA.socket);
     await closeUdp(targetB.socket);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an old subscriber reaches a UDP service republished by a canonical peer", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-canonical-udp-"));
+  const testnet = await createHyperDhtTestnet(4);
+  const target = await startUdpEcho("canonical:");
+  let macDht: DhtNode | undefined;
+  let nucDht: DhtNode | undefined;
+  let subscriberDht: DhtNode | undefined;
+  let macPeer: RunningPeer | undefined;
+  let nucPeer: RunningPeer | undefined;
+  let subscriber: Awaited<ReturnType<typeof startSubscriber>> | undefined;
+  let local: UdpSocket | undefined;
+  try {
+    const macState = path.join(root, "mac", "peer");
+    const nucState = path.join(root, "nuc", "peer");
+    const subscriberState = path.join(root, "subscriber");
+    const mac = await setupPeer({ stateDir: macState });
+    const nuc = await setupPeer({ stateDir: nucState });
+    const oldSubscriber = await setupSubscriber({ stateDir: subscriberState });
+    macDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(macState)).seed),
+    });
+    nucDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed((await loadPeerIdentity(nucState)).seed),
+    });
+    subscriberDht = createDht({ bootstrap: testnet.bootstrap });
+
+    nucPeer = await startPeer({
+      stateDir: nucState,
+      dht: nucDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "mac", publicKey: mac.publicKey, connection: "accept" }],
+        services: [],
+        bindings: [],
+      }),
+    });
+    const invitation = nucPeer.createPairingInvitation();
+    const pairingTask = startSubscriber({
+      stateDir: subscriberState,
+      dht: subscriberDht,
+      gatewayPort: 0,
+      services: [{ id: "farm", kind: "udp", localPort: 0 }],
+      pairing: {
+        invitation: invitation.uri,
+        deviceLabel: "old-phone",
+        platform: "android",
+      },
+    });
+    await waitFor(() => nucPeer?.pairingStatus().phase === "pending");
+    await nucPeer.approvePairing();
+    subscriber = await pairingTask;
+
+    macPeer = await startPeer({
+      stateDir: macState,
+      dht: macDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "nuc", publicKey: nuc.publicKey, connection: "dial" }],
+        services: [{
+          id: "farm",
+          name: "Farm",
+          kind: "udp",
+          source: { localPort: target.port },
+          allow: [nuc.publicKey],
+        }],
+        bindings: [],
+      }),
+    });
+    await nucPeer.applyConfig(parsePeerConfig({
+      gateway: { port: 0 },
+      peers: [
+        { label: "mac", publicKey: mac.publicKey, connection: "accept" },
+        {
+          label: "old-phone",
+          publicKey: oldSubscriber.publicKey,
+          connection: "accept",
+        },
+      ],
+      services: [{
+        id: "farm",
+        name: "Republished farm",
+        kind: "udp",
+        source: { peer: "mac", service: "farm" },
+        allow: [oldSubscriber.publicKey],
+      }],
+      bindings: [],
+    }));
+    await waitFor(() => Boolean(
+      macPeer?.status().connections[0]?.status === "connected" &&
+      nucPeer?.status().connections.some(({ publicKey, status }) =>
+        publicKey === mac.publicKey && status === "connected",
+      ) &&
+      nucPeer?.status().services[0]?.available === true,
+    ));
+
+    local = await bindUdp();
+    const farm = subscriber.services.find((service) => service.id === "farm");
+    assert.ok(farm);
+    assert.equal(farm.kind, "udp");
+    assert.equal(
+      (await sendUdp(local, farm.port, Buffer.from("forwarded"))).toString(),
+      "canonical:forwarded",
+    );
+    const large = Buffer.alloc(1_200, 0x42);
+    assert.deepEqual(await sendUdp(local, farm.port, large), large);
+  } finally {
+    await closeUdp(local);
+    await subscriber?.stop();
+    await nucPeer?.stop();
+    await macPeer?.stop();
+    await subscriberDht?.destroy({ force: true });
+    await nucDht?.destroy({ force: true });
+    await macDht?.destroy({ force: true });
+    await closeUdp(target.socket);
     await testnet.destroy();
     await rm(root, { recursive: true, force: true });
   }

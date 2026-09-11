@@ -41,6 +41,17 @@ export function defaultKeposRoleStatePath(
   );
 }
 
+export function defaultKeposPeerStatePath(
+  environment: PlatformEnvironment = process.env,
+  homeDirectory = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return pathForPlatform(platform).join(
+    defaultKeposStateRoot(environment, homeDirectory, platform),
+    "peer",
+  );
+}
+
 export function defaultKeposDiagnosticsDirectory(
   environment: PlatformEnvironment = process.env,
   homeDirectory = os.homedir(),

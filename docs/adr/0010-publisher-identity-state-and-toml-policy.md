@@ -1,8 +1,13 @@
 # ADR 0010: Publisher identity state and TOML policy ownership
 
-Status: Accepted
+Status: Accepted (historical publisher model; canonical runtime superseded by ADR 0013)
 
 Date: 2026-09-04
+
+ADR 0013 supersedes this ADR's publisher-owned runtime/configuration contract
+for the canonical peer runtime. The strict identity-only state principle and
+the historical rationale remain useful context; current operators should use
+`peer.json` plus peer-oriented TOML instead.
 
 ## Context
 

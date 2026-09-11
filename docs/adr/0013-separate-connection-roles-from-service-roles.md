@@ -1,7 +1,6 @@
 # ADR 0013: Peer identity and independent connection and service roles
 
-Status: Accepted design following the 2026-09-11 implementation request.
-Runtime implementation is pending.
+Status: Accepted and implemented.
 
 Date: 2026-09-11
 
@@ -57,13 +56,14 @@ This decision replaces the earlier proposal to keep pub=accept and
 sub=dial as two separate persistent identities. Dial and accept remain
 per-connection responsibilities of the same peer identity.
 
-## Current-code consequences
+## Implementation consequences
 
-The current mux already carries bidirectional streams but exposes service
-channel initiation only through `RunningMuxSubscriber.open`. The publisher
-runtime already tracks the current connection by authenticated subscriber
-key. Extending these capabilities still requires role-independent service
-resolution, authorization, connection-generation ownership, and cleanup.
+The canonical mux/runtime surface is `createMuxPeer` and `startPeer`. It keeps
+the existing control, heartbeat, TCP/HTTP, UDP, and Home wire adapters at the
+boundary while negotiating `kepos/peer-services/1` for reverse byte streams.
+The peer runtime resolves current connections by authenticated public key and
+generation, owns local bindings and service sources, and closes affected
+channels/flows on policy or source changes.
 
 The existing TCP, pairing, control, UDP, and Home-registry contracts should
 retain their old meanings for old clients. Negotiate reverse support
@@ -75,17 +75,17 @@ Verify old-client-to-new-server operation with frozen wire fixtures or old
 built clients. Keep legacy wire field names where those clients require them;
 this does not require old configuration fields or old internal role ownership.
 
-ADR 0012 currently specifies outbound upstream connections authenticated with
-the republishing publisher key. A unified peer identity removes the need for
-an exception to sub=dial: when a republisher retains its old publisher key as
-its peer identity, upstreams continue to see that key even when it dials.
-Republishers must still select and preserve the intended identity at cutover.
+ADR 0012 specified outbound upstream connections authenticated with the
+republishing publisher key. The canonical runtime supersedes that role
+exception: a republisher retains one selected peer identity and can consume
+an upstream over an accepted or dialed relationship. ADR 0012 remains the
+historical record of explicit republication and its immediate-hop trust
+boundary; `docs/architecture.md` and `docs/cli.md` define the current schema.
 
-The existing subscriber state also stores its pinned publisher contact. If
-the new peer configuration owns contacts, do not leave two writable sources
-of truth: perform identity-format and contact-policy transitions as an
-operator-run cutover. The new runtime must not fall back to the old
-contact policy when new configuration is absent or invalid.
+The existing subscriber state stores a pinned publisher contact. The
+canonical `peers` list and service `allow` lists now own this policy. The
+offline `peer convert` helper is the only bridge from a selected old identity;
+startup never falls back to the old contact policy or probes old state.
 
 ## Working scope
 
@@ -131,5 +131,8 @@ in one PR. Real identity conversion, deployment and live Mac GUI verification
 are separate operator steps; the implementation run does not perform them.
 
 This decision changes the role vocabulary of ADR 0006 and the identity usage
-and terminology of ADR 0012. Their historical decisions remain recorded;
-mark the relevant parts superseded as the runtime implementation is completed.
+and terminology of ADR 0012. Their historical decisions remain recorded and
+are superseded for the canonical runtime by this ADR. ADR 0008's shared DHT
+resource/lifecycle contract and ADR 0003's Android/Bare host boundary remain
+applicable. Real identity conversion, deployment, and live CUA GUI operation
+remain operator work and are not claimed by this ADR.

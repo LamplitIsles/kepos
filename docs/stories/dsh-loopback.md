@@ -1,35 +1,68 @@
 # Making a remote service look local
 
-I wrote Kepos as a general-purpose, end-to-end encrypted P2P tunnel. The publisher shares a service through a TCP byte stream, raw by default, and the subscriber receives it as a `*.localhost` hostname or an explicit local port. Browsers, SSH clients, and CLIs all behave as if the service were on the same machine.
+Kepos is a service-scoped, end-to-end encrypted peer proxy. One runtime owns
+one persistent peer identity; its connections may be dialed or accepted
+independently of which services it provides or consumes. A named service is
+exposed through a local HTTP gateway, TCP port, or Unix socket binding.
 
-The first things I wanted to reach were ordinary self-hosted services: music and SSH, without opening public ports or putting every device on a virtual network. Kepos uses HyperDHT and UDX for the peer connection. Peer keys authenticate an end-to-end encrypted outer connection, and Protomux carries the registry, heartbeat, pairing, and one channel per service over that single connection.
+The tunnel terminates local TCP at each hop. Protomux carries open/data/
+half-close/reset and backpressure state over the authenticated outer
+connection. The service application receives an ordinary local byte stream.
 
-The tunnel ends TCP locally at both peers. Open, data, half-close, reset, and backpressure cross the multiplexed channel instead of forwarding TCP packets. That detail matters less to the application than the result: it sees a normal loopback connection.
+## Why dsh cares about locality
 
-## Then dsh showed up
+DeepSeek Harness (dsh) is local-first and deliberately trusts loopback origins
+to reduce DNS-rebinding risk. A remote tunnel hostname or LAN address can
+therefore fail its browser-trust check. Kepos can make the service local to the
+consumer without changing dsh or adding a generic reverse proxy.
 
-DeepSeek Harness (dsh) is a local-first coding agent with a web interface. Its configuration panel deliberately trusts loopback same-origin requests as a defense against DNS rebinding. That is a sensible boundary, but it makes remote access awkward. A LAN address can receive a `403`; an ordinary tunnel hostname can leave settings unavailable or non-persistent; and `--trusted-host` means maintaining another list of addresses as networks change.
-
-SSH forwarding works. I have used it. But then every client owns a tunnel that has to stay alive. A reverse proxy usually means adding an authentication layer the application did not ask for.
-
-It turned out that Kepos already had the useful property. On the subscriber, dsh can be mounted on an explicit loopback listener:
+For dsh's raw HTTP/TCP port:
 
 ```toml
-[subscriber]
-enabled = true
-gateway_port = 17480
-
-[[subscriber.services]]
+[[services]]
 id = "dsh"
-local_port = 13080
+name = "DeepSeek Harness"
+source = { local_port = 3080 }
+allow = ["<consumer-peer-public-key>"]
+
+[[bindings]]
+peer = "nuc"
+service = "dsh"
+listen = { local_port = 13080 }
 ```
 
-Opening `http://127.0.0.1:13080/` gives dsh the loopback `Host` semantics it expects. There are no `--trusted-host` changes, and its settings continue to edit and persist across reloads. Android includes this `dsh` mapping by default, so the service card opens the same loopback URL after the phone pairs with a publisher that advertises `id = "dsh"`.
+Open `http://127.0.0.1:13080/`; the dsh target receives loopback connection
+semantics and no `--trusted-host` update is needed. The existing gateway form
+is also `http://dsh.localhost:17480/`.
 
-Nothing in the transport is specific to dsh. SSH, Dagger, and other raw TCP services use their own listeners over the same authenticated outer connection; HTTP services can share the `*.localhost` gateway. A target that needs Kepos device identity can explicitly opt into the separate [`kind = "http"` contract](../cli.md#http-service-device-authentication); this dsh recipe deliberately remains raw TCP.
+## CUA over an existing connection
 
-Unknown devices still cannot open the service. Publisher and per-service allowlists decide which subscriber public keys are authorized. Kepos does not weaken dsh's browser fence or expose its port publicly. It makes the remote service look local while keeping access at the service boundary.
+The motivating topology is different from a normal local dsh service. The
+Mac-side CUA driver owns a Unix socket, Mac is configured to `dial` NUC, and
+NUC is configured to `accept` Mac. NUC then binds Mac's `cua` service locally:
 
-Kepos is still a developer preview. Android is sideload-only, the macOS build is ad-hoc signed and not notarized, and the tunnel does not carry UDP. The dsh case is useful because it exposes the design in a concrete way: sometimes "local" is not just a convenient address. It is part of the application's security model.
+```toml
+[[services]]
+id = "cua"
+name = "CUA driver"
+source = { unix_socket = "/run/user/1000/cua-driver.sock" }
+allow = ["<nuc-peer-public-key>"]
 
-See [DeepSeek Harness integration](../integrations/deepseek-harness.md) for the publisher policy, setup steps, and security notes.
+[[bindings]]
+peer = "mac"
+service = "cua"
+listen = { unix_socket = "/run/user/1000/kepos-cua.sock" }
+```
+
+Once the one authenticated outer is established, the NUC-side open travels
+over it. There is no second connection from NUC to Mac and no shared
+filesystem. NDJSON and inline screenshot bytes are opaque application bytes;
+Kepos does not create a CUA-specific protocol adapter.
+
+If a third peer needs the service, NUC must explicitly republish it under a
+new service ID with a new immediate-peer allowlist. A local binding alone does
+not publish or delegate Mac's identity.
+
+See [DeepSeek Harness integration](../integrations/deepseek-harness.md) for
+the complete configuration, pairing, and later live-smoke procedure. The
+automated Unix/testnet proof is not a live DSH, CUA-driver, or GUI test.

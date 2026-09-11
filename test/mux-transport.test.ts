@@ -6,6 +6,7 @@ import { test } from "node:test";
 import ProtomuxModule from "protomux";
 
 import {
+  createMuxPeer,
   createMuxPublisher,
   createMuxSubscriber,
   TerminalPairingError,
@@ -278,6 +279,70 @@ test("multiplexes independent service streams over one persistent connection", a
   navidrome.destroy();
   subscriber.close();
   publisher.close();
+});
+
+test("canonical mux peers negotiate one connection and serve both directions", async () => {
+  const [leftOuter, rightOuter] = framedPair();
+  const left = createMuxPeer(leftOuter, {
+    accept: async (serviceId) => prefixService(`right:${serviceId}:`),
+    serviceAuthorized: (serviceId) => serviceId !== "denied",
+    remotePublicKey: "11".repeat(32),
+  });
+  const right = createMuxPeer(rightOuter, {
+    accept: async (serviceId) => prefixService(`left:${serviceId}:`),
+    remotePublicKey: "22".repeat(32),
+  });
+
+  try {
+    assert.equal(await left.capability, "ready");
+    assert.equal(await right.capability, "ready");
+    assert.equal(await left.controlReady, "ready");
+    assert.equal(await right.controlReady, "ready");
+
+    const rightService = await left.open("right-service");
+    assert.equal(await exchange(rightService, "request"), "left:right-service:request");
+    rightService.destroy();
+
+    const leftService = await right.open("left-service");
+    assert.equal(await exchange(leftService, "response"), "right:left-service:response");
+    leftService.destroy();
+
+    await assert.rejects(
+      () => right.open("denied"),
+      /not authorized/i,
+    );
+    left.closeServiceChannels("missing");
+    right.closeUdpFlows("missing");
+  } finally {
+    left.close();
+    right.close();
+  }
+});
+
+test("canonical mux authorization can promote the same connection", async () => {
+  const [candidateOuter, approvedOuter] = framedPair();
+  const candidate = createMuxPeer(candidateOuter, {
+    authorized: false,
+    accept: async () => prefixService("candidate:"),
+  });
+  const approved = createMuxPeer(approvedOuter, {
+    accept: async () => prefixService("approved:"),
+  });
+
+  try {
+    assert.equal(await candidate.capability, "ready");
+    assert.equal(await approved.capability, "ready");
+    await assert.rejects(() => approved.open("before-approval"), /not approved/i);
+
+    candidate.authorize();
+    assert.equal(await candidate.controlReady, "ready");
+    const stream = await approved.open("after-approval");
+    assert.equal(await exchange(stream, "payload"), "candidate:payload");
+    stream.destroy();
+  } finally {
+    candidate.close();
+    approved.close();
+  }
 });
 
 test("promotes a pairing candidate to services on the same outer", async () => {

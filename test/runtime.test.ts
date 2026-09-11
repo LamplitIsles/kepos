@@ -6,14 +6,9 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  createDefaultCliDependencies,
-  runCli,
-} from "../src/cli/main.js";
-import {
   createDht,
   type DhtNode,
 } from "../src/mux/hyperdht.js";
-import type { Observation } from "../src/mux/observability.js";
 import { startMetricsServer } from "../src/metrics/server.js";
 import {
   startPublisher,
@@ -24,11 +19,13 @@ import {
   startSubscriber,
   type SubscriberRuntimeStatus,
 } from "../src/runtime/subscriber.js";
+import { startPeer } from "../src/runtime/peer.js";
 import { setupPublisher } from "../src/state/publisher.js";
 import {
   setSubscriberPublisher,
   setupSubscriber,
 } from "../src/state/subscriber.js";
+import { setupPeer } from "../src/state/peer.js";
 
 interface HyperDhtTestnet {
   bootstrap: Array<{ host: string; port: number }>;
@@ -397,121 +394,31 @@ test("dual-role runtimes borrow one DHT without merging role identities", async 
   }
 });
 
-test("publisher and subscriber expose synchronous status around an awaited lifecycle", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "kepos-runtime-"));
-  const publisherState = path.join(root, "publisher");
-  const subscriberState = path.join(root, "subscriber");
-  const output: string[] = [];
-  const subscriberEvents: Observation[] = [];
-  const cli = {
-    ...createDefaultCliDependencies({
-      stdout: (line) => output.push(line),
-      stderr: (line) => output.push(line),
-    }),
-    loadConfig: async () => undefined,
-  };
-  await runCli(
-    ["setup", "subscriber", "--state", subscriberState],
-    cli,
-  );
-  const subscriberKey = output.at(-1)?.split(": ")[1];
-  assert.ok(subscriberKey);
-  assert.match(subscriberKey, /^[0-9a-f]{64}$/);
-  await runCli(
-    [
-      "setup",
-      "publisher",
-      "--state",
-      publisherState,
-    ],
-    cli,
-  );
-  const publisherKey = output.at(-1)?.split(": ")[1];
-  assert.ok(publisherKey);
-  assert.match(publisherKey, /^[0-9a-f]{64}$/);
-  await runCli(
-    [
-      "subscriber",
-      "set-publisher",
-      "--state",
-      subscriberState,
-      "--label",
-      "kosmos",
-      "--publisher-key",
-      publisherKey,
-    ],
-    cli,
-  );
+test("peer exposes synchronous status around an awaited lifecycle", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-runtime-"));
+  const stateDir = path.join(root, "peer");
   const testnet = await createHyperDhtTestnet(3);
-  let publisher:
-    | Awaited<ReturnType<typeof startPublisher>>
-    | undefined;
-  let subscriber:
-    | Awaited<ReturnType<typeof startSubscriber>>
-    | undefined;
-
+  let peer: Awaited<ReturnType<typeof startPeer>> | undefined;
   try {
-    publisher = await startPublisher({
-      stateDir: publisherState,
+    const setup = await setupPeer({ stateDir });
+    peer = await startPeer({
+      stateDir,
       bootstrap: testnet.bootstrap,
-      policy: {
-        displayName: "kosmos",
-        subscribers: [{ label: "kosmos", publicKey: subscriberKey }],
-        services: [],
-      },
+      config: { gateway: { port: 0 }, peers: [], services: [], bindings: [] },
     });
-    assert.deepEqual(publisher.status(), {
-      role: "publisher",
-      state: "running",
-      publisherKey,
-      homeUrl: publisher.home.url,
-      acceptedConnections: 0,
-      activeSubscribers: 0,
-      activeSubscriberKeys: [],
-      pairing: { phase: "idle" },
-    } satisfies PublisherRuntimeStatus);
-
-    subscriber = await startSubscriber({
-      stateDir: subscriberState,
-      bootstrap: testnet.bootstrap,
-      gatewayPort: 0,
-      observe: (event) => subscriberEvents.push(event),
-      services: [],
-    });
-    assert.deepEqual(subscriber.status(), {
-      role: "subscriber",
-      state: "running",
-      connection: "connected",
-      connectionGeneration: 1,
-      publisherKey,
-      publisherLabel: "kosmos",
-      subscriberKey,
-      homeUrl: subscriber.home.url,
-      services: [],
-    } satisfies SubscriberRuntimeStatus);
-    assert.equal((await fetch(`${subscriber.home.url}/healthz`)).status, 200);
-    assert.equal(publisher.status().activeSubscribers, 1);
-    assert.deepEqual(publisher.status().activeSubscriberKeys, [subscriberKey]);
-
-    const connected = subscriberEvents.find(
-      ({ event }) => event === "outer.connected",
-    );
-    assert.ok(connected);
-    const transport = connected.transport as Record<string, unknown>;
-    assert.equal(typeof transport.udx, "object");
-    assert.doesNotMatch(
-      JSON.stringify(connected),
-      /(?:127\.0\.0\.1|0\.0\.0\.0|::1)/u,
-    );
-
-    await subscriber.stop();
-    assert.equal(subscriber.status().state, "stopped");
-    await publisher.stop();
-    assert.equal(publisher.status().state, "stopped");
+    const status = peer.status();
+    assert.equal(status.role, "peer");
+    assert.equal(status.state, "running");
+    assert.equal(status.peerKey, setup.publicKey);
+    assert.equal(status.connections.length, 0);
+    assert.equal(status.services.length, 0);
+    assert.equal(status.bindings.length, 0);
+    assert.ok(peer.gateway.port > 0);
+    await peer.stop();
+    assert.equal(peer.status().state, "stopped");
   } finally {
     await Promise.allSettled([
-      subscriber?.stop(),
-      publisher?.stop(),
+      peer?.stop(),
       testnet.destroy(),
       rm(root, { recursive: true, force: true }),
     ]);

@@ -33,3 +33,23 @@
 - Keep Cloudflare configuration in `apps/web/wrangler.jsonc`.
 - Cloudflare Git Builds are disabled. Run the local Wrangler deploy only after
   the website change has merged and passed checks.
+
+## Canonical peer runtime
+
+- New repository-owned configuration uses `peers`, `services`, and `bindings`
+  in the strict snake_case TOML schema. Use `setup peer`, `peer key`, `peer
+  status`, `peer pair`/`peer trust`, `peer convert`, and `peer run`; do not add
+  publisher/subscriber TOML aliases, startup probing, or role-specific
+  compatibility adapters.
+- A peer has one seed-only `peer.json` identity. Keep service grants explicit
+  for the authenticated immediate peer. A `bindings` entry consumes a remote
+  service and never republishes it; republication requires a separate local
+  service with an explicit peer/service source and allowlist.
+- Tests for peer state, sockets, locks, and runtimes must use test-owned
+  temporary paths, generated keys, fakes, or local HyperDHT testnets. Never
+  inspect or mutate live Kepos/DSH state, credentials, installed binaries, or
+  production services.
+- The canonical runtime preserves old-client-to-new-server wire operations,
+  but does not promise new-client-to-old-server operation or reverse UDP.
+  Keep compatibility code at the wire boundary and document unsupported
+  capabilities truthfully.

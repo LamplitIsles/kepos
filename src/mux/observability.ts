@@ -1,4 +1,4 @@
-export type ObservationRole = "publisher" | "subscriber";
+export type ObservationRole = "publisher" | "subscriber" | "peer";
 export type ObservationDirection =
   | "subscriber-to-publisher"
   | "publisher-to-subscriber";

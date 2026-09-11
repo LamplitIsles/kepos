@@ -5,6 +5,9 @@ import {
   parsePublisherIdentity,
   parsePublisherService,
   parsePublisherServices,
+  parsePeerConfig,
+  parseSubscriberDevice,
+  parseSubscriberDevices,
   parseSubscriberContact,
   serializePublisherIdentity,
   serializeSubscriberContact,
@@ -163,5 +166,133 @@ test("subscriber contact round-trips one pinned publisher key", () => {
   assert.deepEqual(
     parseSubscriberContact(JSON.parse(serializeSubscriberContact(contact))),
     contact,
+  );
+});
+
+test("subscriber device lists validate bounded labels and unique identities", () => {
+  const device = { publicKey, label: "phone" };
+  assert.deepEqual(parseSubscriberDevice(device), device);
+  assert.deepEqual(parseSubscriberDevices([device]), [device]);
+
+  for (const value of [
+    null,
+    [],
+    { ...device, extra: true },
+    { ...device, publicKey: "not-a-key" },
+    { ...device, label: "" },
+    { ...device, label: " phone" },
+    { ...device, label: "a".repeat(129) },
+    { ...device, label: "line\nfeed" },
+  ]) {
+    assert.throws(() => parseSubscriberDevice(value), /device|label|key|field/i);
+  }
+  assert.throws(() => parseSubscriberDevices(null), /array/i);
+  assert.throws(
+    () => parseSubscriberDevices([device, { publicKey: otherPublicKey, label: device.label }]),
+    /duplicate.*label/i,
+  );
+  assert.throws(
+    () => parseSubscriberDevices([device, { publicKey, label: "another" }]),
+    /duplicate.*key/i,
+  );
+});
+
+test("legacy config parsers reject malformed values at each boundary", () => {
+  assert.throws(() => parsePublisherService(null), /object/i);
+  assert.throws(
+    () => parsePublisherService({ id: "SSH", name: "SSH", source: { localPort: 22 } }),
+    /identifier/i,
+  );
+  assert.throws(
+    () => parsePublisherService({ id: "ssh", name: " ", source: { localPort: 22 } }),
+    /name/i,
+  );
+  for (const localPort of ["22", 0, 65_536, 1.5]) {
+    assert.throws(
+      () => parsePublisherService({ id: "ssh", name: "SSH", source: { localPort } }),
+      /localPort/i,
+    );
+  }
+  assert.throws(
+    () => parsePublisherService({ id: "ssh", name: "SSH", source: undefined }),
+    /source/i,
+  );
+  assert.throws(
+    () => parsePublisherService({ id: "ssh", name: "SSH", source: {} }),
+    /source/i,
+  );
+  assert.throws(
+    () => parsePublisherService({ id: "ssh", name: "SSH", source: { localPort: 22, extra: true } }),
+    /unknown/i,
+  );
+  assert.throws(
+    () => parsePublisherService({ id: "ssh", name: "SSH", source: { publisherKey: otherPublicKey, serviceId: "site", extra: true } }),
+    /unknown/i,
+  );
+  assert.throws(
+    () => parsePublisherService({ id: "ssh", name: "SSH", source: { publisherKey: "bad", serviceId: "site" } }),
+    /publisherKey/i,
+  );
+  assert.throws(
+    () => parsePublisherService({ id: "ssh", name: "SSH", source: { publisherKey: otherPublicKey, serviceId: "Site" } }),
+    /serviceId/i,
+  );
+  assert.throws(
+    () => parsePublisherService({ id: "ssh", name: "SSH", source: { localPort: 22 }, allow: "all" }),
+    /allow/i,
+  );
+  assert.throws(
+    () => parsePublisherServices(null),
+    /array/i,
+  );
+  assert.throws(
+    () => parseSubscriberContact({ publisherKey: publicKey, label: "phone", requestedLocalPort: -1 }),
+    /requestedLocalPort/i,
+  );
+  assert.throws(
+    () => parseSubscriberContact({ publisherKey: publicKey, label: " ", requestedLocalPort: 0 }),
+    /label/i,
+  );
+  assert.throws(() => parseSubscriberContact(null), /contact|object/i);
+});
+
+test("canonical in-memory config rejects missing collections and malformed optional sections", () => {
+  const minimal = { peers: [], services: [], bindings: [] };
+  for (const value of [null, [], { ...minimal, extra: true }]) {
+    assert.throws(() => parsePeerConfig(value), /config|unknown|object/i);
+  }
+  for (const field of ["peers", "services", "bindings"] as const) {
+    const value = { ...minimal, [field]: undefined };
+    assert.throws(() => parsePeerConfig(value), new RegExp(field));
+  }
+  assert.throws(() => parsePeerConfig({ ...minimal, network: null }), /network/i);
+  assert.throws(() => parsePeerConfig({ ...minimal, gateway: null }), /gateway/i);
+  assert.throws(
+    () => parsePeerConfig({ ...minimal, network: { bootstrap: "not-an-array" } }),
+    /bootstrap/i,
+  );
+  assert.throws(
+    () => parsePeerConfig({ ...minimal, network: { bootstrap: [{ host: "", port: 1 }] } }),
+    /host/i,
+  );
+  assert.throws(
+    () => parsePeerConfig({ ...minimal, network: { bootstrap: [{ host: "dht", port: 0 }] } }),
+    /port/i,
+  );
+  assert.throws(
+    () => parsePeerConfig({ ...minimal, network: { route: "lan" } }),
+    /route/i,
+  );
+  assert.throws(
+    () => parsePeerConfig({ ...minimal, gateway: { port: 70_000 } }),
+    /gateway\.port/i,
+  );
+  assert.throws(
+    () => parsePeerConfig({ ...minimal, gateway: { host: "" } }),
+    /gateway\.host/i,
+  );
+  assert.throws(
+    () => parsePeerConfig({ ...minimal, gateway: { domain: "" } }),
+    /gateway\.domain/i,
   );
 });

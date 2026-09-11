@@ -33,6 +33,7 @@ import {
   createUdpPublisherForwarder,
   createUdpSubscriberTransport,
   type SubscriberDatagramConnection,
+  type UdpEnvelope,
 } from "./udp.js";
 
 const Protomux = ProtomuxModule as ProtomuxConstructor;
@@ -189,6 +190,58 @@ export interface RunningMuxSubscriber {
     request: PairingRequest,
     options?: { onPending?: () => void },
   ) => Promise<void>;
+}
+
+/**
+ * The capability advertised by a canonical peer runtime.  The legacy
+ * publisher/subscriber wire adapters deliberately do not advertise this
+ * value, which lets a peer fail reverse opens without guessing at a second
+ * connection or silently falling back to an old role.
+ */
+export type PeerCapability = "ready" | "unsupported";
+
+export interface MuxPeerOptions {
+  authorized?: boolean;
+  accept: (serviceId: string) => Promise<Duplex>;
+  capabilityTimeoutMs?: number;
+  heartbeat?: false | HeartbeatOptions;
+  now?: () => number;
+  onControlReady?: () => void;
+  observationRole?: ObservationRole;
+  observe?: Observe;
+  outerId?: string;
+  remotePublicKey?: string;
+  serviceAuthorized?: (serviceId: string) => boolean;
+  serviceKind?: (serviceId: string) => "tcp" | "http" | "udp";
+  publisherToSubscriberRateLimiter?: (
+    serviceId: string,
+  ) => PublisherToSubscriberRateLimiter | undefined;
+  /** Public identity used for the existing HTTP forwarding header. */
+  httpRemotePublicKey?: string;
+  transportSnapshot?: () => unknown;
+  /** Legacy UDP service support on the accept side. */
+  serviceTargetPort?: (serviceId: string) => number | undefined;
+  udpRemote?: (
+    serviceId: string,
+    onReply: (flowId: Uint8Array, payload: Uint8Array) => void,
+  ) => import("./udp.js").UdpPublisherRemote | undefined;
+  udpIgnoreIncoming?: (envelope: UdpEnvelope) => boolean;
+  onPairingRequest?: (
+    request: PairingRequest,
+    decision: PairingDecision,
+  ) => void | Promise<void>;
+}
+
+export interface RunningMuxPeer {
+  capability: Promise<PeerCapability>;
+  controlReady: Promise<ControlNegotiation>;
+  udp: SubscriberDatagramConnection;
+  open: (serviceId: string) => Promise<Duplex>;
+  /** Promote an admitted pairing candidate to the authorized service surface. */
+  authorize: () => void;
+  close: () => void;
+  closeServiceChannels: (serviceId?: string) => void;
+  closeUdpFlows: (serviceId?: string) => void;
 }
 
 export type ControlNegotiation = "disabled" | "legacy" | "ready";
@@ -1255,11 +1308,11 @@ function createTunnel(
     measure,
     now,
     incomingDirection:
-      role === "subscriber"
+      role !== "publisher"
         ? "publisher-to-subscriber"
         : "subscriber-to-publisher",
     outgoingDirection:
-      role === "subscriber"
+      role !== "publisher"
         ? "subscriber-to-publisher"
         : "publisher-to-subscriber",
     onBytes,
@@ -1363,4 +1416,427 @@ function directionFields(
       (metric.bytes * 1_000) / Math.max(1, transferMs),
     ),
   };
+}
+
+const peerCapabilityProtocol = "kepos/peer-services/1";
+const peerCapabilityHandshake = "byte-stream-v1";
+const defaultPeerCapabilityTimeoutMs = 2_000;
+
+/**
+ * Install the canonical, symmetric service surface on one authenticated
+ * outer stream.  This is intentionally a single Protomux instance: legacy
+ * service channels, the existing control/heartbeat channel, and reverse
+ * channels all share the same encrypted connection and flow-control code.
+ */
+export function createMuxPeer(
+  outer: OuterStream,
+  options: MuxPeerOptions,
+): RunningMuxPeer {
+  const mux = new Protomux(outer);
+  const now = options.now ?? Date.now;
+  const outerId = options.outerId ?? createObservationId("outer");
+  const role = options.observationRole ?? "peer";
+  let authorized = options.authorized ?? true;
+  let closed = false;
+  const activeServiceChannels = new Set<{
+    serviceId: string;
+    stream: MuxTunnel;
+  }>();
+  const controlChannels = new Set<MuxChannel>();
+  const capabilityChannels = new Set<MuxChannel>();
+  let pairingChannel: MuxChannel | undefined;
+  let pairingOpened = false;
+
+  let capabilitySettled = false;
+  let capabilityResolve!: (result: PeerCapability) => void;
+  const capability = new Promise<PeerCapability>((resolve) => {
+    capabilityResolve = resolve;
+  });
+  void capability.catch(() => undefined);
+  const capabilityTimeout = setTimeout(() => {
+    settleCapability("unsupported");
+  }, positiveInteger(options.capabilityTimeoutMs, defaultPeerCapabilityTimeoutMs));
+  capabilityTimeout.unref?.();
+
+  let controlReadyResolve!: (result: ControlNegotiation) => void;
+  let controlReadyReject!: (error: Error) => void;
+  let controlReadySettled = false;
+  const controlReady = new Promise<ControlNegotiation>((resolve, reject) => {
+    controlReadyResolve = resolve;
+    controlReadyReject = reject;
+  });
+  void controlReady.catch(() => undefined);
+
+  const transportSnapshot = options.transportSnapshot;
+  const markCapability = (handshake: string): void => {
+    if (handshake === peerCapabilityHandshake) {
+      settleCapability("ready");
+      return;
+    }
+    settleCapability("unsupported");
+  };
+
+  mux.pair({ protocol: peerCapabilityProtocol }, (id) => {
+    const channel = mux.createChannel({
+      protocol: peerCapabilityProtocol,
+      id,
+      handshake: compact.string,
+      onopen: (handshake) => {
+        markCapability(handshake);
+      },
+      onclose: () => {
+        if (channel) capabilityChannels.delete(channel);
+      },
+    });
+    if (!channel) return;
+    capabilityChannels.add(channel);
+    channel.open(peerCapabilityHandshake);
+  });
+
+  const capabilityId = crypto.randomBytes(16);
+  const capabilityChannel = mux.createChannel({
+    protocol: peerCapabilityProtocol,
+    id: capabilityId,
+    handshake: compact.string,
+    onopen: (handshake) => {
+      markCapability(handshake);
+    },
+    onclose: () => {
+      if (!capabilitySettled) settleCapability("unsupported");
+    },
+  });
+  if (capabilityChannel) {
+    capabilityChannels.add(capabilityChannel);
+    capabilityChannel.open(peerCapabilityHandshake);
+  } else {
+    settleCapability("unsupported");
+  }
+
+  let subscriberControl: RunningControlChannel | undefined;
+
+  const startAuthorizedControl = (): void => {
+    if (closed || !authorized || subscriberControl) return;
+    subscriberControl = createSubscriberControlChannel(
+      mux,
+      outer,
+      {
+        authorized: true,
+        heartbeat: options.heartbeat,
+        now,
+        onControlReady: () => {
+          options.onControlReady?.();
+        },
+        onControlClosed: () => undefined,
+        onControlEstablishmentTimeout: () => undefined,
+        onControlUnexpectedClose: () => undefined,
+        observe: options.observe,
+        observationRole: role,
+        outerId,
+        transportSnapshot,
+      },
+      now,
+    );
+    void subscriberControl.ready.then(
+      (result) => {
+        if (controlReadySettled) return;
+        controlReadySettled = true;
+        controlReadyResolve(result);
+      },
+      (error: Error) => {
+        if (controlReadySettled) return;
+        controlReadySettled = true;
+        controlReadyReject(error);
+      },
+    );
+
+    const responderControlChannels = pairPublisherControlChannel(mux, {
+      authorized: true,
+      connect: async () => {
+        throw new Error("Control channels do not open services");
+      },
+      heartbeat: options.heartbeat === false ? false : undefined,
+      onControlReady: () => options.onControlReady?.(),
+    });
+    for (const channel of responderControlChannels) controlChannels.add(channel);
+  };
+
+  const authorize = (): void => {
+    if (authorized) return;
+    authorized = true;
+    startAuthorizedControl();
+  };
+
+  if (authorized) startAuthorizedControl();
+
+  const udp = createUdpPublisherForwarder(outer, {
+    authorized: () => authorized && !closed,
+    serviceAuthorized: options.serviceAuthorized,
+    serviceKind: (serviceId) => options.serviceKind?.(serviceId) ?? "tcp",
+    localTargetPort: options.serviceTargetPort,
+    remoteForService: options.udpRemote,
+    publisherToSubscriberRateLimiter:
+      options.publisherToSubscriberRateLimiter,
+    now,
+    ignoreIncoming: options.udpIgnoreIncoming,
+  });
+
+  if (options.onPairingRequest) {
+    mux.pair({ protocol: pairingProtocol }, (id) => {
+      if (authorized || pairingOpened) {
+        outer.destroy(new Error("Pairing candidate opened an invalid channel"));
+        return;
+      }
+      pairingOpened = true;
+      let received = false;
+      let decided = false;
+      let responseMessage: MuxMessage<PairingResponse>;
+      const channel = mux.createChannel({
+        protocol: pairingProtocol,
+        id,
+        handshake: compact.string,
+        onclose: () => {
+          pairingChannel = undefined;
+        },
+      });
+      if (!channel) {
+        outer.destroy(new Error("Pairing channel could not be created"));
+        return;
+      }
+      channel.addMessage({
+        encoding: pairingRequestEncoding,
+        onmessage: (request) => {
+          if (received) {
+            outer.destroy(new Error("Pairing request was already submitted"));
+            return;
+          }
+          received = true;
+          responseMessage.send({ status: "pending" });
+          const decision: PairingDecision = {
+            approve: () => {
+              if (decided) return;
+              decided = true;
+              authorize();
+              responseMessage.send({ status: "approved" });
+              queueMicrotask(() => channel.close());
+            },
+            deny: () => {
+              if (decided) return;
+              decided = true;
+              responseMessage.send({ status: "denied" });
+              queueMicrotask(() => outer.destroy());
+            },
+            fail: (code) => {
+              if (decided) return;
+              decided = true;
+              responseMessage.send({ status: "error", code });
+              queueMicrotask(() => outer.destroy());
+            },
+          };
+          Promise.resolve(options.onPairingRequest?.(request, decision)).catch(
+            () => decision.fail("invalid-request"),
+          );
+        },
+      });
+      responseMessage = channel.addMessage({
+        encoding: pairingResponseEncoding,
+        onmessage: () => undefined,
+      });
+      pairingChannel = channel;
+      channel.open("");
+    });
+  }
+
+  mux.pair({ protocol }, (id) => {
+    let serviceId: string | undefined;
+    const emitBase = createObservationEmitter({
+      observe: options.observe,
+      role,
+      outerId,
+      channelId: b4a.toString(id, "hex"),
+      now,
+    });
+    const emit: EmitObservation = (event, fields = {}) =>
+      emitBase(event, {
+        ...(serviceId ? { serviceId } : {}),
+        ...fields,
+      });
+    let tunnel: { channel: MuxChannel; messages: TunnelMessages; stream: MuxTunnel };
+    try {
+      tunnel = createTunnel(
+        mux,
+        id,
+        "publisher",
+        emit,
+        options.observe !== undefined,
+        now,
+        transportSnapshot,
+        (status) => {
+          if (status === "") {
+            tunnel.stream.accept();
+            emit("channel.open-ok", transportFields(transportSnapshot));
+          } else {
+            emit("channel.open-error", {
+              error: status,
+              ...transportFields(transportSnapshot),
+            });
+            tunnel.stream.reject(status);
+          }
+        },
+        async (openedServiceId) => {
+          serviceId = openedServiceId;
+          emit("channel.open");
+          const activeChannel = {
+            serviceId: openedServiceId,
+            stream: tunnel.stream,
+          };
+          activeServiceChannels.add(activeChannel);
+          tunnel.stream.once("close", () => activeServiceChannels.delete(activeChannel));
+          try {
+            if (!authorized) throw new Error("Peer service access is not approved");
+            if (!(options.serviceAuthorized?.(openedServiceId) ?? true)) {
+              throw new Error(`Service is not authorized: ${openedServiceId}`);
+            }
+            const kind = options.serviceKind?.(openedServiceId) ?? "tcp";
+            if (kind === "udp") {
+              throw new Error(
+                "UDP service requires its established datagram operation",
+              );
+            }
+            tunnel.stream.setPublisherToSubscriberRateLimiter(
+              options.publisherToSubscriberRateLimiter?.(openedServiceId),
+            );
+            const target = await options.accept(openedServiceId);
+            if (tunnel.stream.destroyed) {
+              target.destroy();
+              return;
+            }
+            tunnel.stream.accept();
+            tunnel.messages.status.send("");
+            emit("channel.open-ok", transportFields(transportSnapshot));
+            if (kind === "http") {
+              const identity = options.httpRemotePublicKey ?? options.remotePublicKey;
+              if (!identity) throw new Error("HTTP service is missing peer identity");
+              bridgeHttp1(tunnel.stream, target, identity);
+            } else {
+              bridge(tunnel.stream, target);
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            tunnel.stream.accept();
+            tunnel.messages.status.send(message);
+            emit("channel.open-error", {
+              error: message,
+              ...transportFields(transportSnapshot),
+            });
+            queueMicrotask(() => tunnel.channel.close());
+          }
+        },
+      );
+    } catch (error) {
+      outer.destroy(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    tunnel.channel.open("");
+  });
+
+  outer.once("close", () => {
+    if (!capabilitySettled) settleCapability("unsupported");
+    if (!controlReadySettled) {
+      controlReadySettled = true;
+      controlReadyReject(new Error("Peer connection closed before control was ready"));
+    }
+  });
+
+  return {
+    capability,
+    controlReady,
+    udp: udp.transport,
+    async open(serviceId: string): Promise<Duplex> {
+      if (closed) throw new Error("Peer connection is closed");
+      if (!authorized) throw new Error("Peer service access is not approved");
+      const negotiated = await capability;
+      if (negotiated !== "ready") {
+        throw new Error(
+          "Peer does not support reverse byte-stream services",
+        );
+      }
+      const id = crypto.randomBytes(16);
+      const emit = createObservationEmitter({
+        observe: options.observe,
+        role,
+        outerId,
+        channelId: b4a.toString(id, "hex"),
+        serviceId,
+        now,
+      });
+      const tunnel = createTunnel(
+        mux,
+        id,
+        "subscriber",
+        emit,
+        options.observe !== undefined,
+        now,
+        transportSnapshot,
+        (status) => {
+          if (status === "") {
+            tunnel.stream.accept();
+            emit("channel.open-ok", transportFields(transportSnapshot));
+          } else {
+            emit("channel.open-error", {
+              error: status,
+              ...transportFields(transportSnapshot),
+            });
+            tunnel.stream.reject(status);
+          }
+        },
+      );
+      const activeChannel = { serviceId, stream: tunnel.stream };
+      activeServiceChannels.add(activeChannel);
+      tunnel.stream.once("close", () => activeServiceChannels.delete(activeChannel));
+      emit("channel.open");
+      tunnel.channel.open(serviceId);
+      await tunnel.stream.ready;
+      return tunnel.stream;
+    },
+    authorize,
+    close(): void {
+      if (closed) return;
+      closed = true;
+      clearTimeout(capabilityTimeout);
+      if (!controlReadySettled) {
+        controlReadySettled = true;
+        controlReadyReject(new Error("Peer control channel closed"));
+      }
+      mux.unpair({ protocol });
+      mux.unpair({ protocol: peerCapabilityProtocol });
+      mux.unpair({ protocol: controlProtocol });
+      subscriberControl?.close();
+      pairingChannel?.close();
+      for (const channel of controlChannels) channel.close();
+      for (const channel of capabilityChannels) channel.close();
+      controlChannels.clear();
+      capabilityChannels.clear();
+      udp.close();
+      for (const channel of activeServiceChannels) {
+        channel.stream.closeFrom("peer.close");
+      }
+      activeServiceChannels.clear();
+      outer.destroy();
+    },
+    closeServiceChannels: (serviceId?: string): void => {
+      for (const channel of [...activeServiceChannels]) {
+        if (serviceId === undefined || channel.serviceId === serviceId) {
+          channel.stream.closeFrom("peer.service-policy");
+        }
+      }
+    },
+    closeUdpFlows: (serviceId?: string): void => udp.closeFlows(serviceId),
+  };
+
+  function settleCapability(result: PeerCapability): void {
+    if (capabilitySettled) return;
+    capabilitySettled = true;
+    clearTimeout(capabilityTimeout);
+    capabilityResolve(result);
+  }
 }

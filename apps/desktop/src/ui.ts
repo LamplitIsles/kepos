@@ -15,6 +15,25 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
     ? `
           if (
             !smokeAcknowledgementSent &&
+            next.peer &&
+            next.peer.phase === "running" &&
+            Boolean(next.peer.peerKey) &&
+            !peerSurfaceNode.hidden
+          ) {
+            smokeAcknowledgementSent = true;
+            send({
+              type: "windows-smoke-rendered",
+              role: "peer",
+              connection: "connected",
+              serviceCount: Array.isArray(next.peer.services)
+                ? next.peer.services.length
+                : 0,
+              subscriberKeyPresent: false,
+              peerKeyPresent: Boolean(next.peer.peerKey),
+              connectFormVisible: false,
+            });
+          } else if (
+            !smokeAcknowledgementSent &&
             next.subscriber &&
             next.subscriber.connection === "unconfigured" &&
             Boolean(next.subscriber.subscriberKey) &&
@@ -455,6 +474,11 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
           <span class="relationship-name" data-role="hosted-relationship-name">This device</span>
           <span class="relationship-state" data-role="sharing">Starting</span>
         </button>
+        <button class="relationship-tab" type="button" data-relationship-tab="peer" hidden>
+          <span class="relationship-direction">Peer network</span>
+          <span class="relationship-name" data-role="peer-relationship-name">This device</span>
+          <span class="relationship-state" data-role="peer-connection">Starting</span>
+        </button>
       </nav>
       <button class="settings-tab" type="button" data-view-tab="settings" data-role="settings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.16.39.38.73.7 1 .3.28.7.42 1.1.4H21v4h-.09a1.7 1.7 0 0 0-1.51.6Z"/></svg>
@@ -507,8 +531,22 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
           <div class="section-head"><strong>Services published here</strong><span data-role="shared-service-label">0 shared</span></div>
           <div class="services" data-role="shared-services" aria-live="polite"><div class="empty">Starting local publisher…</div></div>
         </section>
+        <section class="surface" data-role="peer-surface" hidden>
+          <article class="identity-card local card card-border" data-role="peer-identity">
+            <div class="identity-top"><div><p class="identity-role">Peer network</p><h2 class="identity-name">This device</h2></div><div class="publisher-primary-actions"><button class="action compact btn btn-sm" type="button" data-action="create-peer-pairing">Invite peer</button><span class="identity-place">Local</span></div></div>
+            <div class="identity-key"><p class="key-label">Public key</p><div class="key-line"><span class="key-value" data-role="peer-key">Pending</span><button class="action compact" type="button" data-action="copy-peer-key" aria-label="Copy this device peer public key" disabled>Copy</button></div></div>
+          </article>
+          <div class="alert alert-error" data-role="peer-error" role="alert" hidden></div>
+          <div class="pairing card card-border" data-role="peer-pairing" hidden></div>
+          <div class="section-head"><strong>Peer connections</strong><span data-role="peer-connection-label">0 connected</span></div>
+          <div class="services" data-role="peer-connections" aria-live="polite"><div class="empty">Starting peer network…</div></div>
+          <div class="section-head"><strong>Configured services</strong><span data-role="peer-service-label">0 available</span></div>
+          <div class="services" data-role="peer-services" aria-live="polite"><div class="empty">No services configured</div></div>
+          <div class="section-head"><strong>Local bindings</strong><span data-role="peer-binding-label">0 available</span></div>
+          <div class="services" data-role="peer-bindings" aria-live="polite"><div class="empty">No bindings configured</div></div>
+        </section>
         <section class="surface" data-role="settings-surface" hidden>
-          <div class="settings-heading"><p class="settings-intro">Global runtime details live here. Public identities and membership stay with the publisher relationship they belong to.</p><button class="action compact" type="button" data-role="settings-back">Back to connection</button></div>
+          <div class="settings-heading"><p class="settings-intro">Global runtime details live here. Public identities, peer connections, and service policy stay with the relationship they belong to.</p><button class="action compact" type="button" data-role="settings-back">Back to connection</button></div>
           <div class="settings-grid">
             <article class="settings-panel"><p class="setting-label">Subscriber runtime</p><p class="setting-value" data-role="subscriber-runtime">Not configured</p><p class="setting-label">Local gateway</p><p class="setting-value" data-role="gateway">Not available</p></article>
             <article class="settings-panel"><p class="setting-label">Publisher runtime</p><p class="setting-value" data-role="publisher-runtime">Not configured</p><p class="setting-label">Transport</p><p class="setting-value">One shared HyperDHT node</p></article>
@@ -542,16 +580,19 @@ ${smokeAcknowledgementState}
       const sharedServicesNode = document.querySelector('[data-role="shared-services"]');
       const remoteSurfaceNode = document.querySelector('[data-role="remote-surface"]');
       const hostedSurfaceNode = document.querySelector('[data-role="hosted-surface"]');
+      const peerSurfaceNode = document.querySelector('[data-role="peer-surface"]');
       const settingsSurfaceNode = document.querySelector('[data-role="settings-surface"]');
       const countNode = document.querySelector('[data-role="service-count"]');
       const connectionNode = document.querySelector('[data-role="connection"]');
       const sharingNode = document.querySelector('[data-role="sharing"]');
+      const peerConnectionNode = document.querySelector('[data-role="peer-connection"]');
       const viewKickerNode = document.querySelector('[data-role="view-kicker"]');
       const viewTitleNode = document.querySelector('[data-role="view-title"]');
       const viewStatusNode = document.querySelector('[data-role="view-status"]');
       const viewStatusLabel = document.querySelector('[data-role="view-status-label"]');
       const remoteRelationshipName = document.querySelector('[data-role="remote-relationship-name"]');
       const hostedRelationshipName = document.querySelector('[data-role="hosted-relationship-name"]');
+      const peerRelationshipName = document.querySelector('[data-role="peer-relationship-name"]');
       const remotePublisherName = document.querySelector('[data-role="remote-publisher-name"]');
       const remotePublisherKey = document.querySelector('[data-role="remote-publisher-key"]');
       const localSubscriberKey = document.querySelector('[data-role="local-subscriber-key"]');
@@ -569,6 +610,17 @@ ${smokeAcknowledgementState}
       const gatewayNode = document.querySelector('[data-role="gateway"]');
       const createPairingButton = document.querySelector('[data-action="create-pairing"]');
       const pairingNode = document.querySelector('[data-role="pairing"]');
+      const peerCreatePairingButton = document.querySelector('[data-action="create-peer-pairing"]');
+      const peerPairingNode = document.querySelector('[data-role="peer-pairing"]');
+      const peerKeyNode = document.querySelector('[data-role="peer-key"]');
+      const peerErrorNode = document.querySelector('[data-role="peer-error"]');
+      const peerConnectionLabel = document.querySelector('[data-role="peer-connection-label"]');
+      const peerServiceLabel = document.querySelector('[data-role="peer-service-label"]');
+      const peerBindingLabel = document.querySelector('[data-role="peer-binding-label"]');
+      const peerConnectionsNode = document.querySelector('[data-role="peer-connections"]');
+      const peerServicesNode = document.querySelector('[data-role="peer-services"]');
+      const peerBindingsNode = document.querySelector('[data-role="peer-bindings"]');
+      const peerKeyCopy = document.querySelector('[data-action="copy-peer-key"]');
       const toastNode = document.querySelector('[data-role="toast"]');
 
       const escapeHtml = (value) => String(value)
@@ -661,11 +713,62 @@ ${smokeAcknowledgementState}
           '</div></div>';
       };
 
-      const availableRelationshipView = (preferred, subscriber, publisher) => {
+      const renderPeerPairing = (pairing) => {
+        if (!pairing || pairing.phase === 'idle') {
+          peerPairingNode.hidden = true;
+          peerPairingNode.innerHTML = '';
+          peerCreatePairingButton.hidden = false;
+          return;
+        }
+        peerCreatePairingButton.hidden = true;
+        peerPairingNode.hidden = false;
+        peerPairingNode.classList.toggle('pending', pairing.phase === 'pending');
+        if (pairing.phase === 'pending') {
+          peerPairingNode.innerHTML = '<div><h2 class="pairing-title">Approve this peer?</h2>' +
+            '<p class="pairing-detail">' + escapeHtml(pairing.label) + ' · ' + escapeHtml(pairing.platform) + '<br>' +
+            'Key ' + escapeHtml(pairing.keyFingerprint) +
+            (pairing.error ? '<br><span class="pairing-error">' + escapeHtml(pairing.error) + '</span>' : '') + '</p></div>' +
+            '<div class="pairing-actions"><button class="action danger btn btn-sm" type="button" data-action="deny-pairing">Deny</button>' +
+            '<button class="action btn btn-sm" type="button" data-action="approve-pairing">Allow</button></div>';
+          return;
+        }
+        const seconds = Math.max(0, Math.ceil((pairing.expiresAt - Date.now()) / 1000));
+        peerPairingNode.innerHTML = '<div class="pairing-qr">' + (pairing.qrSvg || '') + '</div><div>' +
+          '<h2 class="pairing-title">Invite a peer</h2><p class="pairing-detail">' +
+          (pairing.expired ? 'Invitation expired.' : 'Scan this invitation on the device to add. Expires in ' + seconds + ' seconds.') +
+          '</p><div class="pairing-actions"><button class="action danger btn btn-sm" type="button" data-action="cancel-pairing">Cancel</button>' +
+          (pairing.expired ? '<button class="action btn btn-sm" type="button" data-action="create-peer-pairing">Generate new</button>' : '') +
+          '</div></div>';
+      };
+
+      const peerSource = (service) => service.source && 'localPort' in service.source
+        ? '127.0.0.1:' + service.source.localPort
+        : service.source && 'unixSocket' in service.source
+          ? service.source.unixSocket
+          : service.source
+            ? 'upstream ' + fingerprint(service.source.peer) + ' · ' + service.source.service
+            : 'source unavailable';
+      const renderPeerConnection = (connection) => '<article class="service published"><div class="service-icon">' + icons.port + '</div>' +
+        '<div class="service-copy"><h2 class="service-name">' + escapeHtml(connection.label) + '</h2>' +
+        '<p class="service-address">' + escapeHtml(connection.connection + ' · ' + connection.status + ' · ' + fingerprint(connection.publicKey)) +
+        (connection.error ? '<br>' + escapeHtml(connection.error) : '') + '</p></div></article>';
+      const renderPeerService = (service) => '<article class="service published' + (service.available ? '' : ' unavailable') + '"><div class="service-icon">' + icons.port + '</div>' +
+        '<div class="service-copy"><h2 class="service-name">' + escapeHtml(service.name) + '</h2>' +
+        '<p class="service-address">' + escapeHtml(service.id + ' · ' + service.kind.toUpperCase() + ' · ' + peerSource(service)) +
+        (service.error ? '<br>' + escapeHtml(service.error) : '') + '</p></div></article>';
+      const renderPeerBinding = (binding) => '<article class="service' + (binding.available ? '' : ' unavailable') + '"><div class="service-icon">' + icons.port + '</div>' +
+        '<div class="service-copy"><h2 class="service-name">' + escapeHtml(binding.service) + '</h2>' +
+        '<p class="service-address">' + escapeHtml('from ' + fingerprint(binding.peer) + ' · ' + ('localPort' in binding.listen ? '127.0.0.1:' + binding.listen.localPort : binding.listen.unixSocket)) +
+        (binding.error ? '<br>' + escapeHtml(binding.error) : '') + '</p></div>' +
+        '<div class="actions"><button class="action btn btn-sm" type="button" data-action="open-peer-binding" data-service="' + escapeHtml(binding.service) + '"' + (binding.available ? '' : ' disabled') + '>Open</button></div></article>';
+
+      const availableRelationshipView = (preferred, subscriber, publisher, peer) => {
         if (preferred === 'remote' && subscriber) return 'remote';
         if (preferred === 'hosted' && publisher) return 'hosted';
+        if (preferred === 'peer' && peer) return 'peer';
         if (subscriber) return 'remote';
         if (publisher) return 'hosted';
+        if (peer) return 'peer';
         return null;
       };
 
@@ -679,6 +782,7 @@ ${smokeAcknowledgementState}
         settingsButton.setAttribute('aria-pressed', String(selectedView === 'settings'));
         remoteSurfaceNode.hidden = selectedView !== 'remote';
         hostedSurfaceNode.hidden = selectedView !== 'hosted';
+        peerSurfaceNode.hidden = selectedView !== 'peer';
         settingsSurfaceNode.hidden = selectedView !== 'settings';
         if (selectedView === 'settings') {
           viewKickerNode.textContent = 'This device';
@@ -701,19 +805,20 @@ ${smokeAcknowledgementState}
         }
         const subscriber = snapshot.subscriber;
         const publisher = snapshot.publisher;
+        const peer = snapshot.peer;
         const services = subscriber && Array.isArray(subscriber.services) ? subscriber.services : [];
         const availableServices = services.filter((service) => service.available);
         const subscriberKeys = publisher && Array.isArray(publisher.activeSubscriberKeys) ? publisher.activeSubscriberKeys : [];
-        const availableLastRelationship = availableRelationshipView(lastRelationshipView, subscriber, publisher);
+        const availableLastRelationship = availableRelationshipView(lastRelationshipView, subscriber, publisher, peer);
         if (availableLastRelationship) lastRelationshipView = availableLastRelationship;
         settingsBackButton.hidden = availableLastRelationship === null;
         if (selectedView !== 'settings') {
-          selectedView = availableRelationshipView(selectedView, subscriber, publisher) || 'settings';
+          selectedView = availableRelationshipView(selectedView, subscriber, publisher, peer) || 'settings';
         }
 
         for (const button of relationshipButtons) {
           const view = button.dataset.relationshipTab;
-          const configured = view === 'remote' ? Boolean(subscriber) : Boolean(publisher);
+          const configured = view === 'remote' ? Boolean(subscriber) : view === 'hosted' ? Boolean(publisher) : Boolean(peer);
           button.hidden = !configured;
         }
         applySelectedView();
@@ -782,22 +887,55 @@ ${smokeAcknowledgementState}
           publisherRuntimeNode.textContent = 'Not configured';
         }
 
+        if (peer) {
+          const connectedPeers = peer.connections.filter((connection) => connection.status === 'connected');
+          const availablePeerServices = peer.services.filter((service) => service.available);
+          const availablePeerBindings = peer.bindings.filter((binding) => binding.available);
+          const peerState = peer.phase === 'failed' ? 'failed' : connectedPeers.length ? 'connected' : peer.phase;
+          peerRelationshipName.textContent = 'This device';
+          peerConnectionNode.textContent = peer.phase === 'failed' ? 'Failed' : plural(connectedPeers.length, 'connected', 'connected');
+          peerConnectionNode.closest('[data-relationship-tab]').dataset.state = peerState;
+          peerKeyNode.textContent = fingerprint(peer.peerKey);
+          peerKeyCopy.disabled = !peer.peerKey;
+          peerCreatePairingButton.disabled = peer.phase !== 'running';
+          peerConnectionLabel.textContent = plural(connectedPeers.length, 'connected', 'connected');
+          peerServiceLabel.textContent = plural(availablePeerServices.length, 'available', 'available');
+          peerBindingLabel.textContent = plural(availablePeerBindings.length, 'available', 'available');
+          peerErrorNode.textContent = peer.error || '';
+          peerErrorNode.hidden = !peer.error;
+          peerConnectionsNode.innerHTML = peer.connections.length ? peer.connections.map(renderPeerConnection).join('') : '<div class="empty">No configured peers</div>';
+          peerServicesNode.innerHTML = peer.services.length ? peer.services.map(renderPeerService).join('') : '<div class="empty">No services configured</div>';
+          peerBindingsNode.innerHTML = peer.bindings.length ? peer.bindings.map(renderPeerBinding).join('') : '<div class="empty">No local bindings configured</div>';
+          renderPeerPairing(peer.pairing);
+        } else {
+          peerErrorNode.hidden = true;
+          peerConnectionsNode.innerHTML = '';
+          peerServicesNode.innerHTML = '';
+          peerBindingsNode.innerHTML = '';
+          peerPairingNode.hidden = true;
+        }
+
         const showingRemote = selectedView === 'remote' && subscriber;
         const showingHosted = selectedView === 'hosted' && publisher;
+        const showingPeer = selectedView === 'peer' && peer;
         const activeState = showingRemote
           ? (subscriber.phase === 'failed' ? 'failed' : subscriber.connection)
-          : showingHosted ? (publisher.phase === 'running' ? 'running' : publisher.phase) : snapshot.appPhase;
+          : showingHosted ? (publisher.phase === 'running' ? 'running' : publisher.phase)
+            : showingPeer ? (peer.phase === 'failed' ? 'failed' : peer.connections.some((connection) => connection.status === 'connected') ? 'connected' : peer.phase)
+            : snapshot.appPhase;
         const activeLabel = showingRemote
           ? (subscriber.phase === 'failed' ? 'Subscriber failed' : subscriberStatusLabel(subscriber))
-          : showingHosted ? (publisher.phase === 'running' ? 'Publishing' : publisher.phase) : snapshot.appPhase;
+          : showingHosted ? (publisher.phase === 'running' ? 'Publishing' : publisher.phase)
+            : showingPeer ? (peer.phase === 'failed' ? 'Peer failed' : 'Peer network')
+            : snapshot.appPhase;
         viewStatusNode.dataset.state = activeState;
         viewStatusLabel.textContent = activeLabel;
         if (selectedView !== 'settings') {
-          viewKickerNode.textContent = showingRemote ? 'Remote relationship' : 'Hosted relationship';
+          viewKickerNode.textContent = showingRemote ? 'Remote relationship' : showingHosted ? 'Hosted relationship' : 'Peer runtime';
           viewTitleNode.textContent = showingRemote
             ? (subscriber.remotePublisher ? subscriber.remotePublisher.displayName : 'Waiting for publisher')
-            : (publisher.displayName || 'Local publisher');
-          const visibleCount = showingRemote ? availableServices.length : publisher.services.length;
+            : showingHosted ? (publisher.displayName || 'Local publisher') : 'This device';
+          const visibleCount = showingRemote ? availableServices.length : showingHosted ? publisher.services.length : peer.services.length;
           countNode.textContent = plural(visibleCount, 'SERVICE', 'SERVICES');
         }
       };
@@ -829,7 +967,7 @@ ${smokeAcknowledgementState}
       settingsButton.addEventListener('click', () => selectView('settings'));
       settingsBackButton.addEventListener('click', () => {
         const relationship = snapshot
-          ? availableRelationshipView(lastRelationshipView, snapshot.subscriber, snapshot.publisher)
+          ? availableRelationshipView(lastRelationshipView, snapshot.subscriber, snapshot.publisher, snapshot.peer)
           : lastRelationshipView;
         if (relationship) selectView(relationship);
       });
@@ -904,6 +1042,11 @@ ${smokeAcknowledgementAfterRender}
             if (key) await copy(key, 'Publisher key');
             return;
           }
+          if (button.dataset.action === 'copy-peer-key') {
+            const key = snapshot && snapshot.peer && snapshot.peer.peerKey;
+            if (key) await copy(key, 'Peer key');
+            return;
+          }
           if (button.dataset.action === 'copy-connected-subscriber') {
             const index = Number(button.dataset.subscriberIndex);
             const key = snapshot && snapshot.publisher && snapshot.publisher.activeSubscriberKeys[index];
@@ -911,9 +1054,17 @@ ${smokeAcknowledgementAfterRender}
             return;
           }
           if (button.dataset.action === 'create-pairing') { send({ type: "createPairingInvitation" }); return; }
+          if (button.dataset.action === 'create-peer-pairing') { send({ type: "createPairingInvitation" }); return; }
           if (button.dataset.action === 'cancel-pairing') { send({ type: "cancelPairing" }); return; }
           if (button.dataset.action === 'approve-pairing') { send({ type: "approvePairing" }); return; }
           if (button.dataset.action === 'deny-pairing') { send({ type: "denyPairing" }); return; }
+          if (button.dataset.action === 'open-peer-binding') {
+            const peer = snapshot && snapshot.peer;
+            const serviceId = button.dataset.service;
+            const binding = peer && peer.bindings.find((item) => item.service === serviceId && item.available);
+            if (peer && binding && peer.gatewayPort && serviceId) send({ type: "openService", serviceId });
+            return;
+          }
           const service = snapshot && snapshot.subscriber && snapshot.subscriber.services.find((item) => item.id === button.dataset.service);
           if (!service || !service.available) return;
           if (button.dataset.action === 'copy' && service.copyText) { await copy(service.copyText, 'Service address'); return; }

@@ -75,13 +75,22 @@ test("publisher identity and TOML round-trip labeled devices and reject bare key
   );
 
   const toml = serializeKeposConfig({
-    publisher: { ...policy() },
+    peers: devices.map(({ label, publicKey }) => ({
+      label,
+      publicKey,
+      connection: "accept" as const,
+    })),
+    services: [],
+    bindings: [],
   });
   assert.match(toml, /public_key = "2{64}"/);
-  assert.deepEqual(parseKeposConfig(toml).publisher?.subscribers, devices);
+  assert.deepEqual(
+    parseKeposConfig(toml).peers.map(({ label, publicKey }) => ({ label, publicKey })),
+    devices,
+  );
   assert.throws(
     () => parseKeposConfig(`[publisher]\ndisplay_name = "publisher"\nallow = []\nservices = []`),
-    /unknown field: publisher\.allow/i,
+    /unknown|must be an array|peer config/i,
   );
 });
 

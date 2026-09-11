@@ -3,6 +3,8 @@ import {
   type DesktopDiagnosticErrorCategory,
 } from "./diagnostics-contract.js";
 import type { PublisherServiceSource } from "../../../src/config.js";
+import type { PeerBinding, PeerServiceSource } from "../../../src/config.js";
+import type { PublisherPairingSnapshot } from "../../../src/pairing/publisher.js";
 
 export type DesktopConnection =
   | "unconfigured"
@@ -92,11 +94,49 @@ export interface DesktopPublisherRole {
   error?: string;
 }
 
+export interface DesktopPeerRole {
+  phase: RolePhase;
+  peerKey?: string;
+  gatewayPort?: number;
+  connections: Array<{
+    label: string;
+    publicKey: string;
+    connection: "dial" | "accept";
+    status: string;
+    generation: number;
+    capability: string;
+    services: number;
+    error?: string;
+  }>;
+  services: Array<{
+    id: string;
+    name: string;
+    kind: "tcp" | "http" | "udp";
+    source: PeerServiceSource;
+    available: boolean;
+    error?: string;
+  }>;
+  bindings: Array<{
+    peer: string;
+    service: string;
+    listen: PeerBinding["listen"];
+    port?: number;
+    available: boolean;
+    error?: string;
+  }>;
+  pairing?: PublisherPairingSnapshot & {
+    uri?: string;
+    qrSvg?: string;
+  };
+  error?: string;
+}
+
 export interface DesktopSnapshot {
   type: "snapshot";
   appPhase: "starting" | "running" | "stopping" | "stopped";
   subscriber?: DesktopSubscriberRole;
   publisher?: DesktopPublisherRole;
+  peer?: DesktopPeerRole;
 }
 
 export type DesktopCommand =

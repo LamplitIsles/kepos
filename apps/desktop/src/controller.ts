@@ -98,6 +98,24 @@ export function createDesktopController(
       return;
     }
 
+    const peer = current.peer;
+    if (peer) {
+      const peerBindings = peer.bindings.filter(
+        ({ service, available }) => service === command.serviceId && available,
+      );
+      if (peerBindings.length > 1) {
+        throw new Error(
+          `${command.serviceId} is ambiguous; configure one explicit binding`,
+        );
+      }
+      if (peerBindings.length === 1 && peer.gatewayPort !== undefined) {
+        await options.openService(
+          `http://${command.serviceId}.localhost:${peer.gatewayPort}/`,
+        );
+        return;
+      }
+    }
+
     const service = current.subscriber?.services.find(
       ({ id }) => id === command.serviceId,
     );

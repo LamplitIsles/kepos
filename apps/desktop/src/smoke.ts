@@ -17,9 +17,11 @@ const connections: readonly DesktopConnection[] = [
 
 export interface DesktopSmokeRenderAcknowledgement {
   type: typeof smokeRenderMessageType;
+  role?: "peer";
   connection: DesktopConnection;
   serviceCount: number;
   subscriberKeyPresent: boolean;
+  peerKeyPresent?: boolean;
   connectFormVisible: boolean;
 }
 
@@ -29,21 +31,23 @@ export function isHealthySmokeSnapshot(
   if (!snapshot || snapshot.appPhase !== "running") return false;
   if (snapshot.publisher && snapshot.publisher.phase !== "running") return false;
   if (snapshot.subscriber && snapshot.subscriber.phase !== "running") return false;
-  return Boolean(snapshot.publisher || snapshot.subscriber);
+  if (snapshot.peer && snapshot.peer.phase !== "running") return false;
+  return Boolean(snapshot.publisher || snapshot.subscriber || snapshot.peer);
 }
 
 export function isHealthyUnconfiguredSmokeSnapshot(
   snapshot: DesktopSnapshot | undefined,
-): snapshot is DesktopSnapshot & {
-  subscriber: NonNullable<DesktopSnapshot["subscriber"]>;
-} {
-  return (
-    isHealthySmokeSnapshot(snapshot) &&
-    snapshot.subscriber !== undefined &&
-    snapshot.subscriber.phase === "running" &&
-    snapshot.subscriber.connection === "unconfigured" &&
-    typeof snapshot.subscriber.subscriberKey === "string" &&
-    snapshot.subscriber.subscriberKey.length > 0
+): snapshot is DesktopSnapshot {
+  if (!isHealthySmokeSnapshot(snapshot)) return false;
+  if (snapshot.peer) {
+    return typeof snapshot.peer.peerKey === "string" && snapshot.peer.peerKey.length > 0;
+  }
+  return Boolean(
+    snapshot.subscriber &&
+      snapshot.subscriber.phase === "running" &&
+      snapshot.subscriber.connection === "unconfigured" &&
+      typeof snapshot.subscriber.subscriberKey === "string" &&
+      snapshot.subscriber.subscriberKey.length > 0,
   );
 }
 
@@ -66,11 +70,16 @@ export function parseDesktopSmokeRenderAcknowledgement(
 
   rejectUnknownFields(value, [
     "type",
+    "role",
     "connection",
     "serviceCount",
     "subscriberKeyPresent",
+    "peerKeyPresent",
     "connectFormVisible",
   ]);
+  if (value.role !== undefined && value.role !== "peer") {
+    throw new Error("desktop smoke acknowledgement role is invalid");
+  }
   if (
     typeof value.connection !== "string" ||
     !connections.includes(value.connection as DesktopConnection)
@@ -89,6 +98,12 @@ export function parseDesktopSmokeRenderAcknowledgement(
       "desktop smoke acknowledgement subscriber key presence is invalid",
     );
   }
+  if (value.role === "peer" && typeof value.peerKeyPresent !== "boolean") {
+    throw new Error("desktop smoke acknowledgement peer key presence is invalid");
+  }
+  if (value.role !== "peer" && value.peerKeyPresent !== undefined) {
+    throw new Error("desktop smoke acknowledgement peer key field is unexpected");
+  }
   if (typeof value.connectFormVisible !== "boolean") {
     throw new Error(
       "desktop smoke acknowledgement connect form visibility is invalid",
@@ -97,9 +112,13 @@ export function parseDesktopSmokeRenderAcknowledgement(
 
   return {
     type: smokeRenderMessageType,
+    ...(value.role === "peer" ? { role: "peer" as const } : {}),
     connection: value.connection as DesktopConnection,
     serviceCount: value.serviceCount,
     subscriberKeyPresent: value.subscriberKeyPresent,
+    ...(value.role === "peer"
+      ? { peerKeyPresent: value.peerKeyPresent as boolean }
+      : {}),
     connectFormVisible: value.connectFormVisible,
   };
 }
