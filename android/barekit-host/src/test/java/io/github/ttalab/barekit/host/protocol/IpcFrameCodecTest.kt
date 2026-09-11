@@ -2,6 +2,8 @@ package io.github.ttalab.barekit.host.protocol
 
 import java.nio.ByteBuffer
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -86,13 +88,21 @@ class IpcFrameCodecTest {
   }
 
   @Test
-  fun rejectsObsoleteRoleConfigurationRequests() {
-    val publisherKey = "ab".repeat(32)
-    val frame = rawFrame(
-      """{"version":1,"kind":"request","id":4,"method":"configure","params":{"publisherKey":"$publisherKey"}}"""
-        .encodeToByteArray(),
+  fun roundTripsCanonicalPeerConfiguration() {
+    val request = RequestEnvelope(
+      1,
+      "request",
+      4,
+      "configure",
+      buildJsonObject {
+        put("publicKey", "ab".repeat(32))
+        put("label", "nuc")
+        put("connection", "dial")
+      },
     )
-    assertThrows(IllegalArgumentException::class.java) { IpcFrameCodec().push(frame) }
+    val frame = IpcFrameCodec().encode(request)
+
+    assertEquals(listOf(request), IpcFrameCodec().push(frame))
   }
 
   @Test
