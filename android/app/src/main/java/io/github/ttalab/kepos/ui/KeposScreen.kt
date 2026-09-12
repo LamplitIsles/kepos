@@ -1,35 +1,78 @@
 package io.github.ttalab.kepos.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.AudioLines
+import com.composables.icons.lucide.BookOpen
+import com.composables.icons.lucide.Box as BoxIcon
+import com.composables.icons.lucide.Copy
+import com.composables.icons.lucide.ExternalLink
+import com.composables.icons.lucide.GitBranch
+import com.composables.icons.lucide.Gauge
+import com.composables.icons.lucide.Hammer
+import com.composables.icons.lucide.Images
+import com.composables.icons.lucide.DatabaseBackup
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Network
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.SquareTerminal
+import com.composables.icons.lucide.Unplug
 import io.github.ttalab.barekit.host.RuntimeSnapshot
 import io.github.ttalab.barekit.host.RuntimeState
 
@@ -38,202 +81,473 @@ fun KeposScreen(
   snapshot: RuntimeSnapshot,
   onStart: () -> Unit,
   onStop: () -> Unit,
+  onConfigure: (String) -> Unit = {},
   onCopyText: (String) -> Unit,
   onOpenUrl: (String) -> Unit,
-  onConfigure: (String) -> Unit = {},
   onScanPairing: () -> Unit = {},
 ) {
   val model = KeposUiModel.from(snapshot)
+  var showSettings by rememberSaveable { mutableStateOf(false) }
+  var changingPeer by rememberSaveable { mutableStateOf(false) }
+  var confirmChange by rememberSaveable { mutableStateOf(false) }
+
+  BackHandler(enabled = changingPeer) {
+    changingPeer = false
+    showSettings = true
+  }
+  BackHandler(enabled = showSettings) {
+    showSettings = false
+  }
+
   KeposTheme {
-    Surface(modifier = Modifier.fillMaxSize(), color = KeposPalette.Ink) {
-      when (model.destination) {
-        KeposDestination.SETUP -> SetupScreen(
+    Surface(
+      modifier = Modifier.fillMaxSize(),
+      color = KeposPalette.Ink,
+    ) {
+      when {
+        changingPeer -> SetupScreen(
+          title = "Change device",
+          subtitle = "Enter the public key for the peer this phone should trust.",
+          onBack = {
+            changingPeer = false
+            showSettings = true
+          },
+          onConfigure = { key ->
+            changingPeer = false
+            onConfigure(key)
+          },
+        )
+        showSettings -> SettingsScreen(
           snapshot = snapshot,
+          onBack = { showSettings = false },
+          onChangePeer = { confirmChange = true },
+          onCopyText = onCopyText,
+          onStop = onStop,
+        )
+        model.destination == KeposDestination.SETUP -> SetupScreen(
+          title = "Bring your services here.",
+          subtitle = snapshot.error
+            ?: "Connect this phone to one trusted Kepos peer.",
+          peerKey = snapshot.peerKey,
+          onCopyText = onCopyText,
           onConfigure = onConfigure,
           onScanPairing = onScanPairing,
-          onCopyText = onCopyText,
         )
-        KeposDestination.STOPPED -> StateScreen(
+        model.destination == KeposDestination.SERVICES -> ServiceHome(
+          model = model,
+          onCopyText = onCopyText,
+          onOpenUrl = onOpenUrl,
+          onSettings = { showSettings = true },
+        )
+        model.destination == KeposDestination.FAILED -> ConnectionScreen(
+          title = "Kepos stopped",
+          progress = false,
+          detail = model.error ?: "The peer could not keep running.",
+          action = "Retry",
+          onAction = onStart,
+          secondaryAction = "Diagnostics",
+          onSecondaryAction = { showSettings = true },
+        )
+        model.destination == KeposDestination.STOPPED -> ConnectionScreen(
           title = "Kepos is off",
-          detail = "Start the peer network to use configured services.",
+          progress = false,
+          detail = "Start the peer to reach your private services.",
           action = "Start",
           onAction = onStart,
         )
-        KeposDestination.FAILED -> StateScreen(
-          title = "Kepos stopped",
-          detail = snapshot.error ?: "The peer network could not keep running.",
-          action = "Retry",
-          onAction = onStart,
-        )
-        KeposDestination.CONNECTING -> StateScreen(
-          title = "Starting peer network",
-          detail = "Loading the canonical peer configuration.",
-          action = null,
-          onAction = {},
-          progress = true,
-        )
-        KeposDestination.SERVICES -> PeerHome(
-          snapshot = snapshot,
-          onStop = onStop,
-          onCopyText = onCopyText,
-          onOpenUrl = onOpenUrl,
+        else -> ConnectionScreen(
+          title = connectionTitle(model.connection),
+          detail = connectionDetail(model.connection),
+          action = if (model.connection == "awaiting-approval") {
+            "Scan another code"
+          } else {
+            null
+          },
+          onAction = onScanPairing,
+          secondaryAction = "Settings",
+          onSecondaryAction = { showSettings = true },
         )
       }
+    }
+
+    if (confirmChange) {
+      AlertDialog(
+        onDismissRequest = { confirmChange = false },
+        title = { Text("Change device?") },
+        text = {
+          Text("Connecting a different device replaces the current connection and clears its local port mappings.")
+        },
+        confirmButton = {
+          TextButton(onClick = {
+            confirmChange = false
+            showSettings = false
+            changingPeer = true
+          }) { Text("Continue") }
+        },
+        dismissButton = {
+          TextButton(onClick = { confirmChange = false }) { Text("Cancel") }
+        },
+      )
     }
   }
 }
 
 @Composable
-private fun StateScreen(
-  title: String,
-  detail: String,
-  action: String?,
-  onAction: () -> Unit,
-  progress: Boolean = false,
-) {
-  Column(
-    modifier = Modifier.fillMaxSize().padding(28.dp),
-    verticalArrangement = Arrangement.Center,
-  ) {
-    Text("KEPOS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(18.dp))
-    Text(title, style = MaterialTheme.typography.headlineMedium)
-    Spacer(Modifier.height(8.dp))
-    Text(detail, style = MaterialTheme.typography.bodyLarge)
-    Spacer(Modifier.height(22.dp))
-    if (progress) CircularProgressIndicator()
-    if (action != null) Button(onClick = onAction) { Text(action) }
-  }
-}
-
-@Composable
-private fun PeerHome(
-  snapshot: RuntimeSnapshot,
-  onStop: () -> Unit,
+private fun ServiceHome(
+  model: KeposUiModel,
   onCopyText: (String) -> Unit,
   onOpenUrl: (String) -> Unit,
+  onSettings: () -> Unit,
 ) {
-  val model = KeposUiModel.from(snapshot)
   LazyColumn(
-    modifier = Modifier.fillMaxSize(),
-    contentPadding = PaddingValues(20.dp),
-    verticalArrangement = Arrangement.spacedBy(16.dp),
+    modifier = Modifier
+      .fillMaxSize()
+      .statusBarsPadding()
+      .navigationBarsPadding(),
+    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+      start = 20.dp,
+      end = 20.dp,
+      top = 14.dp,
+      bottom = 24.dp,
+    ),
   ) {
     item {
-      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Column {
-          Text("Peer services", style = MaterialTheme.typography.headlineMedium)
-          model.peerLabel?.let {
-            Text("Peer: $it", style = MaterialTheme.typography.bodyMedium)
-          }
-          Text(snapshot.connectionsSummary(), style = MaterialTheme.typography.bodyMedium)
-        }
-        OutlinedButton(onClick = onStop) { Text("Stop") }
-      }
+      BrandBar(onSettings)
+      Spacer(Modifier.height(30.dp))
+      ServiceHeader(
+        connection = model.connection,
+        serviceCount = model.services.size,
+        peerLabel = model.peerLabel,
+      )
+      Spacer(Modifier.height(14.dp))
     }
-    item {
-      Column {
-        Text("Peer identity", style = MaterialTheme.typography.titleMedium)
-        Text(
-          model.peerKey ?: "Identity unavailable",
-          fontFamily = FontFamily.Monospace,
-          maxLines = 2,
-          overflow = TextOverflow.Ellipsis,
-        )
-        if (model.peerKey != null) {
-          OutlinedButton(onClick = { onCopyText(model.peerKey) }) { Text("Copy key") }
-        }
-      }
+    if (model.services.isEmpty()) item {
+      Text("No shared services yet.", modifier = Modifier.padding(vertical = 24.dp), color = KeposPalette.Muted)
     }
-    if (model.error != null) item { Text(model.error, color = MaterialTheme.colorScheme.error) }
-    item { Text("Configured services", style = MaterialTheme.typography.titleMedium) }
-    if (model.services.isEmpty()) {
-      item { Text("No services configured.", style = MaterialTheme.typography.bodyMedium) }
-    } else {
-      items(model.services) { service ->
-        Column(modifier = Modifier.fillMaxWidth()) {
-          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(service.name, fontWeight = FontWeight.SemiBold)
-            Text(if (service.available) "Available" else "Unavailable")
-          }
-          Text("${service.id} · ${service.kind}", style = MaterialTheme.typography.bodySmall)
-          service.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-          val canAct = service.available && (
-            service.action == ServiceAction.OPEN && service.url != null ||
-              service.action != ServiceAction.OPEN && service.copyText != null
-            )
+    items(model.services, key = { service -> service.id }) { service ->
+      val available = model.connection == "connected" && service.available &&
+        (if (service.action == ServiceAction.OPEN) service.url != null else service.copyText != null)
+      ServiceListItem(
+        service = service,
+        available = available,
+        modifier = Modifier.alpha(if (available) 1f else 0.42f),
+        onAction = {
           when (service.action) {
-            ServiceAction.OPEN -> OutlinedButton(
-              onClick = { service.url?.let(onOpenUrl) },
-              enabled = canAct,
-            ) { Text("Open") }
-            ServiceAction.COPY_URL -> OutlinedButton(
-              onClick = { service.copyText?.let(onCopyText) },
-              enabled = canAct,
-            ) { Text("Copy URL") }
-            ServiceAction.COPY_COMMAND -> OutlinedButton(
-              onClick = { service.copyText?.let(onCopyText) },
-              enabled = canAct,
-            ) { Text("Copy command") }
-            ServiceAction.COPY_ENDPOINT -> OutlinedButton(
-              onClick = { service.copyText?.let(onCopyText) },
-              enabled = canAct,
-            ) { Text("Copy endpoint") }
+            ServiceAction.OPEN -> service.url?.let(onOpenUrl)
+            ServiceAction.COPY_URL,
+            ServiceAction.COPY_COMMAND,
+            ServiceAction.COPY_ENDPOINT,
+            -> service.copyText?.let(onCopyText)
           }
-        }
+        },
+      )
+    }
+  }
+}
+
+@Composable
+private fun BrandBar(onSettings: () -> Unit) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    PortalMark()
+    Spacer(Modifier.width(12.dp))
+    Text(
+      text = "KEPOS",
+      color = KeposPalette.Cream,
+      fontFamily = KeposMono,
+      fontWeight = FontWeight.SemiBold,
+      fontSize = 15.sp,
+      letterSpacing = 3.2.sp,
+    )
+    Spacer(Modifier.weight(1f))
+    IconButton(onClick = onSettings) {
+      Icon(
+        imageVector = Lucide.Settings,
+        contentDescription = "Settings",
+        tint = KeposPalette.Muted,
+      )
+    }
+  }
+}
+
+@Composable
+private fun PortalMark() {
+  Canvas(Modifier.size(width = 34.dp, height = 24.dp)) {
+    val stroke = 2.dp.toPx()
+    val scaleX = size.width / 40f
+    val scaleY = size.height / 28f
+    val portal = Path().apply {
+      moveTo(15f * scaleX, 3f * scaleY)
+      lineTo(4f * scaleX, 3f * scaleY)
+      lineTo(4f * scaleX, 25f * scaleY)
+      lineTo(15f * scaleX, 25f * scaleY)
+
+      moveTo(25f * scaleX, 3f * scaleY)
+      lineTo(36f * scaleX, 3f * scaleY)
+      lineTo(36f * scaleX, 25f * scaleY)
+      lineTo(25f * scaleX, 25f * scaleY)
+
+      moveTo(10f * scaleX, 14f * scaleY)
+      lineTo(30f * scaleX, 14f * scaleY)
+    }
+    drawPath(
+      path = portal,
+      color = KeposPalette.Lime,
+      style = Stroke(width = stroke, cap = StrokeCap.Square),
+    )
+  }
+}
+
+@Composable
+private fun ServiceHeader(connection: String?, serviceCount: Int, peerLabel: String?) {
+  Column {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.Bottom,
+    ) {
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = peerLabel?.uppercase() ?: "YOUR DEVICE",
+          color = KeposPalette.Lime,
+          style = MaterialTheme.typography.labelMedium,
+        )
+        Text(
+          text = "Remote services",
+          modifier = Modifier.padding(top = 4.dp),
+          style = MaterialTheme.typography.headlineLarge.copy(
+            fontSize = 34.sp,
+            lineHeight = 38.sp,
+          ),
+        )
+      }
+      ConnectionStatus(connection)
+    }
+    Text(
+      text = if (serviceCount == 1) "1 SERVICE" else "$serviceCount SERVICES",
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 12.dp, bottom = 10.dp),
+      color = KeposPalette.Muted,
+      style = MaterialTheme.typography.labelMedium,
+    )
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(1.dp)
+        .background(KeposPalette.Line),
+    )
+  }
+}
+
+@Composable
+private fun ConnectionStatus(connection: String?) {
+  Row(
+    modifier = Modifier.padding(bottom = 7.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Canvas(Modifier.size(7.dp)) {
+      drawCircle(
+        if (connection == "connected") KeposPalette.Lime else KeposPalette.Muted,
+      )
+    }
+    Spacer(Modifier.width(8.dp))
+    Text(
+      text = statusLabel(connection).uppercase(),
+      color = if (connection == "connected") KeposPalette.Lime else KeposPalette.Muted,
+      style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp),
+    )
+  }
+}
+
+@Composable
+private fun ServiceListItem(
+  service: ServiceUiModel,
+  available: Boolean,
+  modifier: Modifier = Modifier,
+  onAction: () -> Unit,
+) {
+  Row(
+    modifier = modifier
+      .fillMaxWidth()
+      .heightIn(min = 66.dp)
+      .drawBehind {
+        drawLine(
+          color = KeposPalette.Line,
+          start = Offset(0f, size.height),
+          end = Offset(size.width, size.height),
+          strokeWidth = 1.dp.toPx(),
+        )
+      },
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Box(
+      modifier = Modifier
+        .size(34.dp)
+        .border(1.dp, KeposPalette.Line, RoundedCornerShape(2.dp)),
+      contentAlignment = Alignment.Center,
+    ) {
+      Icon(
+        imageVector = serviceIcon(service.icon),
+        contentDescription = null,
+        tint = KeposPalette.LimeSoft,
+        modifier = Modifier.size(18.dp),
+      )
+    }
+    Spacer(Modifier.width(13.dp))
+    Column(modifier = Modifier.weight(1f).padding(vertical = 12.dp, horizontal = 2.dp)) {
+      Text(
+        text = service.name,
+        style = MaterialTheme.typography.titleLarge.copy(fontSize = 15.sp, lineHeight = 20.sp),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      service.error?.let { error ->
+        Text(error, color = KeposPalette.Muted, style = MaterialTheme.typography.bodySmall)
       }
     }
-    item {
-      Text("Local bindings: ${model.bindings}", style = MaterialTheme.typography.bodyMedium)
-    }
+    ServiceActionButton(service, available, onAction)
+  }
+}
+
+@Composable
+private fun ServiceActionButton(
+  service: ServiceUiModel,
+  available: Boolean,
+  onAction: () -> Unit,
+) {
+  val label = when (service.action) {
+    ServiceAction.OPEN -> "Open"
+    ServiceAction.COPY_URL -> "Copy URL"
+    ServiceAction.COPY_COMMAND -> "Copy command"
+    ServiceAction.COPY_ENDPOINT -> "Copy endpoint"
+  }
+  val icon = when (service.action) {
+    ServiceAction.OPEN -> Lucide.ExternalLink
+    ServiceAction.COPY_URL,
+    ServiceAction.COPY_COMMAND,
+    ServiceAction.COPY_ENDPOINT,
+    -> Lucide.Copy
+  }
+  OutlinedButton(
+    onClick = onAction,
+    enabled = available,
+    shape = RoundedCornerShape(4.dp),
+    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+      horizontal = 11.dp,
+      vertical = 7.dp,
+    ),
+  ) {
+    Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp))
+    Spacer(Modifier.width(7.dp))
+    Text(label, maxLines = 1)
   }
 }
 
 @Composable
 private fun SetupScreen(
-  snapshot: RuntimeSnapshot,
+  title: String,
+  subtitle: String,
   onConfigure: (String) -> Unit,
-  onScanPairing: () -> Unit,
-  onCopyText: (String) -> Unit,
+  onBack: (() -> Unit)? = null,
+  peerKey: String? = null,
+  onCopyText: (String) -> Unit = {},
+  onScanPairing: (() -> Unit)? = null,
 ) {
-  var peerKey by rememberSaveable { mutableStateOf("") }
+  var enteredKey by rememberSaveable { mutableStateOf("") }
   Column(
-    modifier = Modifier.fillMaxSize().padding(28.dp),
-    verticalArrangement = Arrangement.Center,
+    modifier = Modifier
+      .fillMaxSize()
+      .statusBarsPadding()
+      .navigationBarsPadding()
+      .imePadding()
+      .verticalScroll(rememberScrollState())
+      .padding(horizontal = 28.dp, vertical = 20.dp),
   ) {
-    Text("KEPOS", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(18.dp))
-    Text("Connect this device", style = MaterialTheme.typography.headlineMedium)
-    Spacer(Modifier.height(8.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      if (onBack != null) {
+        IconButton(onClick = onBack) {
+          Icon(Lucide.ArrowLeft, contentDescription = "Back")
+        }
+      } else {
+        PortalMark()
+      }
+      Spacer(Modifier.width(12.dp))
+      Text(
+        "KEPOS",
+        fontFamily = KeposMono,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 3.2.sp,
+      )
+    }
+    Spacer(Modifier.height(48.dp))
+    Text(title, style = MaterialTheme.typography.displayLarge)
     Text(
-      snapshot.error ?: "Choose a trusted peer by scanning its invitation or entering its public key.",
+      subtitle,
+      modifier = Modifier.padding(top = 18.dp),
+      color = KeposPalette.Muted,
       style = MaterialTheme.typography.bodyLarge,
     )
-    snapshot.peerKey?.let { key ->
-      Spacer(Modifier.height(18.dp))
-      Text("Your peer key", style = MaterialTheme.typography.labelMedium)
+    peerKey?.let { key ->
+      Spacer(Modifier.height(36.dp))
       Text(
-        key,
-        fontFamily = FontFamily.Monospace,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
+        "THIS PHONE'S KEY",
+        color = KeposPalette.Lime,
+        style = MaterialTheme.typography.labelMedium,
       )
-      OutlinedButton(onClick = { onCopyText(key) }) { Text("Copy key") }
+      Text(
+        fingerprint(key),
+        modifier = Modifier.padding(top = 8.dp),
+        color = KeposPalette.Cream,
+        fontFamily = KeposMono,
+        fontSize = 15.sp,
+      )
+      OutlinedButton(
+        onClick = { onCopyText(key) },
+        modifier = Modifier.padding(top = 8.dp),
+        shape = RoundedCornerShape(4.dp),
+      ) {
+        Icon(Lucide.Copy, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Copy my key")
+      }
     }
-    Spacer(Modifier.height(18.dp))
-    Button(onClick = onScanPairing, modifier = Modifier.fillMaxWidth()) {
-      Text("Scan invitation")
+    Spacer(Modifier.height(36.dp))
+    if (onScanPairing != null) {
+      Button(
+        onClick = onScanPairing,
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(54.dp),
+        shape = RoundedCornerShape(4.dp),
+        colors = ButtonDefaults.buttonColors(
+          containerColor = KeposPalette.Lime,
+          contentColor = KeposPalette.Ink,
+        ),
+      ) {
+        Text("Scan invitation")
+      }
+      Spacer(Modifier.height(28.dp))
     }
-    Spacer(Modifier.height(12.dp))
+    Text(
+      "OR ENTER PEER PUBLIC KEY",
+      color = KeposPalette.Lime,
+      style = MaterialTheme.typography.labelMedium,
+    )
     OutlinedTextField(
-      value = peerKey,
+      value = enteredKey,
       onValueChange = { value ->
-        peerKey = value.lowercase()
+        enteredKey = value
+          .lowercase()
           .filter { character -> character in '0'..'9' || character in 'a'..'f' }
-          .take(64)
+          .take(PEER_KEY_LENGTH)
       },
-      modifier = Modifier.fillMaxWidth(),
-      label = { Text("Peer public key") },
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 12.dp),
+      placeholder = { Text("64-character key") },
+      textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = KeposMono),
       keyboardOptions = KeyboardOptions(
         autoCorrectEnabled = false,
         keyboardType = KeyboardType.Ascii,
@@ -241,14 +555,241 @@ private fun SetupScreen(
       singleLine = true,
     )
     Button(
-      onClick = { onConfigure(peerKey) },
-      enabled = peerKey.length == 64,
-      modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-    ) { Text("Connect with key") }
+      onClick = { onConfigure(enteredKey) },
+      enabled = PEER_KEY.matches(enteredKey),
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 18.dp)
+        .height(54.dp),
+      shape = RoundedCornerShape(4.dp),
+      colors = ButtonDefaults.buttonColors(
+        containerColor = KeposPalette.PanelHigh,
+        contentColor = KeposPalette.Cream,
+      ),
+    ) {
+      Text("Connect")
+    }
+    Spacer(Modifier.height(32.dp))
+    Text(
+      "Private services. No account required.",
+      color = KeposPalette.Muted,
+      style = MaterialTheme.typography.labelMedium,
+    )
   }
 }
 
-private fun RuntimeSnapshot.connectionsSummary(): String {
-  val connected = connections.count { it.status == "connected" }
-  return "$connected connected · ${connections.size} configured"
+@Composable
+private fun ConnectionScreen(
+  title: String,
+  detail: String,
+  action: String?,
+  onAction: () -> Unit,
+  progress: Boolean = true,
+  secondaryAction: String? = null,
+  onSecondaryAction: () -> Unit = {},
+) {
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .statusBarsPadding()
+      .navigationBarsPadding()
+      .padding(28.dp),
+    verticalArrangement = Arrangement.Center,
+  ) {
+    PortalMark()
+    Spacer(Modifier.height(42.dp))
+    if (progress) CircularProgressIndicator(
+      modifier = Modifier.size(26.dp),
+      color = KeposPalette.Lime,
+      strokeWidth = 2.dp,
+    )
+    Spacer(Modifier.height(30.dp))
+    Text(title, style = MaterialTheme.typography.headlineLarge)
+    Text(
+      detail,
+      modifier = Modifier.padding(top = 14.dp),
+      color = KeposPalette.Muted,
+      style = MaterialTheme.typography.bodyLarge,
+    )
+    if (action != null) {
+      Button(
+        onClick = onAction,
+        modifier = Modifier.padding(top = 28.dp),
+        shape = RoundedCornerShape(4.dp),
+      ) {
+        Icon(Lucide.RefreshCw, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(action)
+      }
+    }
+    if (secondaryAction != null) {
+      OutlinedButton(
+        onClick = onSecondaryAction,
+        modifier = Modifier.padding(top = 12.dp),
+        shape = RoundedCornerShape(4.dp),
+      ) {
+        Icon(Lucide.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(secondaryAction)
+      }
+    }
+  }
 }
+
+@Composable
+private fun SettingsScreen(
+  snapshot: RuntimeSnapshot,
+  onBack: () -> Unit,
+  onChangePeer: () -> Unit,
+  onCopyText: (String) -> Unit,
+  onStop: () -> Unit,
+) {
+  LazyColumn(
+    modifier = Modifier
+      .fillMaxSize()
+      .statusBarsPadding()
+      .navigationBarsPadding(),
+    contentPadding = androidx.compose.foundation.layout.PaddingValues(24.dp),
+  ) {
+    item {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onBack) {
+          Icon(Lucide.ArrowLeft, contentDescription = "Back")
+        }
+        Spacer(Modifier.width(8.dp))
+        Text("Settings", style = MaterialTheme.typography.headlineLarge)
+      }
+      Spacer(Modifier.height(44.dp))
+      SettingsSection("Connected device") {
+        snapshot.connections.firstOrNull()?.let { peer ->
+          SettingValue("Name", peer.label)
+          SettingValue("Key", fingerprint(peer.publicKey), mono = true)
+          SettingsAction("Copy device key", Lucide.Copy) {
+            onCopyText(peer.publicKey)
+          }
+        } ?: SettingValue("Status", "Not connected yet")
+        if (snapshot.state == RuntimeState.RUNNING) {
+          SettingsAction("Change device", Lucide.RefreshCw, onClick = onChangePeer)
+        }
+      }
+      Spacer(Modifier.height(30.dp))
+      SettingsSection("Diagnostics") {
+        SettingValue("Runtime", snapshot.state.name.lowercase())
+        SettingValue("Connection", snapshot.connection ?: "unknown")
+        SettingValue("Local mappings", snapshot.bindings.size.toString())
+        snapshot.error?.let { SettingValue("Last error", it) }
+        snapshot.peerKey?.let { key ->
+          SettingValue("Peer", fingerprint(key), mono = true)
+          SettingsAction("Copy my key", Lucide.Copy) { onCopyText(key) }
+        }
+      }
+      Spacer(Modifier.height(30.dp))
+      SettingsSection("Runtime") {
+        SettingsAction(
+          "Stop service",
+          Lucide.Unplug,
+          destructive = true,
+          onClick = onStop,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun SettingsSection(title: String, content: @Composable () -> Unit) {
+  Text(
+    title.uppercase(),
+    color = KeposPalette.Lime,
+    style = MaterialTheme.typography.labelMedium,
+  )
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(top = 12.dp)
+      .border(1.dp, KeposPalette.Line, RoundedCornerShape(5.dp))
+      .background(KeposPalette.Panel, RoundedCornerShape(5.dp))
+      .padding(18.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp),
+  ) {
+    content()
+  }
+}
+
+@Composable
+private fun SettingValue(label: String, value: String, mono: Boolean = false) {
+  Column {
+    Text(label, color = KeposPalette.Muted, style = MaterialTheme.typography.bodyMedium)
+    Text(
+      value,
+      modifier = Modifier.padding(top = 3.dp),
+      fontFamily = if (mono) KeposMono else KeposBody,
+      color = KeposPalette.Cream,
+      fontSize = 15.sp,
+    )
+  }
+}
+
+@Composable
+private fun SettingsAction(
+  label: String,
+  icon: ImageVector,
+  destructive: Boolean = false,
+  onClick: () -> Unit,
+) {
+  OutlinedButton(
+    onClick = onClick,
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(4.dp),
+    colors = ButtonDefaults.outlinedButtonColors(
+      contentColor = if (destructive) KeposPalette.Error else KeposPalette.Cream,
+    ),
+  ) {
+    Icon(icon, contentDescription = null, modifier = Modifier.size(17.dp))
+    Spacer(Modifier.width(9.dp))
+    Text(label)
+  }
+}
+
+private fun serviceIcon(icon: ServiceIcon): ImageVector = when (icon) {
+  ServiceIcon.BOOK -> Lucide.BookOpen
+  ServiceIcon.MUSIC -> Lucide.AudioLines
+  ServiceIcon.TERMINAL -> Lucide.SquareTerminal
+  ServiceIcon.GIT -> Lucide.GitBranch
+  ServiceIcon.BUILD -> Lucide.Hammer
+  ServiceIcon.PHOTOS -> Lucide.Images
+  ServiceIcon.STORAGE -> Lucide.DatabaseBackup
+  ServiceIcon.PROXY -> Lucide.Network
+  ServiceIcon.DASHBOARD -> Lucide.Gauge
+  ServiceIcon.WEB -> Lucide.ExternalLink
+  ServiceIcon.PORT -> Lucide.BoxIcon
+}
+
+private fun statusLabel(connection: String?): String = when (connection) {
+  "connected" -> "Connected"
+  "reconnecting" -> "Reconnecting…"
+  "connecting" -> "Connecting…"
+  else -> "Offline"
+}
+
+internal fun connectionTitle(connection: String?): String = when (connection) {
+  "pairing-connecting" -> "Sending pairing request"
+  "awaiting-approval" -> "Waiting for approval"
+  else -> "Finding your peer"
+}
+
+internal fun connectionDetail(connection: String?): String = when (connection) {
+  "pairing-connecting" ->
+    "Kepos is finding and authenticating the peer from the invitation."
+  "awaiting-approval" ->
+    "The request reached your peer. Choose Allow on that device."
+  "reconnecting" -> "The previous path closed. Kepos is opening a new one."
+  "offline" -> "The peer is not reachable yet. Kepos will keep trying."
+  else -> "Kepos is discovering and authenticating the peer."
+}
+
+private fun fingerprint(key: String): String = if (key.length <= 16) key
+else "${key.take(8)}…${key.takeLast(8)}"
+
+private const val PEER_KEY_LENGTH = 64
+private val PEER_KEY = Regex("^[0-9a-f]{$PEER_KEY_LENGTH}$")
