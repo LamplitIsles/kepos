@@ -52,6 +52,10 @@ listen = { local_port = 0 }
     assert.match(stdout, /KEPOS_DESKTOP_READY/u);
     const snapshot = JSON.parse(await readFile(ready, "utf8"));
     assert.equal(snapshot.peer.phase, "running");
+    const rendered = JSON.parse(await readFile(path.join(home, "render.json"), "utf8"));
+    assert.equal(rendered.role, "peer");
+    assert.equal(rendered.peerKeyPresent, true);
+    assert.equal(rendered.connectFormVisible, false);
     assert.equal(snapshot.peer.bindings.length, 1);
     assert.equal(snapshot.peer.bindings[0].service, "ssh");
     assert.ok(snapshot.peer.bindings[0].port > 0);

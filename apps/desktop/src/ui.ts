@@ -215,7 +215,7 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
     nodes.gateway.textContent = peer.gatewayPort ? '127.0.0.1:' + peer.gatewayPort : 'Not available';
     diagnosticsButton.disabled = diagnosticsPending;
     renderDetails(peer, device); renderServices(peer, device); renderPairing(peer);
-    ${options.smokeAcknowledgement ? `if (!smokeSent) { smokeSent = true; post({type:'windows-smoke-rendered',role:'peer',connection:peer.connections.some(function (connection) { return connection.status === 'connected'; }) ? 'connected' : 'connecting',serviceCount:peer.services.length,peerKeyPresent:Boolean(peer.peerKey),connectFormVisible:false}); }` : ''}
+    ${options.smokeAcknowledgement ? `if (!smokeSent && snapshot.appPhase === 'running' && peer.phase === 'running' && peer.peerKey) { smokeSent = true; post({type:'windows-smoke-rendered',role:'peer',connection:peer.connections.some(function (connection) { return connection.status === 'connected'; }) ? 'connected' : 'connecting',serviceCount:peer.services.length,peerKeyPresent:Boolean(peer.peerKey),connectFormVisible:false}); }` : ''}
   }
   nodes.search.addEventListener('input', function () { query = nodes.search.value; var device = selectedDevice(); if (device) renderServices(snapshot.peer, device); });
   document.addEventListener('click', function (event) {

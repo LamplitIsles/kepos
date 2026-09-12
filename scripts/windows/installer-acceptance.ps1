@@ -206,7 +206,7 @@ function Invoke-InstalledSmoke {
     if ($process.ExitCode -ne 0) { throw "installed Kepos smoke exited with code $($process.ExitCode)" }
     foreach ($marker in @($ready, $rendered, $quit)) { Assert-File $marker }
     $snapshot = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
-    if ($snapshot.appPhase -ne 'running' -or $null -eq $snapshot.subscriber -or $snapshot.subscriber.phase -ne 'running' -or $snapshot.subscriber.connection -ne 'unconfigured') {
+    if ($snapshot.appPhase -ne 'running' -or $null -eq $snapshot.peer -or $snapshot.peer.phase -ne 'running' -or @($snapshot.peer.connections).Count -ne 0 -or [string]::IsNullOrWhiteSpace([string]$snapshot.peer.peerKey)) {
       throw 'installed Kepos smoke did not reach the expected ready state'
     }
     Write-Host 'Installed Kepos launch readiness and clean Quit: PASS'
@@ -303,7 +303,7 @@ try {
 
   Invoke-InstalledSmoke (Join-Path $install 'App\Kepos.exe') (Join-Path $acceptanceRoot 'first launch') $appData $localAppData
   $configPath = Join-Path $appData 'Kepos\config.toml'
-  $identityPath = Join-Path $localAppData 'Kepos\state\subscriber\client.identity.json'
+  $identityPath = Join-Path $localAppData 'Kepos\state\peer\peer.json'
   Assert-File $configPath
   Assert-File $identityPath
   $configBytes = [IO.File]::ReadAllBytes($configPath)
@@ -416,11 +416,11 @@ try {
   Wait-ForAbsent $startUninstallShortcut
   Wait-ForAbsent $desktopShortcut
   Assert-BytesEqual $configBytes $configPath 'Kepos config'
-  Assert-BytesEqual $identityBytes $identityPath 'Kepos subscriber identity'
+  Assert-BytesEqual $identityBytes $identityPath 'Kepos peer identity'
   Assert-BytesEqual $diagnosticsBytes $diagnosticsPath 'Kepos diagnostics'
   Assert-BytesEqual $unrelatedBytes $unrelatedPath 'unrelated user file'
   Assert-BytesEqual $unrelatedDesktopBytes $unrelatedDesktop 'unrelated Desktop file'
-  Assert-Directory (Join-Path $localAppData 'Kepos\state\subscriber')
+  Assert-Directory (Join-Path $localAppData 'Kepos\state\peer')
   Assert-Directory (Join-Path $localAppData 'Kepos\diagnostics')
   $helpers = @(Get-ChildItem -LiteralPath $staging -Filter '.kepos-uninstall-*.ps1' -Force -ErrorAction SilentlyContinue)
   if ($helpers.Count -ne 0) { throw 'deferred uninstall helper did not self-remove' }
