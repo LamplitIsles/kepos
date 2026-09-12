@@ -161,7 +161,7 @@ the recorded public fingerprint:
 ```sh
 actual=$(apksigner verify --verbose --print-certs \
   dist/release/v0.1.0/kepos-android-arm64.apk | \
-  awk -F: '/Signer #1 certificate SHA-256 digest/ { gsub(/[[:space:]]/, "", $2); print tolower($2) }')
+  awk '/certificate SHA-256 digest:/ { sub(/^.*certificate SHA-256 digest:[[:space:]]*/, ""); gsub(/[[:space:]:]/, ""); print tolower($0) }')
 test "$actual" = "$(cat release/android-certificate.sha256)"
 ```
 
