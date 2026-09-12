@@ -9,6 +9,7 @@ val keposVersionCode = providers.gradleProperty("keposVersionCode").map(String::
 android {
   namespace = "io.github.ttalab.kepos"
   compileSdk = 35
+  buildToolsVersion = "37.0.0"
 
   defaultConfig {
     applicationId = "io.github.ttalab.kepos"

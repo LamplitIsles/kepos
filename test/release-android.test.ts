@@ -202,6 +202,10 @@ test("normalizes the apksigner certificate digest", () => {
     ),
     fingerprint,
   );
+  assert.equal(
+    normalizeCertificateFingerprint(`V3.0 Signer: certificate SHA-256 digest: ${fingerprint}\n`),
+    fingerprint,
+  );
   assert.throws(() => normalizeCertificateFingerprint("Verified\n"), /digest/i);
 });
 
