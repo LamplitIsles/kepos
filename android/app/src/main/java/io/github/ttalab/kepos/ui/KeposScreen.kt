@@ -225,7 +225,7 @@ private fun ServiceHome(
       Text("No shared services yet.", modifier = Modifier.padding(vertical = 24.dp), color = KeposPalette.Muted)
     }
     items(model.services, key = { service -> service.id }) { service ->
-      val available = model.connection == "connected" && service.available &&
+      val available = service.available &&
         (if (service.action == ServiceAction.OPEN) service.url != null else service.copyText != null)
       ServiceListItem(
         service = service,

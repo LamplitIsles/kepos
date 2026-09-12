@@ -89,6 +89,28 @@ class KeposScreenTest {
     assertEquals("http://web.localhost:17480/", opened)
   }
 
+  @Test
+  fun availableLocalServiceRemainsActionableWhilePeerReconnects() {
+    var copied: String? = null
+    compose.setContent {
+      KeposScreen(
+        snapshot = connectedSnapshot().copy(
+          connection = "reconnecting",
+          services = listOf(ServiceSnapshot(
+            "local", "Local service", "tcp", true,
+            action = "copy-endpoint", copyText = "127.0.0.1:2200",
+          )),
+        ),
+        onStart = {},
+        onStop = {},
+        onCopyText = { copied = it },
+        onOpenUrl = {},
+      )
+    }
+    compose.onNodeWithText("Copy endpoint").performClick()
+    assertEquals("127.0.0.1:2200", copied)
+  }
+
   private fun connectedSnapshot() = RuntimeSnapshot(
     state = RuntimeState.RUNNING,
     peerKey = "ab".repeat(32),
