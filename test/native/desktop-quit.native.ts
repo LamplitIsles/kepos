@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -19,13 +19,15 @@ test("desktop exits cleanly when AppKit receives an external Quit event", {
   const homeDirectory = await mkdtemp(
     path.join(os.tmpdir(), "kepos-native-quit-"),
   );
-  const configPath = path.join(homeDirectory, "config.toml");
+  const configDirectory = path.join(homeDirectory, "config", "kepos");
+  await mkdir(configDirectory, { recursive: true });
+  const configPath = path.join(configDirectory, "config.toml");
   const stateHome = path.join(homeDirectory, "state");
   await writeFile(
     configPath,
-    '[publisher]\nenabled = true\ndisplay_name = "Native test"\nsubscribers = []\nservices = []\n',
+    'peers = []\nservices = []\nbindings = []\n[network]\nbootstrap = []\n[gateway]\nport = 0\n',
   );
-  const child = spawn(executable, ["--config", configPath], {
+  const child = spawn(executable, [], {
     env: {
       ...process.env,
       HOME: homeDirectory,
@@ -37,9 +39,13 @@ test("desktop exits cleanly when AppKit receives an external Quit event", {
 
   try {
     await waitUntilReady(child);
-    await execute("/usr/bin/osascript", [
+    assert.ok(child.pid);
+    await execute("/usr/bin/swift", [
       "-e",
-      `tell application "${app}" to quit`,
+      `import AppKit
+      guard let app = NSRunningApplication(processIdentifier: ${child.pid}), app.terminate() else {
+        fatalError("Could not send Quit to the test-owned process")
+      }`,
     ]);
 
     assert.deepEqual(await waitForExit(child), {
