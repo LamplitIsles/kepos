@@ -56,7 +56,9 @@ listen = { local_port = 0 }
     assert.match(stdout, /KEPOS_DESKTOP_READY/u);
     const snapshot = JSON.parse(await readFile(ready, "utf8"));
     assert.equal(snapshot.peer.phase, "running");
+    assert.ok(Number.isInteger(snapshot.peer.gatewayPort) && snapshot.peer.gatewayPort > 0);
     assert.notEqual(snapshot.peer.gatewayPort, occupiedPort);
+    assert.ok((await readFile(path.join(config, "kepos/config.toml"), "utf8")).includes(`port = ${occupiedPort}`));
     const rendered = JSON.parse(await readFile(path.join(home, "render.json"), "utf8"));
     assert.equal(rendered.role, "peer");
     assert.equal(rendered.peerKeyPresent, true);
