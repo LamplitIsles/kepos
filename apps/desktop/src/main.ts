@@ -141,6 +141,10 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
+  const smokeErrorFile = process.env.KEPOS_WINDOWS_SMOKE_ERROR_FILE;
+  if (desktopLaunchArguments(process.argv).includes("--smoke-test") && smokeErrorFile) {
+    await writeFile(smokeErrorFile, `${error instanceof Error ? error.stack ?? error.message : String(error)}\n`).catch(() => undefined);
+  }
   console.error(error);
   Bare.exit(1);
 }

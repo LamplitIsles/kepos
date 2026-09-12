@@ -347,6 +347,7 @@ function Invoke-PortableSmoke {
       $process.StartInfo.UseShellExecute = $false
       $process.StartInfo.RedirectStandardOutput = $true
       $process.StartInfo.RedirectStandardError = $true
+      $process.StartInfo.EnvironmentVariables['KEPOS_WINDOWS_SMOKE_ERROR_FILE'] = Join-Path $Logs "smoke-error-$attempt.log"
       $processStarted = $false
       try {
         if (-not $process.Start()) { throw 'Windows portable smoke process did not start' }
