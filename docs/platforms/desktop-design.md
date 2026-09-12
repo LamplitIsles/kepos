@@ -34,6 +34,36 @@ Transport direction, admission, and grants retain the existing
 Selecting a device does not override the gateway's same-ID ambiguity rules or
 create a new hostname scheme.
 
+## Service actions
+
+Remote service cards select actions from the consumer's configured local
+binding. The provider's omission or explicit declaration of TCP does not
+determine whether the card offers Open.
+
+- A byte-stream service without a local binding offers Open through the HTTP
+  gateway by default. This is a browser shortcut, not a guarantee that its
+  source speaks HTTP.
+- A service with a configured local TCP or Unix binding offers a copy action
+  for its local endpoint or a service-specific command or connection URL.
+  It does not offer Open, even when the source speaks HTTP.
+- UDP services never offer browser Open. A configured UDP binding supplies
+  the endpoint to copy; without one, the card explains that a local UDP
+  binding is needed.
+- Offline or unavailable services retain the selected action in a disabled
+  state. A configured but failed binding does not fall back to Open.
+- Local device cards continue to describe shared services rather than expose
+  remote consumption actions.
+
+The user accepts DSH losing Open because it has a local TCP binding. With the
+current Mac configuration, SSH, Dagger, DSH and Mihomo use copy actions; the
+remaining byte-stream services offer Open. No server configuration or new
+catalog distinction between omitted and explicit TCP is required.
+
+HTTP presentation metadata is not permission to use the HTTP gateway. A
+byte-stream service whose source speaks HTTP can use that gateway without an
+HTTP presentation hint. The absence of a local binding must therefore not be
+described as an inability to use the service.
+
 ## Rendering and styles
 
 The shared macOS and Windows view remains raw HTML and JavaScript in

@@ -205,16 +205,14 @@ export function createServicePresentation(
   if (mapping?.kind === "udp") return undefined;
 
   const handler = handlerFor(service.id, presentationKind(service));
-  if (handler.httpUrl !== undefined) {
-    const url = serviceUrl(service.id, gatewayPort, handler.httpUrl === "open");
+  if (mapping === undefined) {
     return {
       id: service.id,
       name: service.name,
       access: "http",
-      action: handler.action,
-      icon: handler.icon,
-      url,
-      ...(handler.action === "copy-url" ? { copyText: url } : {}),
+      action: "open",
+      icon: handler.icon === "port" ? "web" : handler.icon,
+      url: serviceUrl(service.id, gatewayPort, true),
     };
   }
 
@@ -234,13 +232,11 @@ export function createServicePresentation(
       id: service.id,
       name: service.name,
       access: handler.localCommand.access,
-      action: handler.action,
+      action: handler.action === "open" ? "copy-url" : handler.action,
       icon: handler.icon,
       ...(mapping?.port === undefined
         ? {}
-        : handler.action === "open"
-          ? { url: handler.localCommand.format(mapping.port) }
-          : { copyText: handler.localCommand.format(mapping.port) }),
+        : { copyText: handler.localCommand.format(mapping.port) }),
     };
   }
 

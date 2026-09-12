@@ -103,7 +103,8 @@ established by the dialing peer. It does not require a new reverse connection.
 **Service Presentation**:
 The canonical action, icon, access, URL, and copy-text contract for a catalog
 entry. Desktop and Android render this metadata; they do not infer actions from
-service IDs.
+service IDs. A browser action describes how to access a service, not whether
+its source is capable of speaking HTTP.
 
 **Peer Metrics**:
 The canonical runtime's existing Prometheus series for authenticated peer
