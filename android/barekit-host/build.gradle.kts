@@ -7,6 +7,7 @@ plugins {
 android {
   namespace = "io.github.ttalab.barekit.host"
   compileSdk = 35
+  buildToolsVersion = "37.0.0"
 
   defaultConfig {
     minSdk = 31

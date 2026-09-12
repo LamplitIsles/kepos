@@ -103,7 +103,7 @@ export function createAndroidReleasePlan(options: {
     options.repository,
     "android/app/build/outputs/apk/release/app-release-unsigned.apk",
   );
-  const buildTools = path.join(options.androidHome, "build-tools", "35.0.0");
+  const buildTools = path.join(options.androidHome, "build-tools", "37.0.0");
   const apksigner = path.join(buildTools, "apksigner");
 
   return {
