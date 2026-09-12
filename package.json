@@ -113,6 +113,7 @@
     "bare-net": "^2.3.2",
     "bare-os": "^3.9.3",
     "bare-path": "^3.1.1",
+    "bare-process": "^4.5.1",
     "bare-stream": "^2.13.3",
     "bare-url": "^2.4.6",
     "compact-encoding": "^3.3.0",
@@ -130,9 +131,9 @@
   "devDependencies": {
     "@types/b4a": "^1.6.5",
     "@types/node": "^26.1.1",
+    "bare-bundle": "1.10.0",
     "bare-link": "^3.3.0",
     "bare-pack": "^2.2.1",
-    "bare-process": "^4.5.1",
     "extract-zip": "^2.0.1",
     "https-proxy-agent": "^9.1.0",
     "lefthook": "^2.1.10",

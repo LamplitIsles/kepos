@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { writeKeposBootstrapAsset } from "./bootstrap-config.js";
+import { verifyAndroidAddonFiles } from "./verify-android-addons.js";
 
 const repository = fileURLToPath(new URL("..", import.meta.url));
 const assets = path.join(repository, "android", "app", "src", "main", "assets");
@@ -50,6 +51,7 @@ await run("bare-link", [
   repository,
 ]);
 
+await verifyAndroidAddonFiles(bundle, path.join(addons, "arm64-v8a"));
 process.stdout.write("Android Worklet bundle and linked addons are ready\n");
 
 async function run(command: string, arguments_: string[]): Promise<void> {
