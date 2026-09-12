@@ -345,16 +345,20 @@ function Invoke-PortableSmoke {
       $process.StartInfo.Arguments = "--smoke-test --smoke-home `"$smokeHome`""
       $process.StartInfo.WorkingDirectory = Split-Path -Parent $Executable
       $process.StartInfo.UseShellExecute = $false
-      $process.StartInfo.RedirectStandardOutput = $false
-      $process.StartInfo.RedirectStandardError = $false
+      $process.StartInfo.RedirectStandardOutput = $true
+      $process.StartInfo.RedirectStandardError = $true
       $processStarted = $false
       try {
         if (-not $process.Start()) { throw 'Windows portable smoke process did not start' }
         $processStarted = $true
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit(45000)) {
           & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-File (Join-Path $Logs "smoke-timeout-$attempt.log")
           throw 'Windows portable smoke process timed out'
         }
+        $stdoutTask.Result | Set-Content -LiteralPath (Join-Path $Logs "smoke-stdout-$attempt.log") -Encoding utf8
+        $stderrTask.Result | Set-Content -LiteralPath (Join-Path $Logs "smoke-stderr-$attempt.log") -Encoding utf8
         if ($process.ExitCode -ne 0) { throw "Windows portable smoke exited with code $($process.ExitCode)" }
         foreach ($marker in @($ready, $rendered, $quit)) {
           if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
