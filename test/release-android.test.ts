@@ -96,6 +96,7 @@ test("builds, aligns, signs, and verifies a versioned APK without exposing the p
     arguments: [
       "-p",
       "android",
+      "clean",
       "assembleDebug",
       "assembleRelease",
       "-PkeposVersionName=1.2.3",
