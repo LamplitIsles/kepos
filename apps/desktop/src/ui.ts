@@ -197,7 +197,10 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
     if (!peer) return;
     var devices = deviceList(peer);
     var device = devices.find(function (item) { return item.key === selected; });
-    if (!device) { device = devices[0]; selected = device.key; remember(); }
+    if (!device) {
+      device = devices[0];
+      if (peer.peerKey) { selected = device.key; remember(); }
+    }
     renderNav(peer, devices);
     nodes['device-page'].hidden = settings; nodes['settings-page'].hidden = !settings;
     nodes.title.textContent = settings ? 'Settings' : device.name;

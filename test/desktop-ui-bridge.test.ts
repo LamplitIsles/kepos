@@ -168,3 +168,22 @@ test("pairing and diagnostics retain native commands and clipboard feedback", as
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.deepEqual(page.copied, ["Test-owned diagnostics"]);
 });
+
+
+test("startup snapshots preserve saved devices until the identified catalog arrives", () => {
+  const running = deviceSnapshot();
+  const firstKey = "ef".repeat(32);
+  running.peer!.connections.unshift({ ...running.peer!.connections[0]!, label: "peer-one", publicKey: firstKey });
+  const starting: DesktopSnapshot = {
+    type: "snapshot", appPhase: "starting",
+    peer: { phase: "starting", connections: [], services: [], bindings: [] },
+  };
+  for (const [saved, expected] of [[remoteKey, "kosmos"], [localKey, "mac"], ["removed", "peer-one"]]) {
+    const page = runDesktopUiPage(false, saved);
+    page.dispatchHostMessage(JSON.stringify(starting));
+    assert.equal(page.storage.get("kepos.selected-device"), saved);
+    page.dispatchHostMessage(JSON.stringify(running));
+    assert.equal(page.text("h1"), expected);
+    assert.equal(page.storage.get("kepos.selected-device"), saved === "removed" ? firstKey : saved);
+  }
+});
