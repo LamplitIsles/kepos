@@ -1,4 +1,5 @@
 import { appendFile, writeFile } from "node:fs/promises";
+import process from "node:process";
 
 import {
   createNoopDesktopDiagnosticSink,
@@ -266,7 +267,10 @@ export async function startDesktopHost(
     });
     mainWindow.content(mainWebView);
     mainWebView.loadHTML(
-      renderDesktopUi({ smokeAcknowledgement: smokeRenderFile !== undefined }),
+      renderDesktopUi({
+        smokeAcknowledgement: smokeRenderFile !== undefined,
+        localDeviceName: process.platform === "darwin" ? "mac" : "windows",
+      }),
     );
   } catch (error) {
     await cleanNativeSetup(mainWindow, mainWebView, liveTray, peerLock, singleton);

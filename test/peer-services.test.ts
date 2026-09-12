@@ -318,7 +318,9 @@ test("canonical service actions select an explicit same-ID peer without fallback
     assert.equal(consumerPeer.status().services.filter(({ id }) => id === "docs").length, 1);
     assert.equal(docs?.name, "Docs");
     assert.equal(docs?.peer, "peer-one");
-    assert.equal(docs?.action, "open");
+    assert.equal(docs?.action, "copy-endpoint");
+    assert.match(docs?.copyText ?? "", /^127\.0\.0\.1:\d+$/);
+    assert.equal(docs?.url, undefined);
     assert.deepEqual(
       await requestGatewayBody(consumerPeer.gateway.port, "docs"),
       { status: 200, body: "one" },
@@ -1526,9 +1528,10 @@ test("canonical peer keeps offline bindings configured and reports local source 
         source: { peer: "remote", service: "remote-service" },
         available: false,
         error: "Upstream peer is offline",
-        access: "tcp",
-        action: "copy-endpoint",
-        icon: "port",
+        access: "http",
+        action: "open",
+        icon: "web",
+        url: `http://upstream.localhost:${peer.gateway.port}/`,
       },
     );
     const bindingPort = status.bindings[0]?.port;

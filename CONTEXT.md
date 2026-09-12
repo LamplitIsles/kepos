@@ -5,6 +5,20 @@ consume named services explicitly made available by the other.
 
 ## Language
 
+**Device**:
+The user-facing representation of a peer in the desktop service browser. Local
+and remote devices share one navigation list; selecting a device shows the
+services it provides, not the services it consumes.
+_Avoid_: Publisher/subscriber as permanent device types; a separate local-sharing category
+
+**Local Endpoint**:
+The user-facing address of a service binding on this device. It provides access
+to a remote published service and does not change which device provides it.
+
+**Invitation**:
+A temporary opportunity to approve another peer's connection. Approval admits
+the peer; access to published services is granted separately.
+
 **Peer**:
 A Kepos participant with one persistent identity that can provide and consume
 authorized services over its connections to other peers.
@@ -89,7 +103,8 @@ established by the dialing peer. It does not require a new reverse connection.
 **Service Presentation**:
 The canonical action, icon, access, URL, and copy-text contract for a catalog
 entry. Desktop and Android render this metadata; they do not infer actions from
-service IDs.
+service IDs. A browser action describes how to access a service, not whether
+its source is capable of speaking HTTP.
 
 **Peer Metrics**:
 The canonical runtime's existing Prometheus series for authenticated peer

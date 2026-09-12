@@ -49,7 +49,6 @@ export interface ServicePresentationInput {
 
 interface BuiltInServiceHandler {
   action: ServiceAction;
-  httpUrl?: "open" | "origin";
   icon: ServiceIcon;
   localCommand?: {
     access: "http" | "ssh" | "tcp";
@@ -66,19 +65,16 @@ interface BuiltInServiceHandler {
 export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
   bookorbit: {
     action: "open",
-    httpUrl: "open",
     icon: "book",
     sortGroup: 0,
   },
   ente: {
     action: "copy-url",
-    httpUrl: "origin",
     icon: "photos",
     sortGroup: 2,
   },
   "ente-storage": {
     action: "copy-url",
-    httpUrl: "origin",
     icon: "storage",
     sortGroup: 2,
   },
@@ -101,7 +97,7 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
     },
     sortGroup: 1,
   },
-  forgejo: { action: "open", httpUrl: "open", icon: "git", sortGroup: 0 },
+  forgejo: { action: "open", icon: "git", sortGroup: 0 },
   mihomo: {
     action: "copy-url",
     icon: "proxy",
@@ -113,13 +109,11 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
   },
   "mihomo-dashboard": {
     action: "open",
-    httpUrl: "open",
     icon: "dashboard",
     sortGroup: 0,
   },
   navidrome: {
     action: "copy-url",
-    httpUrl: "origin",
     icon: "music",
     sortGroup: 2,
   },
@@ -134,7 +128,6 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
   },
   woodpecker: {
     action: "open",
-    httpUrl: "open",
     icon: "build",
     sortGroup: 0,
   },
@@ -142,7 +135,6 @@ export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
 
 const DEFAULT_HTTP_SERVICE_HANDLER = Object.freeze({
   action: "open",
-  httpUrl: "open",
   icon: "web",
   sortGroup: 0,
 } satisfies BuiltInServiceHandler);
@@ -205,16 +197,14 @@ export function createServicePresentation(
   if (mapping?.kind === "udp") return undefined;
 
   const handler = handlerFor(service.id, presentationKind(service));
-  if (handler.httpUrl !== undefined) {
-    const url = serviceUrl(service.id, gatewayPort, handler.httpUrl === "open");
+  if (mapping === undefined) {
     return {
       id: service.id,
       name: service.name,
       access: "http",
-      action: handler.action,
-      icon: handler.icon,
-      url,
-      ...(handler.action === "copy-url" ? { copyText: url } : {}),
+      action: "open",
+      icon: handler.icon === "port" ? "web" : handler.icon,
+      url: serviceUrl(service.id, gatewayPort, true),
     };
   }
 
@@ -234,13 +224,11 @@ export function createServicePresentation(
       id: service.id,
       name: service.name,
       access: handler.localCommand.access,
-      action: handler.action,
+      action: handler.action === "open" ? "copy-url" : handler.action,
       icon: handler.icon,
       ...(mapping?.port === undefined
         ? {}
-        : handler.action === "open"
-          ? { url: handler.localCommand.format(mapping.port) }
-          : { copyText: handler.localCommand.format(mapping.port) }),
+        : { copyText: handler.localCommand.format(mapping.port) }),
     };
   }
 

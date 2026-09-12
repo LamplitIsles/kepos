@@ -47,18 +47,17 @@ test("canonical service presentation preserves actions and endpoint semantics", 
     id: "ente",
     name: "Ente",
     access: "http",
-    action: "copy-url",
+    action: "open",
     icon: "photos",
-    url: "http://ente.localhost:17480",
-    copyText: "http://ente.localhost:17480",
+    url: "http://ente.localhost:17480/",
   });
   assert.deepEqual(presentations.find(({ id }) => id === "dsh"), {
     id: "dsh",
     name: "DSH",
     access: "http",
-    action: "open",
+    action: "copy-url",
     icon: "terminal",
-    url: "http://127.0.0.1:17482/",
+    copyText: "http://127.0.0.1:17482/",
   });
   assert.deepEqual(presentations.find(({ id }) => id === "ssh"), {
     id: "ssh",
@@ -184,4 +183,23 @@ test("canonical presentations never turn raw or unsupported UDP services into HT
       url: "http://custom-web.localhost:17480/",
     }],
   );
+});
+
+
+test("bindings replace default browser actions regardless of HTTP hints", () => {
+  for (const kind of ["tcp", "http"] as const) {
+    const service = { id: "anki", name: "Anki", kind };
+    assert.equal(createServicePresentation(service, 17480)?.url, "http://anki.localhost:17480/");
+    const mapped = createServicePresentation(service, 17480, { kind: "tcp", port: 1234 });
+    assert.equal(mapped?.action, "copy-endpoint");
+    assert.equal(mapped?.copyText, "127.0.0.1:1234");
+    assert.equal(mapped?.url, undefined);
+    const pending = createServicePresentation(service, 17480, { kind: "tcp" });
+    assert.equal(pending?.action, "copy-endpoint");
+    assert.equal(pending?.url, undefined);
+    assert.equal(pending?.copyText, undefined);
+  }
+  const udp = createServicePresentation({ id: "dns", name: "DNS", kind: "udp" }, 17480);
+  assert.equal(udp?.action, "copy-endpoint");
+  assert.equal(udp?.url, undefined);
 });

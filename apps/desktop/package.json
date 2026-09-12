@@ -4,11 +4,15 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
     "bare-app-kit": "file:../../vendor/holepunch/bare-app-kit",
     "bare-build": "^1.0.2",
     "bare-make": "^1.8.0",
     "bare-native": "file:../../vendor/holepunch/bare-native",
     "bare-web-kit": "file:../../vendor/holepunch/bare-web-kit",
-    "bare-win-ui": "file:../../vendor/holepunch/bare-win-ui"
+    "bare-win-ui": "file:../../vendor/holepunch/bare-win-ui",
+    "daisyui": "^5.7.37",
+    "linkedom": "^0.18.13",
+    "tailwindcss": "^4.3.3"
   }
 }

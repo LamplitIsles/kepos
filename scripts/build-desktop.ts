@@ -21,6 +21,7 @@ import {
   requireBootstrapAsset,
 } from "../src/bootstrap-asset.js";
 import { writeKeposBootstrapAsset } from "./bootstrap-config.js";
+import { buildDesktopStyles } from "./build-desktop-styles.js";
 import { stageWindowsSelfContainedRuntime } from "./windows/self-contained-runtime.js";
 
 export type DesktopTarget = "darwin-arm64" | "win32-x64";
@@ -382,6 +383,7 @@ export async function runDesktopBuild(
   options: DesktopBuildOptions = {},
 ): Promise<void> {
   const plan = desktopBuildPlan(target);
+  await buildDesktopStyles(repository);
   const requireBootstrap =
     options.requireBootstrap ?? process.env.KEPOS_BOOTSTRAP_REQUIRED === "1";
   const stagingDirectory = path.join(repository, ".build", "desktop-bootstrap");
