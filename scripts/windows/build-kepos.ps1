@@ -353,12 +353,14 @@ function Invoke-PortableSmoke {
         $processStarted = $true
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit(45000)) {
+        $timedOut = -not $process.WaitForExit(45000)
+        if ($timedOut) {
           & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-File (Join-Path $Logs "smoke-timeout-$attempt.log")
-          throw 'Windows portable smoke process timed out'
+          if (-not $process.WaitForExit(10000)) { throw 'Windows portable smoke process did not stop after timeout' }
         }
         $stdoutTask.Result | Set-Content -LiteralPath (Join-Path $Logs "smoke-stdout-$attempt.log") -Encoding utf8
         $stderrTask.Result | Set-Content -LiteralPath (Join-Path $Logs "smoke-stderr-$attempt.log") -Encoding utf8
+        if ($timedOut) { throw 'Windows portable smoke process timed out' }
         if ($process.ExitCode -ne 0) { throw "Windows portable smoke exited with code $($process.ExitCode)" }
         foreach ($marker in @($ready, $rendered, $quit)) {
           if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
@@ -372,6 +374,7 @@ function Invoke-PortableSmoke {
             $null -eq $snapshot.peer -or
             $snapshot.peer.phase -ne 'running' -or
             @($snapshot.peer.connections).Count -ne 0 -or
+            @($snapshot.peer.services).Count -ne 0 -or
             [string]::IsNullOrWhiteSpace([string]$snapshot.peer.peerKey)
           ) {
             throw 'ready marker did not contain a healthy empty peer snapshot'

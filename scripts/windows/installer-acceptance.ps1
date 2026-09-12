@@ -206,7 +206,7 @@ function Invoke-InstalledSmoke {
     if ($process.ExitCode -ne 0) { throw "installed Kepos smoke exited with code $($process.ExitCode)" }
     foreach ($marker in @($ready, $rendered, $quit)) { Assert-File $marker }
     $snapshot = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
-    if ($snapshot.appPhase -ne 'running' -or $null -eq $snapshot.peer -or $snapshot.peer.phase -ne 'running' -or @($snapshot.peer.connections).Count -ne 0 -or [string]::IsNullOrWhiteSpace([string]$snapshot.peer.peerKey)) {
+    if ($snapshot.appPhase -ne 'running' -or $null -eq $snapshot.peer -or $snapshot.peer.phase -ne 'running' -or @($snapshot.peer.connections).Count -ne 0 -or @($snapshot.peer.services).Count -ne 0 -or [string]::IsNullOrWhiteSpace([string]$snapshot.peer.peerKey)) {
       throw 'installed Kepos smoke did not reach the expected ready state'
     }
     Write-Host 'Installed Kepos launch readiness and clean Quit: PASS'
