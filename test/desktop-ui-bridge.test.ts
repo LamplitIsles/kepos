@@ -87,6 +87,11 @@ test("desktop smoke acknowledgement crosses the page bridge as one JSON object",
   const smokePage = runDesktopUiPage(true);
   const ready = JSON.stringify({ type: "ready" });
   assert.deepEqual(smokePage.messages, [ready]);
+  smokePage.dispatchHostMessage(JSON.stringify({
+    type: "snapshot", appPhase: "starting",
+    peer: { phase: "starting", connections: [], services: [], bindings: [] },
+  }));
+  assert.deepEqual(smokePage.messages, [ready]);
   smokePage.dispatchHostMessage(JSON.stringify(canonicalSnapshot));
   assert.deepEqual(smokePage.messages, [ready, JSON.stringify(renderedAcknowledgement)]);
   assert.deepEqual(parseDesktopSmokeRenderAcknowledgement(smokePage.messages[1]!), renderedAcknowledgement);

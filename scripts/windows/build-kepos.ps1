@@ -304,9 +304,9 @@ function Invoke-PortableSmoke {
   $ready = Join-Path $SmokeRoot 'ready.marker'
   $rendered = Join-Path $SmokeRoot 'rendered.marker'
   $quit = Join-Path $SmokeRoot 'quit.marker'
-  # These roots intentionally begin empty. The app must create the subscriber
+  # These roots intentionally begin empty. The app must create the peer
   # identity/configuration through its real bootstrap path before it can render
-  # the unconfigured snapshot. The second launch proves that identity survives
+  # the empty peer snapshot. The second launch proves that identity survives
   # a clean quit and restart without importing live state.
   New-Item -ItemType Directory -Path $smokeHome, $appData, $localAppData, $webViewData, $Logs -Force | Out-Null
   $env:APPDATA = $appData
@@ -315,7 +315,7 @@ function Invoke-PortableSmoke {
   $env:KEPOS_WINDOWS_SMOKE_READY_FILE = $ready
   $env:KEPOS_WINDOWS_SMOKE_RENDER_FILE = $rendered
   $env:KEPOS_WINDOWS_SMOKE_QUIT_FILE = $quit
-  $firstSubscriberKey = $null
+  $firstPeerKey = $null
   try {
     foreach ($marker in @($ready, $rendered, $quit)) {
       $existing = Get-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
@@ -345,16 +345,23 @@ function Invoke-PortableSmoke {
       $process.StartInfo.Arguments = "--smoke-test --smoke-home `"$smokeHome`""
       $process.StartInfo.WorkingDirectory = Split-Path -Parent $Executable
       $process.StartInfo.UseShellExecute = $false
-      $process.StartInfo.RedirectStandardOutput = $false
-      $process.StartInfo.RedirectStandardError = $false
+      $process.StartInfo.RedirectStandardOutput = $true
+      $process.StartInfo.RedirectStandardError = $true
+      $process.StartInfo.EnvironmentVariables['KEPOS_WINDOWS_SMOKE_ERROR_FILE'] = Join-Path $Logs "smoke-error-$attempt.log"
       $processStarted = $false
       try {
         if (-not $process.Start()) { throw 'Windows portable smoke process did not start' }
         $processStarted = $true
-        if (-not $process.WaitForExit(45000)) {
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $timedOut = -not $process.WaitForExit(45000)
+        if ($timedOut) {
           & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-File (Join-Path $Logs "smoke-timeout-$attempt.log")
-          throw 'Windows portable smoke process timed out'
+          if (-not $process.WaitForExit(10000)) { throw 'Windows portable smoke process did not stop after timeout' }
         }
+        $stdoutTask.Result | Set-Content -LiteralPath (Join-Path $Logs "smoke-stdout-$attempt.log") -Encoding utf8
+        $stderrTask.Result | Set-Content -LiteralPath (Join-Path $Logs "smoke-stderr-$attempt.log") -Encoding utf8
+        if ($timedOut) { throw 'Windows portable smoke process timed out' }
         if ($process.ExitCode -ne 0) { throw "Windows portable smoke exited with code $($process.ExitCode)" }
         foreach ($marker in @($ready, $rendered, $quit)) {
           if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
@@ -365,34 +372,36 @@ function Invoke-PortableSmoke {
           $snapshot = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
           if (
             $snapshot.appPhase -ne 'running' -or
-            $null -eq $snapshot.subscriber -or
-            $snapshot.subscriber.phase -ne 'running' -or
-            $snapshot.subscriber.connection -ne 'unconfigured' -or
-            [string]::IsNullOrWhiteSpace([string]$snapshot.subscriber.subscriberKey)
+            $null -eq $snapshot.peer -or
+            $snapshot.peer.phase -ne 'running' -or
+            @($snapshot.peer.connections).Count -ne 0 -or
+            @($snapshot.peer.services).Count -ne 0 -or
+            [string]::IsNullOrWhiteSpace([string]$snapshot.peer.peerKey)
           ) {
-            throw 'ready marker did not contain a healthy unconfigured subscriber snapshot'
+            throw 'ready marker did not contain a healthy empty peer snapshot'
           }
-          $subscriberKey = [string]$snapshot.subscriber.subscriberKey
+          $peerKey = [string]$snapshot.peer.peerKey
           if ($attempt -eq 1) {
-            $firstSubscriberKey = $subscriberKey
-          } elseif ($subscriberKey -ne $firstSubscriberKey) {
-            throw 'Windows portable smoke changed the subscriber identity across restart'
+            $firstPeerKey = $peerKey
+          } elseif ($peerKey -ne $firstPeerKey) {
+            throw 'Windows portable smoke changed the peer identity across restart'
           }
 
           $acknowledgement = Get-Content -LiteralPath $rendered -Raw | ConvertFrom-Json
-          $expectedFields = @('connectFormVisible', 'connection', 'serviceCount', 'subscriberKeyPresent', 'type') | Sort-Object
+          $expectedFields = @('connectFormVisible', 'connection', 'serviceCount', 'peerKeyPresent', 'role', 'type') | Sort-Object
           $actualFields = @($acknowledgement.PSObject.Properties.Name) | Sort-Object
           if (($expectedFields -join '|') -ne ($actualFields -join '|')) {
             throw 'rendered acknowledgement contained unexpected fields'
           }
           if (
             $acknowledgement.type -ne 'windows-smoke-rendered' -or
-            $acknowledgement.connection -ne 'unconfigured' -or
+            $acknowledgement.role -ne 'peer' -or
+            $acknowledgement.connection -ne 'connecting' -or
             $acknowledgement.serviceCount -ne 0 -or
-            $acknowledgement.subscriberKeyPresent -ne $true -or
-            $acknowledgement.connectFormVisible -ne $true
+            $acknowledgement.peerKeyPresent -ne $true -or
+            $acknowledgement.connectFormVisible -ne $false
           ) {
-            throw 'rendered acknowledgement did not prove the unconfigured page state'
+            throw 'rendered acknowledgement did not prove the empty peer page state'
           }
 
           if (-not [string]::IsNullOrWhiteSpace($BootstrapAsset)) {

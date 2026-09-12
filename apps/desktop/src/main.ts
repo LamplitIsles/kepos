@@ -72,13 +72,18 @@ async function main(): Promise<void> {
     {
       homeDirectory,
       diagnostics,
-      loadOptions: () =>
-        loadDesktopOptions(launchArguments, {
+      loadOptions: async () => {
+        const options = await loadDesktopOptions(launchArguments, {
           homeDirectory,
           environment: process.env,
           executablePath: process.execPath,
           platform: process.platform,
-        }),
+        });
+        if (smokeTest) {
+          options.peer.config.gateway = { ...options.peer.config.gateway, port: 0 };
+        }
+        return options;
+      },
       onSnapshot: (snapshot) => {
         smokeSnapshot = snapshot;
       },
@@ -128,6 +133,7 @@ async function main(): Promise<void> {
       }
     } catch (error) {
       smokeFailure = true;
+      await recordSmokeError(error);
       await running.shutdown().catch(() => undefined);
       throw error;
     }
@@ -138,9 +144,17 @@ async function main(): Promise<void> {
   }
 }
 
+async function recordSmokeError(error: unknown): Promise<void> {
+  const smokeErrorFile = process.env.KEPOS_WINDOWS_SMOKE_ERROR_FILE;
+  if (desktopLaunchArguments(process.argv).includes("--smoke-test") && smokeErrorFile) {
+    await writeFile(smokeErrorFile, `${error instanceof Error ? error.stack ?? error.message : String(error)}\n`).catch(() => undefined);
+  }
+}
+
 try {
   await main();
 } catch (error) {
+  await recordSmokeError(error);
   console.error(error);
   Bare.exit(1);
 }

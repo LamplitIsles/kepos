@@ -130,6 +130,7 @@ export function createAndroidReleasePlan(options: {
         arguments: [
           "-p",
           "android",
+          "clean",
           "assembleDebug",
           "assembleRelease",
           `-PkeposVersionName=${version.versionName}`,
