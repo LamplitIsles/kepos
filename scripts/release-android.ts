@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadRequiredKeposBootstrap } from "./bootstrap-config.js";
 import { verifyBootstrapAssetArchive } from "./release-bootstrap.js";
+import { verifyAndroidApkAddons } from "./verify-android-addons.js";
 import { reportAndroidApkSizes } from "./report-android-size.js";
 import {
   assertReleaseGitState,
@@ -294,6 +295,7 @@ async function main(): Promise<void> {
       remove: (file) => rm(file, { force: true }),
       reportSizes: reportAndroidApkSizes,
     });
+    await verifyAndroidApkAddons(plan.finalApk);
     await verifyBootstrapAssetArchive({
       archivePath: plan.finalApk,
       entryPath: "assets/kepos-bootstrap.json",

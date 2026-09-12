@@ -67,6 +67,19 @@ class KeposUiModelTest {
   }
 
   @Test
+  fun pairingProgressStaysVisibleBeforeThePeerIsConfigured() {
+    for (connection in listOf("pairing-connecting", "awaiting-approval")) {
+      val model = KeposUiModel.from(RuntimeSnapshot(
+        state = RuntimeState.RUNNING,
+        configured = false,
+        connection = connection,
+      ))
+      assertEquals(KeposDestination.CONNECTING, model.destination)
+      assertEquals(connection, model.connection)
+    }
+  }
+
+  @Test
   fun failedRuntimeSurfacesItsError() {
     val model = KeposUiModel.from(
       RuntimeSnapshot(RuntimeState.FAILED, error = "peer stopped"),

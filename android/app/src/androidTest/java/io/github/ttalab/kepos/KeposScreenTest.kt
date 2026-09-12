@@ -1,9 +1,13 @@
 package io.github.ttalab.kepos
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import io.github.ttalab.barekit.host.BindingSnapshot
 import io.github.ttalab.barekit.host.PeerConnectionSnapshot
@@ -32,22 +36,24 @@ class KeposScreenTest {
       )
     }
 
-    compose.onNodeWithText("Peer services").assertIsDisplayed()
-    compose.onNodeWithText("Peer: desktop").assertIsDisplayed()
-    compose.onNodeWithText("1 connected · 1 configured").assertIsDisplayed()
+    compose.onNodeWithText("Remote services").assertIsDisplayed()
+    compose.onNodeWithText("DESKTOP").assertIsDisplayed()
     compose.onNodeWithText("SSH").assertIsDisplayed()
     compose.onNodeWithText("Photos").assertIsDisplayed()
-    compose.onNodeWithText("Available").assertIsDisplayed()
-    compose.onNodeWithText("Unavailable").assertIsDisplayed()
-    compose.onNodeWithText("Copy key").performClick()
+    compose.onNodeWithText("Copy endpoint").assertIsNotEnabled()
+    compose.onNodeWithText("Copy command").performClick()
+    assertEquals("ssh -p 2200 localhost", copied)
+    compose.onNodeWithContentDescription("Settings").performClick()
+    compose.onNodeWithText("Copy my key").performScrollTo().performClick()
     assertEquals("ab".repeat(32), copied)
   }
 
   @Test
   fun stoppedAndFailedPeersOfferTheAppropriateRecoveryAction() {
+    val snapshot = mutableStateOf(RuntimeSnapshot(RuntimeState.STOPPED))
     compose.setContent {
       KeposScreen(
-        snapshot = RuntimeSnapshot(RuntimeState.STOPPED),
+        snapshot = snapshot.value,
         onStart = {},
         onStop = {},
         onCopyText = {},
@@ -57,14 +63,8 @@ class KeposScreenTest {
     compose.onNodeWithText("Kepos is off").assertIsDisplayed()
     compose.onNodeWithText("Start").assertIsDisplayed()
 
-    compose.setContent {
-      KeposScreen(
-        snapshot = RuntimeSnapshot(RuntimeState.FAILED, error = "peer stopped"),
-        onStart = {},
-        onStop = {},
-        onCopyText = {},
-        onOpenUrl = {},
-      )
+    compose.runOnIdle {
+      snapshot.value = RuntimeSnapshot(RuntimeState.FAILED, error = "peer stopped")
     }
     compose.onNodeWithText("Kepos stopped").assertIsDisplayed()
     compose.onNodeWithText("peer stopped").assertIsDisplayed()
@@ -89,6 +89,28 @@ class KeposScreenTest {
     assertEquals("http://web.localhost:17480/", opened)
   }
 
+  @Test
+  fun availableLocalServiceRemainsActionableWhilePeerReconnects() {
+    var copied: String? = null
+    compose.setContent {
+      KeposScreen(
+        snapshot = connectedSnapshot().copy(
+          connection = "reconnecting",
+          services = listOf(ServiceSnapshot(
+            "local", "Local service", "tcp", true,
+            action = "copy-endpoint", copyText = "127.0.0.1:2200",
+          )),
+        ),
+        onStart = {},
+        onStop = {},
+        onCopyText = { copied = it },
+        onOpenUrl = {},
+      )
+    }
+    compose.onNodeWithText("Copy endpoint").performClick()
+    assertEquals("127.0.0.1:2200", copied)
+  }
+
   private fun connectedSnapshot() = RuntimeSnapshot(
     state = RuntimeState.RUNNING,
     peerKey = "ab".repeat(32),
@@ -106,7 +128,7 @@ class KeposScreenTest {
       ),
     ),
     services = listOf(
-      ServiceSnapshot("ssh", "SSH", "tcp", true),
+      ServiceSnapshot("ssh", "SSH", "tcp", true, action = "copy-command", copyText = "ssh -p 2200 localhost"),
       ServiceSnapshot("photos", "Photos", "http", false, "offline"),
       ServiceSnapshot(
         "web",

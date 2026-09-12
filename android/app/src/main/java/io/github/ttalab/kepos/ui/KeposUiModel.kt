@@ -66,6 +66,14 @@ data class KeposUiModel(
       if (snapshot.state != RuntimeState.RUNNING) {
         return KeposUiModel(destination = KeposDestination.CONNECTING)
       }
+      if (snapshot.connection == "pairing-connecting" || snapshot.connection == "awaiting-approval") {
+        return KeposUiModel(
+          destination = KeposDestination.CONNECTING,
+          peerKey = snapshot.peerKey,
+          connection = snapshot.connection,
+          error = snapshot.error,
+        )
+      }
       if (!snapshot.configured) {
         return KeposUiModel(
           destination = KeposDestination.SETUP,
