@@ -2151,7 +2151,7 @@ async function listenBinding(
     };
     server.once("listening", onListening);
     if ("localPort" in listen) {
-      server.listen({ host: "127.0.0.1", port: listen.localPort });
+      server.listen(listen.localPort, "127.0.0.1");
     } else {
       server.listen(listen.unixSocket);
     }
