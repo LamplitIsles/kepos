@@ -3,7 +3,9 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readlink,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -452,6 +454,45 @@ test("desktop installer replaces the app bundle without retaining stale files", 
     await rm(temporary, { force: true, recursive: true });
   }
 });
+
+test(
+  "desktop installer preserves relative app-bundle symlinks",
+  { skip: process.platform === "win32" },
+  async () => {
+    const temporary = await mkdtemp(path.join(os.tmpdir(), "kepos-install-test-"));
+    const source = path.join(temporary, "build", "Kepos.app");
+    const target = desktopInstallPath(path.join(temporary, "home"));
+    const framework = path.join(
+      source,
+      "Contents",
+      "Frameworks",
+      "Kepos.framework",
+      "Versions",
+    );
+    try {
+      await mkdir(path.join(framework, "A"), { recursive: true });
+      await symlink("A", path.join(framework, "Current"));
+
+      await replaceDesktopApp(source, target);
+
+      assert.equal(
+        await readlink(
+          path.join(
+            target,
+            "Contents",
+            "Frameworks",
+            "Kepos.framework",
+            "Versions",
+            "Current",
+          ),
+        ),
+        "A",
+      );
+    } finally {
+      await rm(temporary, { force: true, recursive: true });
+    }
+  },
+);
 
 test("desktop installer skips bundle lookup when Kepos is not running", async () => {
   let quitRequests = 0;
