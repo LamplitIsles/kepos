@@ -889,7 +889,7 @@ export async function startPeer(
             return true;
           },
         });
-        await waitForConnect(
+        const releaseConnectListeners = await waitForConnect(
           outer,
           options.connectTimeoutMs ?? defaultConnectTimeoutMs,
         );
@@ -910,6 +910,7 @@ export async function startPeer(
           dht: dhtStatsSnapshot(dht),
         });
         await installConnection(entry, outer, "dialed", outerObserve);
+        releaseConnectListeners();
         delayMs = minimumReconnectDelayMs;
         await onceClosed(outer);
       } catch (error) {
@@ -2065,39 +2066,55 @@ function bindingKey(
   return `${peerKey}\u0000${binding.service}`;
 }
 
-async function waitForConnect(stream: DhtStream, timeoutMs: number): Promise<void> {
-  if (stream.connected) return;
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error("connect timeout must be a positive finite number");
-  }
+async function waitForConnect(
+  stream: DhtStream,
+  timeoutMs: number,
+): Promise<() => void> {
+  let releaseConnectListeners!: () => void;
   await new Promise<void>((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Peer connection timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const onConnect = (): void => {
-      cleanup();
+      cleanupWaiters();
       resolve();
     };
     const onError = (error: Error): void => {
-      cleanup();
+      cleanupWaiters();
       reject(error);
     };
     const onClose = (): void => {
-      cleanup();
+      release();
       reject(new Error("Peer connection closed before handshake"));
     };
-    const cleanup = (): void => {
+    const cleanupWaiters = (): void => {
       if (timer) clearTimeout(timer);
       timer = undefined;
       stream.off("connect", onConnect);
+    };
+    const release = (): void => {
+      cleanupWaiters();
       stream.off("error", onError);
       stream.off("close", onClose);
     };
-    stream.once("connect", onConnect);
-    stream.once("error", onError);
+    releaseConnectListeners = release;
+    stream.on("error", onError);
     stream.once("close", onClose);
+    stream.once("connect", onConnect);
+    if (stream.connected) {
+      cleanupWaiters();
+      resolve();
+      return;
+    }
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      cleanupWaiters();
+      reject(new Error("connect timeout must be a positive finite number"));
+      return;
+    }
+    timer = setTimeout(() => {
+      cleanupWaiters();
+      reject(new Error(`Peer connection timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
   });
+  return releaseConnectListeners;
 }
 
 async function onceClosed(stream: DhtStream): Promise<void> {

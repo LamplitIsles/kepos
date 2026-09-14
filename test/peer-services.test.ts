@@ -12,11 +12,17 @@ import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Duplex } from "node:stream";
 import { test } from "node:test";
 
 import { loadKeposConfig, saveKeposConfig } from "../src/app-config.js";
 import { parsePeerConfig, type PeerConfig } from "../src/config.js";
-import { createDht, keyPairFromSeed, type DhtNode } from "../src/mux/hyperdht.js";
+import {
+  createDht,
+  keyPairFromSeed,
+  type DhtNode,
+  type DhtStream,
+} from "../src/mux/hyperdht.js";
 import {
   decodeUdpEnvelope,
   encodeUdpEnvelope,
@@ -1717,6 +1723,61 @@ test("canonical peer dial retries remain observable and stop cleanly", async () 
   }
 });
 
+test("canonical peer dial survives timeout teardown errors and retries", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-dial-timeout-"));
+  const stateDir = path.join(root, "peer");
+  let peer: RunningPeer | undefined;
+  const streams: DhtStream[] = [];
+  const retryReleases: Array<() => void> = [];
+  try {
+    await setupPeer({ stateDir });
+    const dht = createFakeDht();
+    dht.connect = () => {
+      const stream = createUnconnectedDhtStream("66".repeat(32));
+      streams.push(stream);
+      return stream;
+    };
+    peer = await startPeer({
+      stateDir,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "remote", publicKey: "66".repeat(32), connection: "dial" }],
+        services: [],
+        bindings: [],
+      }),
+      dht,
+      connectTimeoutMs: 1,
+      sleep: () => new Promise((resolve) => retryReleases.push(resolve)),
+      log: () => undefined,
+    });
+    await waitFor(() => {
+      const connection = peer?.status().connections[0];
+      return (
+        retryReleases.length === 1 &&
+        connection?.status === "reconnecting" &&
+        connection.error === "Peer connection timed out after 1ms"
+      );
+    });
+    retryReleases.shift()?.();
+    await waitFor(() => {
+      const connection = peer?.status().connections[0];
+      return (
+        streams.length === 2 &&
+        retryReleases.length === 1 &&
+        connection?.status === "reconnecting" &&
+        connection.error === "Peer connection timed out after 1ms"
+      );
+    });
+    assert.equal(streams.length, 2);
+    assert.equal(peer?.status().state, "running");
+    assert.ok(streams.every((stream) => stream.destroyed));
+  } finally {
+    await peer?.stop().catch(() => undefined);
+    for (const release of retryReleases.splice(0)) release();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function listenTcp(server: Server): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -1893,6 +1954,15 @@ async function waitFor(predicate: () => boolean, timeoutMs = 15_000): Promise<vo
 
 function delay(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function createUnconnectedDhtStream(remotePublicKey: string): DhtStream {
+  const stream = new Duplex({
+    read: () => undefined,
+    write: (_chunk, _encoding, callback) => callback(),
+  }) as DhtStream;
+  stream.remotePublicKey = Buffer.from(remotePublicKey, "hex");
+  return stream;
 }
 
 function createFakeDht(
