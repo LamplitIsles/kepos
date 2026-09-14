@@ -33,7 +33,7 @@ export async function replaceDesktopApp(
   let movedPrevious = false;
 
   try {
-    await cp(source, next, { recursive: true });
+    await cp(source, next, { recursive: true, verbatimSymlinks: true });
     try {
       await rename(target, previous);
       movedPrevious = true;
