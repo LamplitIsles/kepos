@@ -91,6 +91,7 @@ import {
 } from "./cancellation.js";
 import { cleanupAll } from "./cleanup.js";
 import { readHomeRegistryFromConnection } from "./registry-client.js";
+import { retainStreamErrors } from "./stream-errors.js";
 
 const defaultConnectTimeoutMs = 20_000;
 const defaultServiceAcquisitionTimeoutMs = 10_000;
@@ -2082,7 +2083,7 @@ async function waitForConnect(
       reject(error);
     };
     const onClose = (): void => {
-      release();
+      cleanupWaiters();
       reject(new Error("Peer connection closed before handshake"));
     };
     const cleanupWaiters = (): void => {
@@ -2092,11 +2093,11 @@ async function waitForConnect(
     };
     const release = (): void => {
       cleanupWaiters();
-      stream.off("error", onError);
       stream.off("close", onClose);
+      releaseErrors();
     };
     releaseConnectListeners = release;
-    stream.on("error", onError);
+    const releaseErrors = retainStreamErrors(stream, onError);
     stream.once("close", onClose);
     stream.once("connect", onConnect);
     if (stream.connected) {

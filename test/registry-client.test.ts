@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { createServer, type Server } from "node:http";
+import process from "node:process";
 import { Duplex } from "node:stream";
 import { test } from "node:test";
 
@@ -155,15 +158,6 @@ test("Home registry reader settles transport errors, closes, timeouts, and write
   setImmediate(() => emptyClose.emit("close"));
   await assert.rejects(emptyCloseResult, /headers are invalid/i);
 
-  const timeout = new Duplex({
-    read() {},
-    write(_chunk, _encoding, callback) {
-      callback();
-    },
-  });
-  timeout.on("error", () => undefined);
-  await assert.rejects(readHomeRegistryFromConnection(timeout, 1), /timed out after 1ms/i);
-
   const writeFailure = new Duplex({
     read() {},
     write(_chunk, _encoding, callback) {
@@ -176,6 +170,51 @@ test("Home registry reader settles transport errors, closes, timeouts, and write
     },
   });
   await assert.rejects(readHomeRegistryFromConnection(writeFailure), /write failed/i);
+});
+
+test("Home registry timeout cleanup leaves the executing process alive", async () => {
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", "test/fixtures/registry-timeout-child.ts"],
+    { cwd: process.cwd(), stdio: "ignore" },
+  );
+  const [code, signal] = await once(child, "close");
+
+  assert.equal(signal, null);
+  assert.equal(code, 0);
+});
+
+test("Home registry reader closes invalid tunnels and later accepts a catalog", async () => {
+  const malformed = carrier();
+  const malformedResult = readHomeRegistryFromConnection(malformed);
+  const malformedClosed = onceClosed(malformed);
+  setImmediate(() => {
+    malformed.emit("data", Buffer.from("HTTP/1.1 200 OK\r\n\r\nnot-json", "latin1"));
+    malformed.emit("end");
+  });
+  await assert.rejects(malformedResult, /unexpected token|JSON/i);
+  await malformedClosed;
+  assert.equal(malformed.destroyed, true);
+
+  const oversized = carrier();
+  const oversizedResult = readHomeRegistryFromConnection(oversized);
+  const oversizedClosed = onceClosed(oversized);
+  setImmediate(() => oversized.emit("data", Buffer.alloc(81 * 1024)));
+  await assert.rejects(oversizedResult, /exceeds 80 KiB/i);
+  await oversizedClosed;
+  assert.equal(oversized.destroyed, true);
+
+  const registry = createHomeRegistry({ publisherKey, displayName: "recovered", services: [] });
+  const body = Buffer.from(JSON.stringify(registry));
+  assert.deepEqual(
+    await readCarrier(
+      Buffer.concat([
+        Buffer.from(`HTTP/1.1 200 OK\r\nContent-Length: ${body.byteLength}\r\n\r\n`, "latin1"),
+        body,
+      ]),
+    ),
+    registry,
+  );
 });
 
 test("Home registry HTTP reader handles status, valid, oversized, and timeout responses", async () => {
@@ -210,18 +249,26 @@ test("Home registry HTTP reader handles status, valid, oversized, and timeout re
 });
 
 function readCarrier(source: Buffer, ending: "end" | "close" = "end"): Promise<HomeRegistry> {
-  const connection = new Duplex({
-    read() {},
-    write(_chunk, _encoding, callback) {
-      callback();
-    },
-  });
+  const connection = carrier();
   const result = readHomeRegistryFromConnection(connection);
   setImmediate(() => {
     connection.emit("data", source);
     connection.emit(ending);
   });
   return result;
+}
+
+function carrier(): Duplex {
+  return new Duplex({
+    read() {},
+    write(_chunk, _encoding, callback) {
+      callback();
+    },
+  });
+}
+
+function onceClosed(stream: Duplex): Promise<void> {
+  return new Promise((resolve) => stream.once("close", resolve));
 }
 
 async function listen(server: Server): Promise<void> {

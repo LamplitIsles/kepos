@@ -7,6 +7,7 @@ import {
   type HomeRegistry,
   type HomeRegistryService,
 } from "../home/registry.js";
+import { retainStreamErrors } from "./stream-errors.js";
 
 const maximumRegistryBytes = 64 * 1024;
 
@@ -76,8 +77,7 @@ export function readHomeRegistryFromConnection(
     let bytes = 0;
     let settled = false;
     const timer = setTimeout(() => {
-      finish(new HomeRegistryTimeoutError(timeoutMs));
-      connection.destroy(new HomeRegistryTimeoutError(timeoutMs));
+      fail(new HomeRegistryTimeoutError(timeoutMs));
     }, timeoutMs);
     timer.unref?.();
 
@@ -86,19 +86,21 @@ export function readHomeRegistryFromConnection(
       settled = true;
       clearTimeout(timer);
       connection.off("data", onData);
-      connection.off("error", onError);
       connection.off("end", onEnd);
       connection.off("close", onClose);
       if (error) reject(error);
       else if (registry) resolve(registry);
       else reject(new Error("Home registry connection ended without a response"));
     };
+    const fail = (error: Error): void => {
+      finish(error);
+      if (!connection.destroyed) connection.destroy(error);
+    };
     const onData = (chunk: Buffer | Uint8Array): void => {
       const next = Buffer.from(chunk);
       bytes += next.byteLength;
       if (bytes > maximumRegistryBytes + 16 * 1024) {
-        finish(new Error("Home registry response exceeds 80 KiB"));
-        connection.destroy();
+        fail(new Error("Home registry response exceeds 80 KiB"));
         return;
       }
       chunks.push(next);
@@ -109,7 +111,7 @@ export function readHomeRegistryFromConnection(
         const registry = parseHomeRegistryResponse(Buffer.concat(chunks));
         finish(undefined, registry);
       } catch (error) {
-        finish(error instanceof Error ? error : new Error(String(error)));
+        fail(error instanceof Error ? error : new Error(String(error)));
       }
     };
     const onClose = (): void => {
@@ -123,7 +125,7 @@ export function readHomeRegistryFromConnection(
     };
 
     connection.on("data", onData);
-    connection.once("error", onError);
+    retainStreamErrors(connection, onError);
     connection.once("end", onEnd);
     connection.once("close", onClose);
     try {
@@ -136,7 +138,7 @@ export function readHomeRegistryFromConnection(
         ),
       );
     } catch (error) {
-      finish(error instanceof Error ? error : new Error(String(error)));
+      fail(error instanceof Error ? error : new Error(String(error)));
     }
   });
 }
