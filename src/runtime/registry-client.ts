@@ -24,41 +24,48 @@ export function readHomeRegistry(
   timeoutMs = 5_000,
 ): Promise<HomeRegistry> {
   return new Promise((resolve, reject) => {
-    const pending = request({
-      host: "127.0.0.1",
-      port: gatewayPort,
-      path: HOME_REGISTRY_PATH,
-      method: "GET",
-      headers: {
-        accept: "application/json",
-        host: `home.localhost:${gatewayPort}`,
+    const pending = request(
+      {
+        host: "127.0.0.1",
+        port: gatewayPort,
+        path: HOME_REGISTRY_PATH,
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          host: `home.localhost:${gatewayPort}`,
+        },
       },
-    }, (response) => {
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error(`Home registry returned HTTP ${response.statusCode ?? "unknown"}`));
-        return;
-      }
-
-      const chunks: Buffer[] = [];
-      let bytes = 0;
-      response.on("data", (chunk: Buffer) => {
-        bytes += chunk.byteLength;
-        if (bytes > maximumRegistryBytes) {
-          response.destroy(new Error("Home registry exceeds 64 KiB"));
+      (response) => {
+        if (response.statusCode !== 200) {
+          response.resume();
+          reject(
+            new Error(
+              `Home registry returned HTTP ${response.statusCode ?? "unknown"}`,
+            ),
+          );
           return;
         }
-        chunks.push(chunk);
-      });
-      response.once("error", reject);
-      response.once("end", () => {
-        try {
-          resolve(parseHomeRegistry(Buffer.concat(chunks).toString("utf8")));
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
+
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        response.on("data", (chunk: Buffer) => {
+          bytes += chunk.byteLength;
+          if (bytes > maximumRegistryBytes) {
+            response.destroy(new Error("Home registry exceeds 64 KiB"));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.once("error", reject);
+        response.once("end", () => {
+          try {
+            resolve(parseHomeRegistry(Buffer.concat(chunks).toString("utf8")));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      },
+    );
     pending.setTimeout(timeoutMs, () => {
       pending.destroy(new HomeRegistryTimeoutError(timeoutMs));
     });
@@ -90,7 +97,8 @@ export function readHomeRegistryFromConnection(
       connection.off("close", onClose);
       if (error) reject(error);
       else if (registry) resolve(registry);
-      else reject(new Error("Home registry connection ended without a response"));
+      else
+        reject(new Error("Home registry connection ended without a response"));
     };
     const fail = (error: Error): void => {
       finish(error);
@@ -183,10 +191,12 @@ function parseHomeRegistryResponse(source: Buffer): HomeRegistry {
   const headers = new Map<string, string>();
   for (const line of lines) {
     const separator = line.indexOf(":");
-    if (separator <= 0) throw new Error("Home registry response has an invalid header");
+    if (separator <= 0)
+      throw new Error("Home registry response has an invalid header");
     const name = line.slice(0, separator).toLowerCase();
     const value = line.slice(separator + 1).trim();
-    if (headers.has(name)) throw new Error(`Home registry response repeats ${name}`);
+    if (headers.has(name))
+      throw new Error(`Home registry response repeats ${name}`);
     headers.set(name, value);
   }
   const encodedBody = source.subarray(headerEnd + 4);
@@ -250,7 +260,8 @@ function decodeChunkedBody(source: Buffer): Buffer {
     if (size !== 0) continue;
     while (true) {
       const trailerEnd = source.indexOf(Buffer.from("\r\n", "latin1"), offset);
-      if (trailerEnd === -1) throw new Error("Home registry trailers are incomplete");
+      if (trailerEnd === -1)
+        throw new Error("Home registry trailers are incomplete");
       if (trailerEnd === offset) {
         offset += 2;
         if (offset !== source.byteLength) {

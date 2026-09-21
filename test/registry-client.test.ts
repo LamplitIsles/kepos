@@ -24,7 +24,10 @@ test("Home registry reader accepts content-length, chunked, and close-delimited 
 
   const contentLength = await readCarrier(
     Buffer.concat([
-      Buffer.from(`HTTP/1.1 200 OK\r\nContent-Length: ${body.byteLength}\r\n\r\n`, "latin1"),
+      Buffer.from(
+        `HTTP/1.1 200 OK\r\nContent-Length: ${body.byteLength}\r\n\r\n`,
+        "latin1",
+      ),
       body,
     ]),
   );
@@ -49,7 +52,11 @@ test("Home registry reader accepts content-length, chunked, and close-delimited 
 });
 
 test("Home registry reader rejects malformed response framing and registry bodies", async () => {
-  const registry = createHomeRegistry({ publisherKey, displayName: "reader", services: [] });
+  const registry = createHomeRegistry({
+    publisherKey,
+    displayName: "reader",
+    services: [],
+  });
   const body = Buffer.from(JSON.stringify(registry));
   const response = (headers: string, payload = body): Buffer =>
     Buffer.concat([
@@ -62,7 +69,12 @@ test("Home registry reader rejects malformed response framing and registry bodie
     /headers are invalid/i,
   );
   await assert.rejects(
-    readCarrier(Buffer.from("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n", "latin1")),
+    readCarrier(
+      Buffer.from(
+        "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n",
+        "latin1",
+      ),
+    ),
     /returned HTTP 204/i,
   );
   await assert.rejects(
@@ -70,10 +82,18 @@ test("Home registry reader rejects malformed response framing and registry bodie
     /invalid header/i,
   );
   await assert.rejects(
-    readCarrier(Buffer.from("HTTP/1.1 200 OK\r\nX-Test: one\r\nx-test: two\r\n\r\n", "latin1")),
+    readCarrier(
+      Buffer.from(
+        "HTTP/1.1 200 OK\r\nX-Test: one\r\nx-test: two\r\n\r\n",
+        "latin1",
+      ),
+    ),
     /repeats x-test/i,
   );
-  await assert.rejects(readCarrier(response("Content-Length: nope")), /content length is invalid/i);
+  await assert.rejects(
+    readCarrier(response("Content-Length: nope")),
+    /content length is invalid/i,
+  );
   await assert.rejects(
     readCarrier(response("Content-Length: 99999999999999999999")),
     /exceeds 64 KiB/i,
@@ -90,37 +110,66 @@ test("Home registry reader rejects malformed response framing and registry bodie
     readCarrier(response("Content-Length: 2", Buffer.from("{}"))),
     /unsupported schema/i,
   );
-  const incomplete = Buffer.from('{"schemaVersion":2,"revision":1,"services":[]}');
+  const incomplete = Buffer.from(
+    '{"schemaVersion":2,"revision":1,"services":[]}',
+  );
   await assert.rejects(
-    readCarrier(response(`Content-Length: ${incomplete.byteLength}`, incomplete)),
+    readCarrier(
+      response(`Content-Length: ${incomplete.byteLength}`, incomplete),
+    ),
     /incomplete/i,
   );
-  const noHome = Buffer.from('{"schemaVersion":2,"revision":1,"publisher":{},"services":[]}');
+  const noHome = Buffer.from(
+    '{"schemaVersion":2,"revision":1,"publisher":{},"services":[]}',
+  );
   await assert.rejects(
     readCarrier(response(`Content-Length: ${noHome.byteLength}`, noHome)),
     /canonical Home service/i,
   );
 
   await assert.rejects(
-    readCarrier(Buffer.from("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZ\r\n", "latin1")),
+    readCarrier(
+      Buffer.from(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nZ\r\n",
+        "latin1",
+      ),
+    ),
     /chunk size is invalid/i,
   );
   await assert.rejects(
-    readCarrier(Buffer.from("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nabc", "latin1")),
+    readCarrier(
+      Buffer.from(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nabc",
+        "latin1",
+      ),
+    ),
     /chunk is incomplete/i,
   );
   await assert.rejects(
-    readCarrier(Buffer.from("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabcd", "latin1")),
+    readCarrier(
+      Buffer.from(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabcd",
+        "latin1",
+      ),
+    ),
     /chunk is not CRLF terminated|chunk is incomplete/i,
   );
   await assert.rejects(
-    readCarrier(Buffer.from("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nTrailer", "latin1")),
+    readCarrier(
+      Buffer.from(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nTrailer",
+        "latin1",
+      ),
+    ),
     /trailers are incomplete/i,
   );
   await assert.rejects(
     readCarrier(
       Buffer.concat([
-        Buffer.from("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n", "latin1"),
+        Buffer.from(
+          "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+          "latin1",
+        ),
         Buffer.from("extra", "latin1"),
       ]),
     ),
@@ -145,7 +194,9 @@ test("Home registry reader settles transport errors, closes, timeouts, and write
     },
   });
   const errorResult = readHomeRegistryFromConnection(errorConnection, 100);
-  setImmediate(() => errorConnection.emit("error", new Error("carrier failed")));
+  setImmediate(() =>
+    errorConnection.emit("error", new Error("carrier failed")),
+  );
   await assert.rejects(errorResult, /carrier failed/);
 
   const emptyClose = new Duplex({
@@ -169,7 +220,10 @@ test("Home registry reader settles transport errors, closes, timeouts, and write
       throw new Error("write failed");
     },
   });
-  await assert.rejects(readHomeRegistryFromConnection(writeFailure), /write failed/i);
+  await assert.rejects(
+    readHomeRegistryFromConnection(writeFailure),
+    /write failed/i,
+  );
 });
 
 test("Home registry timeout cleanup leaves the executing process alive", async () => {
@@ -189,7 +243,10 @@ test("Home registry reader closes invalid tunnels and later accepts a catalog", 
   const malformedResult = readHomeRegistryFromConnection(malformed);
   const malformedClosed = onceClosed(malformed);
   setImmediate(() => {
-    malformed.emit("data", Buffer.from("HTTP/1.1 200 OK\r\n\r\nnot-json", "latin1"));
+    malformed.emit(
+      "data",
+      Buffer.from("HTTP/1.1 200 OK\r\n\r\nnot-json", "latin1"),
+    );
     malformed.emit("end");
   });
   await assert.rejects(malformedResult, /unexpected token|JSON/i);
@@ -204,12 +261,19 @@ test("Home registry reader closes invalid tunnels and later accepts a catalog", 
   await oversizedClosed;
   assert.equal(oversized.destroyed, true);
 
-  const registry = createHomeRegistry({ publisherKey, displayName: "recovered", services: [] });
+  const registry = createHomeRegistry({
+    publisherKey,
+    displayName: "recovered",
+    services: [],
+  });
   const body = Buffer.from(JSON.stringify(registry));
   assert.deepEqual(
     await readCarrier(
       Buffer.concat([
-        Buffer.from(`HTTP/1.1 200 OK\r\nContent-Length: ${body.byteLength}\r\n\r\n`, "latin1"),
+        Buffer.from(
+          `HTTP/1.1 200 OK\r\nContent-Length: ${body.byteLength}\r\n\r\n`,
+          "latin1",
+        ),
         body,
       ]),
     ),
@@ -218,7 +282,11 @@ test("Home registry reader closes invalid tunnels and later accepts a catalog", 
 });
 
 test("Home registry HTTP reader handles status, valid, oversized, and timeout responses", async () => {
-  const registry = createHomeRegistry({ publisherKey, displayName: "http", services: [] });
+  const registry = createHomeRegistry({
+    publisherKey,
+    displayName: "http",
+    services: [],
+  });
   let mode: "valid" | "status" | "oversized" | "timeout" = "valid";
   const server = createServer((_request, response) => {
     if (mode === "status") {
@@ -234,7 +302,8 @@ test("Home registry HTTP reader handles status, valid, oversized, and timeout re
   });
   await listen(server);
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("registry test server has no address");
+  if (!address || typeof address === "string")
+    throw new Error("registry test server has no address");
   try {
     assert.deepEqual(await readHomeRegistry(address.port), registry);
     mode = "status";
@@ -242,13 +311,19 @@ test("Home registry HTTP reader handles status, valid, oversized, and timeout re
     mode = "oversized";
     await assert.rejects(readHomeRegistry(address.port), /exceeds 64 KiB/i);
     mode = "timeout";
-    await assert.rejects(readHomeRegistry(address.port, 1), /timed out after 1ms|socket hang up/i);
+    await assert.rejects(
+      readHomeRegistry(address.port, 1),
+      /timed out after 1ms|socket hang up/i,
+    );
   } finally {
     await closeServer(server);
   }
 });
 
-function readCarrier(source: Buffer, ending: "end" | "close" = "end"): Promise<HomeRegistry> {
+function readCarrier(
+  source: Buffer,
+  ending: "end" | "close" = "end",
+): Promise<HomeRegistry> {
   const connection = carrier();
   const result = readHomeRegistryFromConnection(connection);
   setImmediate(() => {

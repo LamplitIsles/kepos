@@ -10,5 +10,8 @@ const connection = new Duplex({
   },
 });
 
-await assert.rejects(readHomeRegistryFromConnection(connection, 1), /timed out after 1ms/i);
+await assert.rejects(
+  readHomeRegistryFromConnection(connection, 1),
+  /timed out after 1ms/i,
+);
 await new Promise<void>((resolve) => setImmediate(resolve));
