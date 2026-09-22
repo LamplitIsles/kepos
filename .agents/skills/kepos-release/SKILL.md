@@ -35,6 +35,22 @@ Check whether credentials exist without echoing their values. When a signing too
 
 Do not substitute rehearsal, debug, ad-hoc Android, moved tags, or manually renamed assets for the formal scripts.
 
+## Recovering machine-local release setup
+
+Repository documentation records portable commands, not a person's private-key
+path, password, or Keychain item name. If an expected local signing value is
+missing, use FlickLog to find a prior Kepos release record before guessing:
+
+```sh
+flicklog search "Kepos release minisign" --all-projects --limit 20
+```
+
+Treat the result as a lead only. Verify a candidate private-key path with a
+read-only existence and owner-permission check, and verify a Keychain service
+exists without printing its value. Never copy a secret, machine-specific path,
+or Keychain service name into repository files, shell history, tool output,
+FlickLog notes, or PR text.
+
 ## Android signing material on the release Mac
 
 Before an Android signing operation, inspect the host-local instructions in

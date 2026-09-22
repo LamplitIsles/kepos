@@ -201,12 +201,18 @@ remote_command+=(-BareNativeRevision "$bare_native_revision")
 remote_command+=(-BareWinUiRevision "$bare_win_ui_revision")
 remote_command+=(-BareAppKitRevision "$bare_app_kit_revision")
 if [[ -n $RELEASE_TAG ]]; then
-  remote_origin=$(git -C "$LOCAL_ROOT" remote get-url origin)
-  if [[ $remote_origin =~ ^https?://[^/]*@ || $remote_origin =~ ^[^:]+://[^/]*: ]]; then
-    printf '%s\n' 'origin URL must not contain credentials' >&2
+  release_remote=${KEPOS_WINDOWS_RELEASE_REMOTE:-}
+  if [[ -z $release_remote ]]; then
+    if ! release_remote=$(git -C "$LOCAL_ROOT" remote get-url github 2>/dev/null); then
+      printf '%s\n' 'set KEPOS_WINDOWS_RELEASE_REMOTE to an unauthenticated URL reachable from the NUC' >&2
+      exit 1
+    fi
+  fi
+  if [[ $release_remote =~ ^[[:alpha:]][[:alnum:]+.-]*://[^/]*@ ]]; then
+    printf '%s\n' 'Windows release remote URL must not contain credentials' >&2
     exit 1
   fi
-  remote_command+=(-Workflow release -ReleaseTag "$RELEASE_TAG" -ReleaseMode "$RELEASE_MODE" -RemoteOrigin "$remote_origin" -ReleaseArtifactName "$RELEASE_ARTIFACT_NAME")
+  remote_command+=(-Workflow release -ReleaseTag "$RELEASE_TAG" -ReleaseMode "$RELEASE_MODE" -RemoteOrigin "$release_remote" -ReleaseArtifactName "$RELEASE_ARTIFACT_NAME")
 fi
 remote_powershell=""
 for argument in "${remote_command[@]}"; do remote_powershell+=" $(shell_quote "$argument")"; done
