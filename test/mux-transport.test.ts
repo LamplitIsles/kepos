@@ -169,6 +169,39 @@ function openRawPairingChannel(outer: Duplex): void {
   channel.open("");
 }
 
+function openRawPeerControlChannel(outer: Duplex): { sendCatalog: (value: string) => void } {
+  const Protomux = ProtomuxModule as unknown as new (
+    stream: Duplex,
+  ) => {
+    createChannel(options: {
+      protocol: string;
+      id: Uint8Array;
+      handshake: unknown;
+    }): {
+      addMessage<T>(options: {
+        encoding: unknown;
+        onmessage: (value: T) => void;
+      }): { send(value: T): boolean };
+      open(handshake: string): void;
+    } | null;
+  };
+  const mux = new Protomux(outer);
+  const channel = mux.createChannel({
+    protocol: "kepos/peer-control/1",
+    id: Buffer.alloc(16, 2),
+    handshake: compact.string,
+  });
+  assert.ok(channel);
+  const catalog = channel.addMessage<string>({
+    encoding: compact.string,
+    onmessage: () => undefined,
+  });
+  channel.addMessage<string>({ encoding: compact.string, onmessage: () => undefined });
+  channel.addMessage<string>({ encoding: compact.string, onmessage: () => undefined });
+  channel.open("1");
+  return { sendCatalog: (value) => catalog.send(value) };
+}
+
 async function flushFrames(): Promise<void> {
   for (let index = 0; index < 4; index++) {
     await new Promise((resolve) => setImmediate(resolve));
@@ -368,6 +401,150 @@ test("canonical dial control is the only heartbeat initiator while accept respon
     assert.equal(acceptScheduler.pending(), 0);
   } finally {
     dial.close();
+    accept.close();
+  }
+});
+
+test("canonical peers exchange and suppress full catalogs on their one control channel", async () => {
+  const dialScheduler = new ManualScheduler();
+  const acceptScheduler = new ManualScheduler();
+  const [dialOuter, acceptOuter] = framedPair();
+  const dialCatalogs: unknown[] = [];
+  const acceptCatalogs: unknown[] = [];
+  let dialServices = ["ssh"];
+  const dial = createMuxPeer(dialOuter, {
+    connection: "dial",
+    accept: async () => prefixService("dial:"),
+    heartbeat: heartbeatOptions(dialScheduler),
+    catalog: {
+      snapshot: () => ({ services: dialServices }),
+      receive: (catalog) => dialCatalogs.push(catalog),
+    },
+  });
+  const accept = createMuxPeer(acceptOuter, {
+    connection: "accept",
+    accept: async () => prefixService("accept:"),
+    heartbeat: heartbeatOptions(acceptScheduler),
+    catalog: {
+      snapshot: () => ({ services: ["home"] }),
+      receive: (catalog) => acceptCatalogs.push(catalog),
+    },
+  });
+
+  try {
+    await flushFrames();
+    assert.deepEqual(dialCatalogs, [{ services: ["home"] }]);
+    assert.deepEqual(acceptCatalogs, [{ services: ["ssh"] }]);
+    assert.equal(acceptScheduler.pending(), 0);
+
+    dial.publishCatalog();
+    await flushFrames();
+    assert.equal(acceptCatalogs.length, 1);
+
+    dialServices = ["ssh", "metrics"];
+    dial.publishCatalog();
+    await flushFrames();
+    assert.deepEqual(acceptCatalogs, [
+      { services: ["ssh"] },
+      { services: ["ssh", "metrics"] },
+    ]);
+
+    const Protomux = ProtomuxModule as unknown as {
+      from(stream: Duplex): Iterable<{ protocol: string }>;
+    };
+    assert.equal(
+      [...Protomux.from(dialOuter)].filter(
+        (channel) => channel.protocol === "kepos/peer-control/1",
+      ).length,
+      1,
+    );
+  } finally {
+    dial.close();
+    accept.close();
+  }
+});
+
+test("canonical peer control exchanges catalogs without heartbeat watchdogs", async () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const timerDelays: number[] = [];
+  globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+    timerDelays.push(Number(args[1]));
+    return originalSetTimeout(...args);
+  }) as typeof setTimeout;
+  const [dialOuter, acceptOuter] = framedPair();
+  const dialCatalogs: unknown[] = [];
+  const acceptCatalogs: unknown[] = [];
+  let dialCatalog = { services: ["ssh"] };
+  let dial: ReturnType<typeof createMuxPeer> | undefined;
+  let accept: ReturnType<typeof createMuxPeer> | undefined;
+
+  try {
+    dial = createMuxPeer(dialOuter, {
+      connection: "dial",
+      accept: async () => prefixService("dial:"),
+      heartbeat: false,
+      catalog: {
+        snapshot: () => dialCatalog,
+        receive: (catalog) => dialCatalogs.push(catalog),
+      },
+    });
+    accept = createMuxPeer(acceptOuter, {
+      connection: "accept",
+      accept: async () => prefixService("accept:"),
+      heartbeat: false,
+      catalog: {
+        snapshot: () => ({ services: ["home"] }),
+        receive: (catalog) => acceptCatalogs.push(catalog),
+      },
+    });
+    await flushFrames();
+    assert.equal(await dial.controlReady, "ready");
+    assert.equal(await accept.controlReady, "ready");
+    assert.deepEqual(dialCatalogs, [{ services: ["home"] }]);
+    assert.deepEqual(acceptCatalogs, [{ services: ["ssh"] }]);
+    assert.equal(
+      timerDelays.some((delayMs) =>
+        [20_000, 15_000, 10_000].includes(delayMs),
+      ),
+      false,
+    );
+
+    dialCatalog = { services: ["ssh", "metrics"] };
+    dial.publishCatalog();
+    await flushFrames();
+    assert.deepEqual(acceptCatalogs, [
+      { services: ["ssh"] },
+      { services: ["ssh", "metrics"] },
+    ]);
+  } finally {
+    dial?.close();
+    accept?.close();
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test("accept control reports malformed catalog input with the canonical trigger", async () => {
+  const [dialOuter, acceptOuter] = framedPair();
+  const failures: Array<Record<string, unknown>> = [];
+  const errors: Error[] = [];
+  acceptOuter.on("error", (error) => errors.push(error));
+  const accept = createMuxPeer(acceptOuter, {
+    connection: "accept",
+    accept: async () => prefixService("accept:"),
+    onControlFailure: (fields) => failures.push(fields),
+  });
+  const raw = openRawPeerControlChannel(dialOuter);
+
+  try {
+    await flushFrames();
+    assert.equal(await accept.controlReady, "ready");
+    raw.sendCatalog("{");
+    await flushFrames();
+
+    assert.deepEqual(failures, [{ trigger: "control.invalid-message" }]);
+    assert.equal(acceptOuter.destroyCalls, 1);
+    assert.match(errors[0]?.message ?? "", /invalid catalog/i);
+  } finally {
     accept.close();
   }
 });

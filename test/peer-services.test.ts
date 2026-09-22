@@ -30,6 +30,7 @@ import {
 } from "../src/mux/udp.js";
 import { startPeer, type RunningPeer } from "../src/runtime/peer.js";
 import { listenPeerUdpBinding } from "../src/runtime/udp-binding.js";
+import type { Observation } from "../src/mux/observability.js";
 import { loadPeerIdentity, setupPeer } from "../src/state/peer.js";
 import {
   connectFrozenLegacyClient,
@@ -53,6 +54,7 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
   let bPeer: RunningPeer | undefined;
   let aSource: Server | undefined;
   let bSource: Server | undefined;
+  const aObservations: Observation[] = [];
   try {
     const aState = path.join(root, "a", "peer");
     const bState = path.join(root, "b", "peer");
@@ -145,13 +147,26 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
 
     bPeer = await startPeer({ stateDir: bState, config: bConfig, dht: bDht });
     assert.equal(bPeer.status().bindings[0]?.available, false);
-    aPeer = await startPeer({ stateDir: aState, config: aConfig, dht: aDht });
+    aPeer = await startPeer({
+      stateDir: aState,
+      config: aConfig,
+      dht: aDht,
+      observe: (observation) => aObservations.push(observation),
+    });
     await waitFor(
       () =>
         aPeer?.status().connections[0]?.status === "connected" &&
         bPeer?.status().connections[0]?.status === "connected" &&
         aPeer?.status().bindings[0]?.available === true &&
         bPeer?.status().bindings[0]?.available === true,
+    );
+    await delay(1_100);
+    assert.equal(
+      aObservations.some(
+        ({ event, serviceId }) =>
+          event === "channel.open" && serviceId === "home",
+      ),
+      false,
     );
 
     const aBindingPort = aPeer.status().bindings[0]?.port;
@@ -1511,6 +1526,22 @@ test("a canonical peer republishes an upstream service only when explicitly conf
     await assert.rejects(
       clientPeer.open(nucSetup.publicKey, "cua"),
       /unauthorized or unavailable/i,
+    );
+    await closeServer(source);
+    source = undefined;
+    await assert.rejects(
+      clientPeer.open(nucSetup.publicKey, "cua-republished"),
+      /connect|refused|unavailable|closed/i,
+    );
+    await waitFor(
+      () => clientPeer?.status().bindings[0]?.available === false,
+      1_000,
+    );
+    assert.equal(
+      clientPeer
+        .status()
+        .connections.every(({ status }) => status === "connected"),
+      true,
     );
     assert.equal(
       nucPeer

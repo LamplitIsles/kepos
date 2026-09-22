@@ -16,7 +16,11 @@ import {
   DEFAULT_GATEWAY_PORT,
   type RunningHttpGateway,
 } from "../home/gateway.js";
-import type { HomeRegistry } from "../home/registry.js";
+import {
+  createHomeRegistry,
+  type HomeRegistry,
+  type HomeRegistryService,
+} from "../home/registry.js";
 import {
   createDht,
   dhtStatsSnapshot,
@@ -90,14 +94,12 @@ import {
   type CancellationSignal,
 } from "./cancellation.js";
 import { cleanupAll } from "./cleanup.js";
-import { readHomeRegistryFromConnection } from "./registry-client.js";
 import { retainStreamErrors } from "./stream-errors.js";
 
 const defaultConnectTimeoutMs = 20_000;
 const defaultServiceAcquisitionTimeoutMs = 10_000;
 const minimumReconnectDelayMs = 100;
 const maximumReconnectDelayMs = 2_000;
-const catalogRefreshIntervalMs = 1_000;
 
 export type PeerConnectionStatus =
   "connecting" | "connected" | "reconnecting" | "offline" | "stopped";
@@ -208,8 +210,6 @@ interface PeerConnection {
   mux: RunningMuxPeer;
   capability: PeerCapability | "pending";
   catalog?: HomeRegistry;
-  catalogTask?: Promise<void>;
-  catalogRefreshTimer?: ReturnType<typeof setTimeout>;
   closed: boolean;
   error?: string;
   udpMappings: Map<string, CanonicalUdpMapping>;
@@ -518,7 +518,7 @@ export async function startPeer(
       const entry = peerEntries.get(device.publicKey);
       entry?.current?.mux.authorize();
       if (entry?.current?.capability === "ready") {
-        void refreshCatalog(entry.current);
+        entry.current.mux.publishCatalog();
       }
     },
   });
@@ -872,6 +872,7 @@ export async function startPeer(
         }
       }
       updateHomeServers();
+      publishCatalogs();
       if (
         JSON.stringify(previous.gateway) !== JSON.stringify(nextConfig.gateway)
       ) {
@@ -1108,6 +1109,10 @@ export async function startPeer(
         accept: (serviceId) => acceptService(connection, serviceId),
         connection: entry.definition.connection,
         capabilityTimeoutMs: options.capabilityTimeoutMs,
+        catalog: {
+          snapshot: () => catalogSnapshotFor(entry),
+          receive: (snapshot) => receiveCatalog(connection, snapshot),
+        },
         heartbeat: {},
         now,
         observationRole: "peer",
@@ -1218,10 +1223,6 @@ export async function startPeer(
     void mux.capability.then((capability) => {
       if (entry.current !== connection) return;
       connection.capability = capability;
-      if (capability === "ready") {
-        void refreshCatalog(connection);
-        scheduleCatalogRefresh(connection);
-      }
       updateUdpBindings();
     });
     outer.once("error", (error) => {
@@ -1235,10 +1236,6 @@ export async function startPeer(
     });
     outer.once("close", () => {
       connection.closed = true;
-      if (connection.catalogRefreshTimer) {
-        clearTimeout(connection.catalogRefreshTimer);
-        connection.catalogRefreshTimer = undefined;
-      }
       clearCanonicalUdpMappings(connection);
       for (const remote of canonicalUdpRemotes)
         remote.clearConnection(connection);
@@ -1249,6 +1246,7 @@ export async function startPeer(
       entry.error = streamError;
       connection.catalog = undefined;
       updateHomeServers();
+      publishCatalogs();
       observe("outer.closed", {
         trigger: stopped
           ? "local.stop"
@@ -1292,67 +1290,6 @@ export async function startPeer(
     // A newly accepted stream can be used immediately; the capability promise
     // is only required by opens in the reverse direction.
     updateHomeServers();
-  }
-
-  async function refreshCatalog(connection: PeerConnection): Promise<void> {
-    if (connection.catalogTask) return connection.catalogTask;
-    connection.catalogTask = (async () => {
-      try {
-        const home = await connection.mux.open("home");
-        const registry = await readHomeRegistryFromConnection(home);
-        home.destroy();
-        if (
-          registry.publisher.publisherKey !==
-          connection.entry.definition.publicKey
-        ) {
-          throw new Error(
-            "Home registry identity does not match authenticated peer",
-          );
-        }
-        if (connection.entry.current !== connection) return;
-        connection.catalog = registry;
-        connection.entry.lastCatalog = registry;
-        connection.error = undefined;
-        updateUdpBindings();
-        updateHomeServers();
-      } catch (error) {
-        connection.error = errorMessage(error);
-        connection.catalog = undefined;
-        updateUdpBindings();
-        updateHomeServers();
-      } finally {
-        connection.catalogTask = undefined;
-      }
-    })();
-    return connection.catalogTask;
-  }
-
-  function scheduleCatalogRefresh(connection: PeerConnection): void {
-    if (
-      stopped ||
-      connection.closed ||
-      connection.entry.current !== connection ||
-      connection.capability !== "ready" ||
-      connection.catalogRefreshTimer
-    ) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      connection.catalogRefreshTimer = undefined;
-      if (
-        stopped ||
-        connection.closed ||
-        connection.entry.current !== connection ||
-        connection.capability !== "ready"
-      ) {
-        return;
-      }
-      void refreshCatalog(connection).finally(() => {
-        scheduleCatalogRefresh(connection);
-      });
-    }, catalogRefreshIntervalMs);
-    timer.unref?.();
-    connection.catalogRefreshTimer = timer;
   }
 
   async function acceptService(
@@ -1418,12 +1355,15 @@ export async function startPeer(
 
   function recordLocalSourceError(serviceId: string, message: string): void {
     localSourceErrors.set(serviceId, message);
+    updateHomeServers();
+    publishCatalogs();
     const existing = localSourceErrorTimers.get(serviceId);
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       localSourceErrorTimers.delete(serviceId);
       localSourceErrors.delete(serviceId);
       updateHomeServers();
+      publishCatalogs();
     }, 1_000);
     timer.unref?.();
     localSourceErrorTimers.set(serviceId, timer);
@@ -1434,6 +1374,8 @@ export async function startPeer(
     const timer = localSourceErrorTimers.get(serviceId);
     if (timer) clearTimeout(timer);
     localSourceErrorTimers.delete(serviceId);
+    updateHomeServers();
+    publishCatalogs();
   }
 
   function publisherToSubscriberRateLimiter(
@@ -1539,15 +1481,9 @@ export async function startPeer(
     deadline: number,
   ): Promise<void> {
     if (connection.capability !== "ready") return;
-    await refreshCatalog(connection);
     if (connection.catalog) return;
     while (connection.entry.current === connection && !connection.catalog) {
       throwIfAborted(signal);
-      if (connection.error) {
-        throw new Error(
-          `Peer service catalog unavailable: ${connection.error}`,
-        );
-      }
       if (now() >= deadline) {
         throw new Error("Peer service catalog is unavailable");
       }
@@ -1623,6 +1559,50 @@ export async function startPeer(
               }),
         };
       });
+  }
+
+  function catalogSnapshotFor(entry: PeerEntry): HomeRegistry {
+    return createHomeRegistry({
+      publisherKey: peerKey,
+      displayName: "Kepos peer",
+      services: registryServicesFor(entry).sort((left, right) =>
+        left.id.localeCompare(right.id),
+      ),
+    });
+  }
+
+  function receiveCatalog(connection: PeerConnection, snapshot: unknown): void {
+    let registry: HomeRegistry;
+    try {
+      registry = parseCatalogSnapshot(snapshot);
+    } catch (error) {
+      connection.outer.destroy(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return;
+    }
+    if (
+      registry.publisher.publisherKey !== connection.entry.definition.publicKey
+    ) {
+      connection.outer.destroy(
+        new Error("Peer catalog identity does not match authenticated peer"),
+      );
+      return;
+    }
+    if (connection.entry.current !== connection || connection.closed) return;
+    connection.catalog = registry;
+    connection.entry.lastCatalog = registry;
+    connection.error = undefined;
+    updateUdpBindings();
+    updateHomeServers();
+    publishCatalogs();
+  }
+
+  function publishCatalogs(): void {
+    for (const entry of peerEntries.values()) {
+      const connection = entry.current;
+      if (connection && !connection.closed) connection.mux.publishCatalog();
+    }
   }
 
   function updateHomeServers(): void {
@@ -2536,6 +2516,38 @@ function throwIfAborted(signal: CancellationSignal | undefined): void {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseCatalogSnapshot(snapshot: unknown): HomeRegistry {
+  if (!isRecord(snapshot) || !isRecord(snapshot.publisher)) {
+    throw new Error("Peer catalog snapshot is incomplete");
+  }
+  const { publisher, services } = snapshot;
+  if (
+    typeof publisher.publisherKey !== "string" ||
+    typeof publisher.displayName !== "string" ||
+    !Array.isArray(services)
+  ) {
+    throw new Error("Peer catalog snapshot is invalid");
+  }
+  const [home, ...published] = services;
+  if (
+    !isRecord(home) ||
+    home.id !== "home" ||
+    home.name !== "Home" ||
+    home.kind !== "tcp"
+  ) {
+    throw new Error("Peer catalog snapshot has no canonical Home service");
+  }
+  return createHomeRegistry({
+    publisherKey: publisher.publisherKey,
+    displayName: publisher.displayName,
+    services: published as HomeRegistryService[],
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
 }
 
 function flowKey(flowId: Uint8Array): string {

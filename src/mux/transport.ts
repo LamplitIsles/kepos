@@ -136,9 +136,12 @@ interface TunnelMessages {
 }
 
 interface ControlMessages {
+  catalog?: MuxMessage<string>;
   ping: MuxMessage<string>;
   pong: MuxMessage<string>;
 }
+
+const maximumPeerCatalogBytes = 64 * 1024;
 
 type ScheduleHeartbeat = (
   delayMs: number,
@@ -233,12 +236,18 @@ export interface MuxPeerOptions {
   accept: (serviceId: string) => Promise<Duplex>;
   capabilityTimeoutMs?: number;
   heartbeat?: false | HeartbeatOptions;
+  /** Provider-owned full catalog snapshots carried by peer-control/1. */
+  catalog?: {
+    snapshot: () => unknown;
+    receive: (snapshot: unknown) => void;
+  };
   now?: () => number;
   onControlReady?: () => void;
   /** Receives the single canonical connection-control failure for this outer. */
   onControlFailure?: (fields: {
     trigger:
       | "control.establishment.timeout"
+      | "control.invalid-message"
       | "control.unexpected-close"
       | "heartbeat.timeout";
     lastPongElapsedMs?: number;
@@ -288,6 +297,8 @@ export interface RunningMuxPeer {
   closeServiceChannels: (serviceId?: string) => void;
   closeUdpFlows: (serviceId?: string) => void;
   pairing?: Promise<void>;
+  /** Send the current provider catalog if it materially changed. */
+  publishCatalog: () => void;
 }
 
 export type ControlNegotiation = "disabled" | "legacy" | "ready";
@@ -320,6 +331,7 @@ export class TerminalPairingError extends Error {
 
 interface RunningControlChannel {
   close: () => void;
+  publishCatalog?: () => void;
   ready: Promise<ControlNegotiation>;
 }
 
@@ -329,6 +341,26 @@ function scheduleHeartbeat(
 ): () => void {
   const timeout = setTimeout(callback, delayMs);
   return () => clearTimeout(timeout);
+}
+
+function serializeCatalog(snapshot: unknown): string | undefined {
+  try {
+    const encoded = JSON.stringify(snapshot);
+    if (encoded === undefined || b4a.byteLength(encoded, "utf8") > maximumPeerCatalogBytes)
+      return undefined;
+    return encoded;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseCatalog(encoded: string): unknown | undefined {
+  if (b4a.byteLength(encoded, "utf8") > maximumPeerCatalogBytes) return undefined;
+  try {
+    return JSON.parse(encoded) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 function positiveInteger(value: number | undefined, fallback: number): number {
@@ -614,11 +646,8 @@ function createDialerPeerControl(
   options: MuxPeerOptions,
   now: () => number,
 ): RunningControlChannel {
-  if (options.heartbeat === false) {
-    return { close: () => undefined, ready: Promise.resolve("disabled") };
-  }
-
-  const heartbeat = options.heartbeat ?? {};
+  const heartbeatEnabled = options.heartbeat !== false;
+  const heartbeat = options.heartbeat === false ? {} : (options.heartbeat ?? {});
   const emit = createObservationEmitter({
     observe: options.observe,
     role: options.observationRole ?? "peer",
@@ -656,6 +685,7 @@ function createDialerPeerControl(
   let readyReject!: (error: Error) => void;
   let readySettled = false;
   let failureReported = false;
+  let lastCatalog: string | undefined;
   const ready = new Promise<ControlNegotiation>((resolve, reject) => {
     readyResolve = resolve;
     readyReject = reject;
@@ -685,7 +715,8 @@ function createDialerPeerControl(
       opened = true;
       settleReady("ready");
       options.onControlReady?.();
-      sendPing();
+      publishCatalog();
+      if (heartbeatEnabled) sendPing();
     },
     onclose: (isRemote) => {
       const wasOpened = opened;
@@ -700,9 +731,13 @@ function createDialerPeerControl(
   });
   if (!channel) {
     settleFailure(new Error("Peer control channel could not be created"));
-    return { close: () => undefined, ready };
+    return { close: () => undefined, publishCatalog: () => undefined, ready };
   }
   messages = {
+    catalog: channel.addMessage({
+      encoding: compact.string,
+      onmessage: receiveCatalog,
+    }),
     ping: channel.addMessage({
       encoding: compact.string,
       onmessage: () => undefined,
@@ -727,20 +762,37 @@ function createDialerPeerControl(
       );
     finish();
   });
-  arm(establishmentTimeoutMs, establishmentTimedOut);
+  if (heartbeatEnabled) arm(establishmentTimeoutMs, establishmentTimedOut);
   channel.open("1");
 
-  return { close: stop, ready };
+  return { close: stop, publishCatalog, ready };
 
   function arm(delayMs: number, callback: () => void): void {
     cancelTimer?.();
     cancelTimer = schedule(delayMs, callback);
   }
   function sendPing(): void {
-    if (closed) return;
+    if (closed || !heartbeatEnabled) return;
     pendingSequence = String(++sequence);
     messages.ping.send(pendingSequence);
     arm(responseTimeoutMs, missPong);
+  }
+  function publishCatalog(): void {
+    const encoded = options.catalog && serializeCatalog(options.catalog.snapshot());
+    if (encoded === undefined || encoded === lastCatalog) return;
+    lastCatalog = encoded;
+    messages.catalog?.send(encoded);
+  }
+  function receiveCatalog(encoded: string): void {
+    const snapshot = parseCatalog(encoded);
+    if (snapshot === undefined) {
+      const error = new Error("Peer control received an invalid catalog snapshot");
+      reportFailure({ trigger: "control.invalid-message" });
+      finish();
+      destroyOuter(error);
+      return;
+    }
+    options.catalog?.receive(snapshot);
   }
   function establishmentTimedOut(): void {
     if (closed || opened) return;
@@ -810,12 +862,11 @@ function createAcceptPeerControl(
   outer: OuterStream,
   options: MuxPeerOptions,
 ): RunningControlChannel {
-  if (options.heartbeat === false) {
-    return { close: () => undefined, ready: Promise.resolve("disabled") };
-  }
   let closed = false;
   let outerClosed = false;
   let channel: MuxChannel | undefined;
+  let messages: ControlMessages | undefined;
+  let lastCatalog: string | undefined;
   let readyResolve!: (result: ControlNegotiation) => void;
   let readyReject!: (error: Error) => void;
   let readySettled = false;
@@ -825,10 +876,12 @@ function createAcceptPeerControl(
     readyReject = reject;
   });
   void ready.catch(() => undefined);
-  const reportFailure = (): void => {
+  const reportFailure = (
+    trigger: "control.invalid-message" | "control.unexpected-close",
+  ): void => {
     if (failureReported) return;
     failureReported = true;
-    const fields = { trigger: "control.unexpected-close" as const };
+    const fields = { trigger };
     if (options.onControlFailure) options.onControlFailure(fields);
     else {
       createObservationEmitter({
@@ -848,7 +901,6 @@ function createAcceptPeerControl(
       );
       return;
     }
-    let messages: ControlMessages;
     const accepted = mux.createChannel({
       protocol: peerControlProtocol,
       id,
@@ -856,13 +908,14 @@ function createAcceptPeerControl(
       onopen: () => {
         settleReady("ready");
         options.onControlReady?.();
+        publishCatalog();
       },
       onclose: (isRemote) => {
         if (channel === accepted) channel = undefined;
         if (closed || outerClosed || !isRemote) return;
         queueMicrotask(() => {
           if (closed || outerClosed || outer.destroyed) return;
-          reportFailure();
+          reportFailure("control.unexpected-close");
           outer.destroy(new Error("Peer control channel closed unexpectedly"));
         });
       },
@@ -873,9 +926,13 @@ function createAcceptPeerControl(
     }
     channel = accepted;
     messages = {
+      catalog: accepted.addMessage({
+        encoding: compact.string,
+        onmessage: receiveCatalog,
+      }),
       ping: accepted.addMessage({
         encoding: compact.string,
-        onmessage: (sequence) => messages.pong.send(sequence),
+        onmessage: (sequence) => messages?.pong.send(sequence),
       }),
       pong: accepted.addMessage({
         encoding: compact.string,
@@ -899,6 +956,7 @@ function createAcceptPeerControl(
   });
   return {
     ready,
+    publishCatalog,
     close: () => {
       closed = true;
       mux.unpair({ protocol: peerControlProtocol });
@@ -917,6 +975,21 @@ function createAcceptPeerControl(
     if (readySettled) return;
     readySettled = true;
     readyReject(error);
+  }
+  function publishCatalog(): void {
+    const encoded = options.catalog && serializeCatalog(options.catalog.snapshot());
+    if (encoded === undefined || encoded === lastCatalog || !messages) return;
+    lastCatalog = encoded;
+    messages.catalog?.send(encoded);
+  }
+  function receiveCatalog(encoded: string): void {
+    const snapshot = parseCatalog(encoded);
+    if (snapshot === undefined) {
+      reportFailure("control.invalid-message");
+      outer.destroy(new Error("Peer control received an invalid catalog snapshot"));
+      return;
+    }
+    options.catalog?.receive(snapshot);
   }
 }
 
@@ -2265,6 +2338,7 @@ export function createMuxPeer(
       return tunnel.stream;
     },
     authorize,
+    publishCatalog: () => peerControl?.publishCatalog?.(),
     close(): void {
       if (closed) return;
       closed = true;
