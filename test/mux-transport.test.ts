@@ -285,11 +285,13 @@ test("multiplexes independent service streams over one persistent connection", a
 test("canonical mux peers negotiate one connection and serve both directions", async () => {
   const [leftOuter, rightOuter] = framedPair();
   const left = createMuxPeer(leftOuter, {
+    connection: "dial",
     accept: async (serviceId) => prefixService(`right:${serviceId}:`),
     serviceAuthorized: (serviceId) => serviceId !== "denied",
     remotePublicKey: "11".repeat(32),
   });
   const right = createMuxPeer(rightOuter, {
+    connection: "accept",
     accept: async (serviceId) => prefixService(`left:${serviceId}:`),
     remotePublicKey: "22".repeat(32),
   });
@@ -320,13 +322,108 @@ test("canonical mux peers negotiate one connection and serve both directions", a
   }
 });
 
+test("canonical dial control is the only heartbeat initiator while accept responds", async () => {
+  const dialScheduler = new ManualScheduler();
+  const acceptScheduler = new ManualScheduler();
+  const [dialOuter, acceptOuter] = framedPair();
+  const dial = createMuxPeer(dialOuter, {
+    connection: "dial",
+    accept: async (serviceId) => prefixService(`dial:${serviceId}:`),
+    heartbeat: heartbeatOptions(dialScheduler),
+  });
+  const accept = createMuxPeer(acceptOuter, {
+    connection: "accept",
+    accept: async (serviceId) => prefixService(`accept:${serviceId}:`),
+    heartbeat: heartbeatOptions(acceptScheduler),
+  });
+
+  try {
+    await flushFrames();
+    assert.equal(await dial.controlReady, "ready");
+    assert.equal(await accept.controlReady, "ready");
+    assert.equal(dialScheduler.pending(), 1);
+    assert.equal(acceptScheduler.pending(), 0);
+    const Protomux = ProtomuxModule as unknown as {
+      from(stream: Duplex): Iterable<{ protocol: string }>;
+    };
+    assert.equal(
+      [...Protomux.from(dialOuter)].filter(
+        (channel) => channel.protocol === "kepos/peer-control/1",
+      ).length,
+      1,
+    );
+    assert.equal(
+      [...Protomux.from(dialOuter)].some(
+        (channel) => channel.protocol === "kepos/control/1",
+      ),
+      false,
+    );
+
+    const reverse = await accept.open("dial-service");
+    assert.equal(
+      await exchange(reverse, "request"),
+      "dial:dial-service:request",
+    );
+    reverse.destroy();
+    assert.equal(acceptScheduler.pending(), 0);
+  } finally {
+    dial.close();
+    accept.close();
+  }
+});
+
+test("canonical dial control reports one heartbeat failure and destroys its outer", async () => {
+  const scheduler = new ManualScheduler();
+  const [dialOuter, acceptOuter] = framedPair();
+  const errors: Error[] = [];
+  const failures: Array<Record<string, unknown>> = [];
+  dialOuter.on("error", (error) => errors.push(error));
+  const dial = createMuxPeer(dialOuter, {
+    connection: "dial",
+    accept: async () => prefixService("dial:"),
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+    onControlFailure: (fields) => failures.push(fields),
+  });
+  const accept = createMuxPeer(acceptOuter, {
+    connection: "accept",
+    accept: async () => prefixService("accept:"),
+    heartbeat: heartbeatOptions(new ManualScheduler()),
+  });
+
+  try {
+    await flushFrames();
+    assert.equal(await dial.controlReady, "ready");
+    dialOuter.dropWrites = true;
+    scheduler.advance(15);
+    scheduler.advance(10);
+    scheduler.advance(10);
+    await flushFrames();
+
+    assert.equal(dialOuter.destroyCalls, 1);
+    assert.match(errors[0]?.message ?? "", /heartbeat timed out/i);
+    assert.deepEqual(failures, [
+      {
+        trigger: "heartbeat.timeout",
+        lastPongElapsedMs: 35,
+        missedPongs: 2,
+      },
+    ]);
+  } finally {
+    dial.close();
+    accept.close();
+  }
+});
+
 test("canonical mux authorization can promote the same connection", async () => {
   const [candidateOuter, approvedOuter] = framedPair();
   const candidate = createMuxPeer(candidateOuter, {
+    connection: "dial",
     authorized: false,
     accept: async () => prefixService("candidate:"),
   });
   const approved = createMuxPeer(approvedOuter, {
+    connection: "accept",
     accept: async () => prefixService("approved:"),
   });
 
@@ -349,6 +446,7 @@ test("canonical mux authorization can promote the same connection", async () => 
 test("canonical peer reports source failures, rejects unsupported kinds, and closes policy channels", async () => {
   const [leftOuter, rightOuter] = framedPair();
   const left = createMuxPeer(leftOuter, {
+    connection: "dial",
     accept: async (serviceId) => {
       if (serviceId === "down") throw new Error("source is unavailable");
       return prefixService(`source:${serviceId}:`);
@@ -357,6 +455,7 @@ test("canonical peer reports source failures, rejects unsupported kinds, and clo
     remotePublicKey: "11".repeat(32),
   });
   const right = createMuxPeer(rightOuter, {
+    connection: "accept",
     accept: async () => prefixService("unused:"),
     remotePublicKey: "22".repeat(32),
   });
@@ -378,10 +477,12 @@ test("canonical peer reports source failures, rejects unsupported kinds, and clo
 
   const [httpLeftOuter, httpRightOuter] = framedPair();
   const httpLeft = createMuxPeer(httpLeftOuter, {
+    connection: "dial",
     accept: async () => new PassThrough(),
     serviceKind: () => "http",
   });
   const httpRight = createMuxPeer(httpRightOuter, {
+    connection: "accept",
     accept: async () => new PassThrough(),
   });
   try {
@@ -394,6 +495,7 @@ test("canonical peer reports source failures, rejects unsupported kinds, and clo
 
   const [unsupportedOuter, unusedOuter] = framedPair();
   const unsupported = createMuxPeer(unsupportedOuter, {
+    connection: "dial",
     accept: async () => new PassThrough(),
     capabilityTimeoutMs: 1,
   });
@@ -409,9 +511,11 @@ test("canonical peer reports source failures, rejects unsupported kinds, and clo
 test("canonical mux tunnels propagate explicit and empty reset reasons", async () => {
   const [leftOuter, rightOuter] = framedPair();
   const left = createMuxPeer(leftOuter, {
+    connection: "dial",
     accept: async () => prefixService("left:"),
   });
   const right = createMuxPeer(rightOuter, {
+    connection: "accept",
     accept: async () => prefixService("right:"),
   });
   try {

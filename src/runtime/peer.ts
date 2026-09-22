@@ -1086,18 +1086,37 @@ export async function startPeer(
       subscriberKey: entry.definition.publicKey,
       connectionId: `${entry.definition.publicKey}:${generation}`,
     };
+    let streamError: string | undefined;
+    let streamDiagnosticError: Record<string, unknown> | undefined;
+    let streamDiagnosticTrigger: string | undefined;
+    let unhealthyObserved = false;
+    const observeOuterUnhealthy = (fields: Record<string, unknown>): void => {
+      if (unhealthyObserved) return;
+      unhealthyObserved = true;
+      observe("outer.unhealthy", {
+        remotePublicKey: entry.definition.publicKey,
+        transport: dhtStreamSnapshot(outer),
+        ...wakeContext(),
+        ...fields,
+      });
+    };
     let mux: RunningMuxPeer;
     try {
       const pairingRequest = entry.pairingRequest;
       mux = createMuxPeer(outer, {
         authorized: pairingRequest === undefined && authorized,
         accept: (serviceId) => acceptService(connection, serviceId),
+        connection: entry.definition.connection,
         capabilityTimeoutMs: options.capabilityTimeoutMs,
         heartbeat: {},
         now,
         observationRole: "peer",
         observe: options.observe,
         outerId,
+        onControlFailure: (fields) => {
+          streamDiagnosticTrigger = fields.trigger;
+          observeOuterUnhealthy(fields);
+        },
         remotePublicKey: entry.definition.publicKey,
         httpRemotePublicKey: entry.definition.publicKey,
         serviceAuthorized: (serviceId) =>
@@ -1205,18 +1224,12 @@ export async function startPeer(
       }
       updateUdpBindings();
     });
-    let streamError: string | undefined;
-    let streamDiagnosticError: Record<string, unknown> | undefined;
-    let streamDiagnosticTrigger: string | undefined;
     outer.once("error", (error) => {
       streamError = error.message;
       streamDiagnosticError = diagnosticError(error);
       streamDiagnosticTrigger = diagnosticTrigger(error);
-      observe("outer.unhealthy", {
+      observeOuterUnhealthy({
         trigger: streamDiagnosticTrigger,
-        remotePublicKey: entry.definition.publicKey,
-        transport: dhtStreamSnapshot(outer),
-        ...wakeContext(),
         ...streamDiagnosticError,
       });
     });

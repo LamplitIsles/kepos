@@ -37,6 +37,7 @@ const compact = compactModule as CompactEncoding;
 
 const protocol = "kepos/tcp/1";
 const controlProtocol = "kepos/control/1";
+const peerControlProtocol = "kepos/peer-control/1";
 const pairingProtocol = "kepos/pair/1";
 const defaultControlEstablishmentTimeoutMs = 20_000;
 const defaultHeartbeatIntervalMs = 15_000;
@@ -227,11 +228,22 @@ export type PeerCapability = "ready" | "unsupported";
 
 export interface MuxPeerOptions {
   authorized?: boolean;
+  /** Configured connection ownership; service direction never changes it. */
+  connection: "dial" | "accept";
   accept: (serviceId: string) => Promise<Duplex>;
   capabilityTimeoutMs?: number;
   heartbeat?: false | HeartbeatOptions;
   now?: () => number;
   onControlReady?: () => void;
+  /** Receives the single canonical connection-control failure for this outer. */
+  onControlFailure?: (fields: {
+    trigger:
+      | "control.establishment.timeout"
+      | "control.unexpected-close"
+      | "heartbeat.timeout";
+    lastPongElapsedMs?: number;
+    missedPongs?: number;
+  }) => void;
   observationRole?: ObservationRole;
   observe?: Observe;
   outerId?: string;
@@ -589,6 +601,323 @@ function pairPublisherControlChannel(
     channel.open("1");
   });
   return channels;
+}
+
+/**
+ * Canonical peer control is directional. The configured dialer owns the
+ * active liveness probe; the accepting peer only pairs this channel and
+ * answers probes. Service opens deliberately never reach this seam.
+ */
+function createDialerPeerControl(
+  mux: MuxInstance,
+  outer: OuterStream,
+  options: MuxPeerOptions,
+  now: () => number,
+): RunningControlChannel {
+  if (options.heartbeat === false) {
+    return { close: () => undefined, ready: Promise.resolve("disabled") };
+  }
+
+  const heartbeat = options.heartbeat ?? {};
+  const emit = createObservationEmitter({
+    observe: options.observe,
+    role: options.observationRole ?? "peer",
+    outerId: options.outerId,
+    now,
+  });
+  const establishmentTimeoutMs = positiveInteger(
+    heartbeat.establishmentTimeoutMs,
+    defaultControlEstablishmentTimeoutMs,
+  );
+  const intervalMs = positiveInteger(
+    heartbeat.intervalMs,
+    defaultHeartbeatIntervalMs,
+  );
+  const responseTimeoutMs = positiveInteger(
+    heartbeat.responseTimeoutMs,
+    defaultHeartbeatResponseTimeoutMs,
+  );
+  const missedPongsBeforeTimeout = positiveInteger(
+    heartbeat.missedPongsBeforeTimeout,
+    defaultMissedPongsBeforeTimeout,
+  );
+  const schedule = heartbeat.schedule ?? scheduleHeartbeat;
+  let cancelTimer: (() => void) | undefined;
+  let closed = false;
+  let opened = false;
+  let outerClosed = false;
+  let locallyClosing = false;
+  let lastPongAt = now();
+  let missedPongs = 0;
+  let pendingSequence: string | undefined;
+  let sequence = 0;
+  let messages: ControlMessages;
+  let readyResolve!: (result: ControlNegotiation) => void;
+  let readyReject!: (error: Error) => void;
+  let readySettled = false;
+  let failureReported = false;
+  const ready = new Promise<ControlNegotiation>((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  void ready.catch(() => undefined);
+
+  const reportFailure = (
+    fields: Parameters<NonNullable<MuxPeerOptions["onControlFailure"]>>[0],
+  ): void => {
+    if (failureReported) return;
+    failureReported = true;
+    if (options.onControlFailure) {
+      options.onControlFailure(fields);
+      return;
+    }
+    emit("outer.unhealthy", {
+      ...fields,
+      ...transportFields(options.transportSnapshot),
+    });
+  };
+  const channel = mux.createChannel({
+    protocol: peerControlProtocol,
+    id: crypto.randomBytes(16),
+    handshake: compact.string,
+    onopen: () => {
+      if (closed) return;
+      opened = true;
+      settleReady("ready");
+      options.onControlReady?.();
+      sendPing();
+    },
+    onclose: (isRemote) => {
+      const wasOpened = opened;
+      finish();
+      if (locallyClosing || !wasOpened || !isRemote) return;
+      queueMicrotask(() => {
+        if (outerClosed || outer.destroyed || locallyClosing) return;
+        reportFailure({ trigger: "control.unexpected-close" });
+        outer.destroy(new Error("Peer control channel closed unexpectedly"));
+      });
+    },
+  });
+  if (!channel) {
+    settleFailure(new Error("Peer control channel could not be created"));
+    return { close: () => undefined, ready };
+  }
+  messages = {
+    ping: channel.addMessage({
+      encoding: compact.string,
+      onmessage: () => undefined,
+    }),
+    pong: channel.addMessage({
+      encoding: compact.string,
+      onmessage: receivePong,
+    }),
+  };
+  outer.once("close", () => {
+    outerClosed = true;
+    if (!readySettled)
+      settleFailure(
+        new Error("Peer connection closed before control was ready"),
+      );
+    finish();
+  });
+  outer.once("error", () => {
+    if (!readySettled)
+      settleFailure(
+        new Error("Peer connection errored before control was ready"),
+      );
+    finish();
+  });
+  arm(establishmentTimeoutMs, establishmentTimedOut);
+  channel.open("1");
+
+  return { close: stop, ready };
+
+  function arm(delayMs: number, callback: () => void): void {
+    cancelTimer?.();
+    cancelTimer = schedule(delayMs, callback);
+  }
+  function sendPing(): void {
+    if (closed) return;
+    pendingSequence = String(++sequence);
+    messages.ping.send(pendingSequence);
+    arm(responseTimeoutMs, missPong);
+  }
+  function establishmentTimedOut(): void {
+    if (closed || opened) return;
+    const error = new Error(
+      `Peer control channel timed out after ${establishmentTimeoutMs}ms`,
+    );
+    reportFailure({ trigger: "control.establishment.timeout" });
+    settleFailure(error);
+    finish();
+    destroyOuter(error);
+  }
+  function receivePong(receivedSequence: string): void {
+    if (closed || receivedSequence !== pendingSequence) return;
+    pendingSequence = undefined;
+    missedPongs = 0;
+    lastPongAt = now();
+    arm(intervalMs, sendPing);
+  }
+  function missPong(): void {
+    if (closed) return;
+    pendingSequence = undefined;
+    missedPongs++;
+    if (missedPongs < missedPongsBeforeTimeout) {
+      sendPing();
+      return;
+    }
+    const fields = {
+      lastPongElapsedMs: Math.max(0, now() - lastPongAt),
+      missedPongs,
+    };
+    reportFailure({ trigger: "heartbeat.timeout", ...fields });
+    finish();
+    destroyOuter(
+      new Error(`Peer heartbeat timed out after ${missedPongs} missed replies`),
+    );
+  }
+  function stop(): void {
+    locallyClosing = true;
+    if (!readySettled) settleFailure(new Error("Peer control channel closed"));
+    finish();
+    channel?.close();
+  }
+  function finish(): void {
+    if (closed) return;
+    closed = true;
+    pendingSequence = undefined;
+    cancelTimer?.();
+    cancelTimer = undefined;
+  }
+  function settleReady(result: ControlNegotiation): void {
+    if (readySettled) return;
+    readySettled = true;
+    readyResolve(result);
+  }
+  function settleFailure(error: Error): void {
+    if (readySettled) return;
+    readySettled = true;
+    readyReject(error);
+  }
+  function destroyOuter(error: Error): void {
+    if (!outer.destroyed) outer.destroy(error);
+  }
+}
+
+function createAcceptPeerControl(
+  mux: MuxInstance,
+  outer: OuterStream,
+  options: MuxPeerOptions,
+): RunningControlChannel {
+  if (options.heartbeat === false) {
+    return { close: () => undefined, ready: Promise.resolve("disabled") };
+  }
+  let closed = false;
+  let outerClosed = false;
+  let channel: MuxChannel | undefined;
+  let readyResolve!: (result: ControlNegotiation) => void;
+  let readyReject!: (error: Error) => void;
+  let readySettled = false;
+  let failureReported = false;
+  const ready = new Promise<ControlNegotiation>((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  void ready.catch(() => undefined);
+  const reportFailure = (): void => {
+    if (failureReported) return;
+    failureReported = true;
+    const fields = { trigger: "control.unexpected-close" as const };
+    if (options.onControlFailure) options.onControlFailure(fields);
+    else {
+      createObservationEmitter({
+        observe: options.observe,
+        role: options.observationRole ?? "peer",
+        outerId: options.outerId,
+      })("outer.unhealthy", {
+        ...fields,
+        ...transportFields(options.transportSnapshot),
+      });
+    }
+  };
+  mux.pair({ protocol: peerControlProtocol }, (id) => {
+    if (closed || channel) {
+      outer.destroy(
+        new Error("Peer control channel was opened more than once"),
+      );
+      return;
+    }
+    let messages: ControlMessages;
+    const accepted = mux.createChannel({
+      protocol: peerControlProtocol,
+      id,
+      handshake: compact.string,
+      onopen: () => {
+        settleReady("ready");
+        options.onControlReady?.();
+      },
+      onclose: (isRemote) => {
+        if (channel === accepted) channel = undefined;
+        if (closed || outerClosed || !isRemote) return;
+        queueMicrotask(() => {
+          if (closed || outerClosed || outer.destroyed) return;
+          reportFailure();
+          outer.destroy(new Error("Peer control channel closed unexpectedly"));
+        });
+      },
+    });
+    if (!accepted) {
+      settleFailure(new Error("Peer control channel could not be accepted"));
+      return;
+    }
+    channel = accepted;
+    messages = {
+      ping: accepted.addMessage({
+        encoding: compact.string,
+        onmessage: (sequence) => messages.pong.send(sequence),
+      }),
+      pong: accepted.addMessage({
+        encoding: compact.string,
+        onmessage: () => undefined,
+      }),
+    };
+    accepted.open("1");
+  });
+  outer.once("close", () => {
+    outerClosed = true;
+    if (!readySettled)
+      settleFailure(
+        new Error("Peer connection closed before control was ready"),
+      );
+  });
+  outer.once("error", () => {
+    if (!readySettled)
+      settleFailure(
+        new Error("Peer connection errored before control was ready"),
+      );
+  });
+  return {
+    ready,
+    close: () => {
+      closed = true;
+      mux.unpair({ protocol: peerControlProtocol });
+      if (!readySettled)
+        settleFailure(new Error("Peer control channel closed"));
+      channel?.close();
+    },
+  };
+
+  function settleReady(result: ControlNegotiation): void {
+    if (readySettled) return;
+    readySettled = true;
+    readyResolve(result);
+  }
+  function settleFailure(error: Error): void {
+    if (readySettled) return;
+    readySettled = true;
+    readyReject(error);
+  }
 }
 
 class MuxTunnel extends Duplex {
@@ -1565,31 +1894,15 @@ export function createMuxPeer(
     settleCapability("unsupported");
   }
 
-  let subscriberControl: RunningControlChannel | undefined;
+  let peerControl: RunningControlChannel | undefined;
 
   const startAuthorizedControl = (): void => {
-    if (closed || !authorized || subscriberControl) return;
-    subscriberControl = createSubscriberControlChannel(
-      mux,
-      outer,
-      {
-        authorized: true,
-        heartbeat: options.heartbeat,
-        now,
-        onControlReady: () => {
-          options.onControlReady?.();
-        },
-        onControlClosed: () => undefined,
-        onControlEstablishmentTimeout: () => undefined,
-        onControlUnexpectedClose: () => undefined,
-        observe: options.observe,
-        observationRole: role,
-        outerId,
-        transportSnapshot,
-      },
-      now,
-    );
-    void subscriberControl.ready.then(
+    if (closed || !authorized || peerControl) return;
+    peerControl =
+      options.connection === "accept"
+        ? createAcceptPeerControl(mux, outer, options)
+        : createDialerPeerControl(mux, outer, options, now);
+    void peerControl.ready.then(
       (result) => {
         if (controlReadySettled) return;
         controlReadySettled = true;
@@ -1601,16 +1914,6 @@ export function createMuxPeer(
         controlReadyReject(error);
       },
     );
-
-    const responderControlChannels = pairPublisherControlChannel(mux, {
-      authorized: true,
-      connect: async () => {
-        throw new Error("Control channels do not open services");
-      },
-      heartbeat: options.heartbeat === false ? false : undefined,
-      onControlReady: () => options.onControlReady?.(),
-    });
-    for (const channel of responderControlChannels) controlChannels.add(channel);
   };
 
   const authorize = (): void => {
@@ -1972,13 +2275,10 @@ export function createMuxPeer(
       }
       mux.unpair({ protocol });
       mux.unpair({ protocol: peerCapabilityProtocol });
-      mux.unpair({ protocol: controlProtocol });
-      subscriberControl?.close();
+      peerControl?.close();
       pairingChannel?.close();
       outgoingPairingChannel?.close();
-      for (const channel of controlChannels) channel.close();
       for (const channel of capabilityChannels) channel.close();
-      controlChannels.clear();
       capabilityChannels.clear();
       udp.close();
       for (const channel of activeServiceChannels) {

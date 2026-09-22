@@ -198,6 +198,7 @@ test("canonical mux service channels feed peer metrics in both directions", asyn
   });
   recorder.connectionActivated(context("outer-1"));
   const server = createMuxPeer(serverOuter, {
+    connection: "accept",
     accept: async () => new Transform({
       transform(chunk, _encoding, callback) {
         callback(null, Buffer.concat([Buffer.from("reply:"), Buffer.from(chunk)]));
@@ -211,6 +212,7 @@ test("canonical mux service channels feed peer metrics in both directions", asyn
     serviceKind: () => "tcp",
   });
   const client = createMuxPeer(clientOuter, {
+    connection: "dial",
     accept: async () => new Transform(),
     authorized: true,
     heartbeat: false,
