@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import {
-  createServer as createHttpServer,
-  request as httpRequest,
-  type IncomingMessage,
-  type ServerResponse,
-} from "node:http";
+import { request as httpRequest } from "node:http";
 import { createSocket, type Socket } from "node:dgram";
 import { createConnection, createServer, type Server } from "node:net";
 import { once } from "node:events";
@@ -32,10 +27,6 @@ import { startPeer, type RunningPeer } from "../src/runtime/peer.js";
 import { listenPeerUdpBinding } from "../src/runtime/udp-binding.js";
 import type { Observation } from "../src/mux/observability.js";
 import { loadPeerIdentity, setupPeer } from "../src/state/peer.js";
-import {
-  connectFrozenLegacyClient,
-  type FrozenLegacyClient,
-} from "./fixtures/frozen-legacy-client.js";
 
 const require = createRequire(import.meta.url);
 const createHyperDhtTestnet = require("hyperdht/testnet") as (
@@ -866,170 +857,6 @@ test("canonical local UDP bindings isolate carrier generations and flow state", 
   }
 });
 
-test("the frozen pre-change client pairs and uses catalog, HTTP, TCP, and UDP wire contracts", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-legacy-"));
-  const testnet = await createHyperDhtTestnet(4);
-  let serverDht: DhtNode | undefined;
-  let peer: RunningPeer | undefined;
-  let legacy: FrozenLegacyClient | undefined;
-  let target: Server | undefined;
-  let httpTarget: Server | undefined;
-  let udpTarget: import("node:dgram").Socket | undefined;
-  try {
-    const serverState = path.join(root, "server", "peer");
-    const serverSetup = await setupPeer({ stateDir: serverState });
-    const serverIdentity = await loadPeerIdentity(serverState);
-    let persistedConfig: PeerConfig | undefined;
-    serverDht = createDht({
-      bootstrap: testnet.bootstrap,
-      keyPair: keyPairFromSeed(serverIdentity.seed),
-    });
-    peer = await startPeer({
-      stateDir: serverState,
-      config: parsePeerConfig({
-        gateway: { port: 0 },
-        peers: [],
-        services: [],
-        bindings: [],
-      }),
-      dht: serverDht,
-      persistConfig: async (config) => {
-        persistedConfig = config;
-      },
-    });
-    const invitation = peer.createPairingInvitation();
-
-    target = createServer((socket) => {
-      const chunks: Buffer[] = [];
-      socket.on("data", (chunk: Buffer) => chunks.push(chunk));
-      socket.on("end", () => {
-        socket.end(Buffer.concat([Buffer.from("legacy:"), ...chunks]));
-      });
-    });
-    await listenTcp(target);
-    const targetAddress = target.address();
-    if (!targetAddress || typeof targetAddress === "string") {
-      throw new Error("test legacy source did not receive an address");
-    }
-    let authorization: string | undefined;
-    httpTarget = createHttpServer(
-      (request: IncomingMessage, response: ServerResponse) => {
-        authorization = request.headers.authorization;
-        response.end(`legacy-http:${request.url ?? "/"}`);
-      },
-    );
-    await listenTcp(httpTarget);
-    const httpAddress = httpTarget.address();
-    if (!httpAddress || typeof httpAddress === "string") {
-      throw new Error("test legacy HTTP source did not receive an address");
-    }
-    const { createSocket: createUdpSocket } = await import("node:dgram");
-    udpTarget = createUdpSocket("udp4");
-    await new Promise<void>((resolve, reject) => {
-      udpTarget!.once("error", reject);
-      udpTarget!.bind(0, "127.0.0.1", resolve);
-    });
-    const udpAddress = udpTarget.address();
-    if (typeof udpAddress === "string")
-      throw new Error("legacy UDP target has no address");
-    udpTarget.on("message", (message, remote) => {
-      udpTarget!.send(
-        Buffer.concat([Buffer.from("legacy-udp:"), message]),
-        remote.port,
-        remote.address,
-      );
-    });
-
-    const clientState = path.join(root, "client", "peer");
-    const clientSetup = await setupPeer({ stateDir: clientState });
-    const legacyTask = connectFrozenLegacyClient({
-      invitation: invitation.uri,
-      seed: (await loadPeerIdentity(clientState)).seed,
-      bootstrap: testnet.bootstrap,
-      label: "old-phone",
-      platform: "android",
-    });
-    await waitFor(() => peer?.pairingStatus().phase === "pending");
-    await peer.approvePairing();
-    legacy = await legacyTask;
-    assert.equal(persistedConfig?.peers[0]?.publicKey, clientSetup.publicKey);
-    await waitFor(() => peer?.status().connections[0]?.status === "connected");
-    assert.equal(peer.status().connections[0]?.capability, "unsupported");
-
-    await peer.applyConfig(
-      parsePeerConfig({
-        gateway: { port: 0 },
-        peers: [
-          {
-            label: "old-phone",
-            publicKey: clientSetup.publicKey,
-            connection: "accept",
-          },
-        ],
-        services: [
-          {
-            id: "legacy",
-            name: "Legacy service",
-            source: { localPort: targetAddress.port },
-            allow: [clientSetup.publicKey],
-          },
-          {
-            id: "legacy-http",
-            name: "Legacy HTTP service",
-            kind: "http",
-            source: { localPort: httpAddress.port },
-            allow: [clientSetup.publicKey],
-          },
-          {
-            id: "legacy-udp",
-            name: "Legacy UDP",
-            kind: "udp",
-            source: { localPort: udpAddress.port },
-            allow: [clientSetup.publicKey],
-          },
-        ],
-        bindings: [],
-      }),
-    );
-    const catalog = await legacy.catalog();
-    assert.equal(catalog.publisher?.publisherKey, serverSetup.publicKey);
-    assert.deepEqual(
-      catalog.services
-        ?.filter(({ id }) => id !== "home")
-        .map(({ id, kind }) => ({ id, kind })),
-      [
-        { id: "legacy", kind: "tcp" },
-        { id: "legacy-http", kind: "tcp" },
-        { id: "legacy-udp", kind: "udp" },
-      ],
-    );
-    const tunnel = await legacy.open("legacy");
-    const tcpReply = readStream(tunnel);
-    tunnel.end(Buffer.from("payload"));
-    assert.deepEqual(await tcpReply, Buffer.from("legacy:payload"));
-    assert.equal(
-      await legacy.requestHttp("legacy-http", "/from-old-client"),
-      "legacy-http:/from-old-client",
-    );
-    assert.equal(authorization, `Kepos ${legacy.publicKey}`);
-    assert.equal(
-      Buffer.from(
-        await legacy.sendUdp("legacy-udp", Buffer.from("payload")),
-      ).toString(),
-      "legacy-udp:payload",
-    );
-  } finally {
-    await legacy?.close().catch(() => undefined);
-    await peer?.stop().catch(() => undefined);
-    await serverDht?.destroy({ force: true }).catch(() => undefined);
-    await closeServer(target);
-    await closeServer(httpTarget);
-    await closeUdp(udpTarget);
-    await testnet.destroy();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
 test("pair approval survives stop, config reload, and a fresh peer connection", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-pair-reload-"));
   const testnet = await createHyperDhtTestnet(4);
@@ -1037,7 +864,6 @@ test("pair approval survives stop, config reload, and a fresh peer connection", 
   let clientDht: DhtNode | undefined;
   let serverPeer: RunningPeer | undefined;
   let clientPeer: RunningPeer | undefined;
-  let legacy: FrozenLegacyClient | undefined;
   try {
     const serverState = path.join(root, "server", "peer");
     const clientState = path.join(root, "client", "peer");
@@ -1056,35 +882,51 @@ test("pair approval survives stop, config reload, and a fresh peer connection", 
       bootstrap: testnet.bootstrap,
       keyPair: keyPairFromSeed(serverIdentity.seed),
     });
+    const clientIdentity = await loadPeerIdentity(clientState);
+    clientDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(clientIdentity.seed),
+    });
     serverPeer = await startPeer({
       stateDir: serverState,
       config: initialConfig,
       dht: serverDht,
       persistConfig: (config) => saveKeposConfig(config, configPath),
     });
+    clientPeer = await startPeer({
+      stateDir: clientState,
+      config: initialConfig,
+      dht: clientDht,
+      persistConfig: async () => undefined,
+    });
 
     const invitation = serverPeer.createPairingInvitation();
-    const legacyTask = connectFrozenLegacyClient({
-      invitation: invitation.uri,
-      seed: (await loadPeerIdentity(clientState)).seed,
-      bootstrap: testnet.bootstrap,
-      label: "old-phone",
-      platform: "android",
-    });
+    const pairingTask = clientPeer.pair(
+      invitation.uri,
+      "phone",
+      "android",
+    );
     await waitFor(() => serverPeer?.pairingStatus().phase === "pending");
     await serverPeer.approvePairing();
-    legacy = await legacyTask;
+    await pairingTask;
+    await waitFor(
+      () =>
+        serverPeer?.status().connections[0]?.status === "connected" &&
+        clientPeer?.status().connections[0]?.status === "connected",
+    );
 
     const persisted = await loadKeposConfig(configPath);
     assert.deepEqual(persisted?.peers, [
       {
-        label: "old-phone",
+        label: "phone",
         publicKey: clientSetup.publicKey,
         connection: "accept",
       },
     ]);
-    await legacy.close();
-    legacy = undefined;
+    await clientPeer.stop();
+    clientPeer = undefined;
+    await clientDht.destroy({ force: true });
+    clientDht = undefined;
     await serverPeer.stop();
     serverPeer = undefined;
     await serverDht.destroy({ force: true });
@@ -1101,10 +943,10 @@ test("pair approval survives stop, config reload, and a fresh peer connection", 
       config: reloaded!,
       dht: serverDht,
     });
-    const clientIdentity = await loadPeerIdentity(clientState);
+    const reloadedClientIdentity = await loadPeerIdentity(clientState);
     clientDht = createDht({
       bootstrap: testnet.bootstrap,
-      keyPair: keyPairFromSeed(clientIdentity.seed),
+      keyPair: keyPairFromSeed(reloadedClientIdentity.seed),
     });
     clientPeer = await startPeer({
       stateDir: clientState,
@@ -1130,16 +972,14 @@ test("pair approval survives stop, config reload, and a fresh peer connection", 
         clientPeer.status().connections[0]?.services === 1,
     );
     assert.deepEqual(serverPeer.status().connections[0], {
-      label: "old-phone",
+      label: "phone",
       publicKey: clientSetup.publicKey,
       connection: "accept",
       status: "connected",
       generation: 1,
-      capability: "ready",
       services: 1,
     });
   } finally {
-    await legacy?.close().catch(() => undefined);
     await clientPeer?.stop().catch(() => undefined);
     await serverPeer?.stop().catch(() => undefined);
     await clientDht?.destroy({ force: true }).catch(() => undefined);
@@ -1567,9 +1407,11 @@ test("canonical UDP republication uses the authenticated upstream peer and retur
   const testnet = await createHyperDhtTestnet(4);
   let macDht: DhtNode | undefined;
   let nucDht: DhtNode | undefined;
+  let clientDht: DhtNode | undefined;
   let macPeer: RunningPeer | undefined;
   let nucPeer: RunningPeer | undefined;
-  let legacy: FrozenLegacyClient | undefined;
+  let clientPeer: RunningPeer | undefined;
+  let clientSocket: Socket | undefined;
   let target: import("node:dgram").Socket | undefined;
   try {
     const macState = path.join(root, "mac", "peer");
@@ -1580,6 +1422,7 @@ test("canonical UDP republication uses the authenticated upstream peer and retur
     const clientSetup = await setupPeer({ stateDir: clientState });
     const macIdentity = await loadPeerIdentity(macState);
     const nucIdentity = await loadPeerIdentity(nucState);
+    const clientIdentity = await loadPeerIdentity(clientState);
     macDht = createDht({
       bootstrap: testnet.bootstrap,
       keyPair: keyPairFromSeed(macIdentity.seed),
@@ -1587,6 +1430,10 @@ test("canonical UDP republication uses the authenticated upstream peer and retur
     nucDht = createDht({
       bootstrap: testnet.bootstrap,
       keyPair: keyPairFromSeed(nucIdentity.seed),
+    });
+    clientDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(clientIdentity.seed),
     });
 
     const { createSocket } = await import("node:dgram");
@@ -1633,6 +1480,7 @@ test("canonical UDP republication uses the authenticated upstream peer and retur
       gateway: { port: 0 },
       peers: [
         { label: "mac", publicKey: macSetup.publicKey, connection: "accept" },
+        { label: "phone", publicKey: clientSetup.publicKey, connection: "accept" },
       ],
       services: [
         {
@@ -1640,7 +1488,7 @@ test("canonical UDP republication uses the authenticated upstream peer and retur
           name: "Republished game",
           kind: "udp",
           source: { peer: "mac", service: "game" },
-          allow: [],
+          allow: [clientSetup.publicKey],
         },
       ],
       bindings: [],
@@ -1658,58 +1506,46 @@ test("canonical UDP republication uses the authenticated upstream peer and retur
         nucPeer.status().services[0]?.available === true,
     );
 
-    const invitation = nucPeer.createPairingInvitation();
-    const legacyTask = connectFrozenLegacyClient({
-      invitation: invitation.uri,
-      seed: (await loadPeerIdentity(clientState)).seed,
-      bootstrap: testnet.bootstrap,
-      label: "old-udp-client",
-      platform: "android",
+    clientPeer = await startPeer({
+      stateDir: clientState,
+      dht: clientDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [
+          { label: "nuc", publicKey: nucSetup.publicKey, connection: "dial" },
+        ],
+        services: [],
+        bindings: [
+          {
+            peer: "nuc",
+            service: "game-republished",
+            kind: "udp",
+            listen: { localPort: 0 },
+          },
+        ],
+      }),
     });
-    await waitFor(() => nucPeer?.pairingStatus().phase === "pending");
-    await nucPeer.approvePairing();
-    legacy = await legacyTask;
-    const approvedConfig = parsePeerConfig({
-      ...initialNucConfig,
-      peers: [
-        ...initialNucConfig.peers,
-        {
-          label: "old-udp-client",
-          publicKey: clientSetup.publicKey,
-          connection: "accept",
-        },
-      ],
-      services: [
-        {
-          ...initialNucConfig.services[0]!,
-          allow: [clientSetup.publicKey],
-        },
-      ],
-    });
-    await nucPeer.applyConfig(approvedConfig);
-    const catalog = await legacy.catalog();
-    assert.equal(
-      catalog.services?.find(({ id }) => id === "game-republished")?.kind,
-      "udp",
+    await waitFor(
+      () =>
+        clientPeer?.status().connections[0]?.status === "connected" &&
+        clientPeer.status().bindings[0]?.available === true,
     );
+    const bindingPort = clientPeer.status().bindings[0]?.port;
+    assert.equal(typeof bindingPort, "number");
+    clientSocket = createSocket("udp4");
+    await bindUdpSocket(clientSocket);
     assert.equal(
-      Buffer.from(
-        await legacy.sendUdp("game-republished", Buffer.from("datagram")),
-      ).toString(),
+      (await sendUdpDatagram(clientSocket, bindingPort!, Buffer.from("datagram"))).toString(),
       "udp-upstream:datagram",
     );
-    await nucPeer.applyConfig(
-      parsePeerConfig({
-        ...approvedConfig,
-        gateway: { port: 0, domain: "kepos.internal" },
-      }),
-    );
   } finally {
-    await legacy?.close().catch(() => undefined);
+    await clientPeer?.stop().catch(() => undefined);
     await nucPeer?.stop().catch(() => undefined);
     await macPeer?.stop().catch(() => undefined);
+    await clientDht?.destroy({ force: true }).catch(() => undefined);
     await nucDht?.destroy({ force: true }).catch(() => undefined);
     await macDht?.destroy({ force: true }).catch(() => undefined);
+    await closeUdp(clientSocket);
     await closeUdp(target);
     await testnet.destroy();
     await rm(root, { recursive: true, force: true });

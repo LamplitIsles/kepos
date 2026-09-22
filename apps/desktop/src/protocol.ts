@@ -37,7 +37,6 @@ export interface DesktopPeerRole {
     connection: "dial" | "accept";
     status: string;
     generation: number;
-    capability: string;
     services: number;
     error?: string;
   }>;

@@ -18,7 +18,6 @@ const runningPeer = {
     connection: "accept" as const,
     status: "connected",
     generation: 1,
-    capability: "ready",
     services: 1,
   }],
   services: [{

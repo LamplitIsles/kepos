@@ -17,10 +17,9 @@ install can enter a peer public key, scan a QR invitation, or consume a
 `kepos://pair?...` deep link. The host IPC writes the selected relationship
 to the app-private canonical configuration and retains the seed in the
 app-private identity file. It does not add a general configuration editor,
-reverse-service UI, or reverse UDP. Already-built Android binaries remain
-useful as legacy wire clients for the one-way old-client interoperability
-contract; that compatibility target is not the source contract of a freshly
-built app.
+reverse-service UI, or reverse UDP. Already-built Android binaries must be
+redistributed with canonical peer-control before they can participate in
+admitted peer relationships.
 
 ## User flow
 
@@ -69,9 +68,9 @@ its host protocol; it does not receive another device's private seed or a
 copied canonical peer directory.
 
 The canonical configuration shape is documented in
-[CLI, identity, and configuration](../cli.md). Old subscriber wire fields in
-the Worklet are compatibility code at the network boundary, not a second
-repository-owned TOML source of truth.
+[CLI, identity, and configuration](../cli.md). The Worklet uses only the
+canonical peer-control protocol and does not read a second repository-owned
+TOML source of truth.
 
 ## Build and install
 
@@ -107,9 +106,9 @@ and test ports. It cannot replace or remove the installed
 
 ## Scope and evidence
 
-The peer-services implementation validates canonical peer behavior and
-old-client → canonical-server interoperability with test-owned identities and
-HyperDHT testnets. Those checks are not an Android hardware run and do not
+The canonical peer-control implementation validates canonical peer behavior
+with test-owned identities and HyperDHT testnets. Those checks are not an
+Android hardware run and do not
 claim reverse-service UI, Android reverse UDP, or a live DSH/cua-driver
 session.
 

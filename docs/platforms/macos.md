@@ -10,7 +10,7 @@ bindings, pairing, config reload, diagnostics, and shutdown. The app does not
 start a Node or Electron child process.
 
 The peer UI shows the local public-key fingerprint, configured peer labels and
-dial/accept directions, capability/connection state, published services,
+dial/accept directions, connection state, published services,
 bindings, gateway, and pairing phase. It never displays the private seed.
 
 ## Paths and first launch
@@ -112,9 +112,8 @@ for the full schema and identity conversion order.
 
 Once a configured peer connects, either side can open an explicitly granted
 byte-stream service over that one outer connection. A peer that only supports
-the old wire is still able to consume established server-side services; the
-desktop reports reverse capability as unsupported instead of dialing a second
-connection.
+the old wire is still able to consume established server-side services, but it
+does not become a canonical peer-control counterpart or cause a second dial.
 
 ## Pairing and service actions
 

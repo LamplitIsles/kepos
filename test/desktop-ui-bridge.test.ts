@@ -72,7 +72,7 @@ function deviceSnapshot(): DesktopSnapshot {
     ...canonicalSnapshot,
     peer: {
       ...canonicalSnapshot.peer!,
-      connections: [{ label: "kosmos", publicKey: remoteKey, connection: "dial", status: "connected", generation: 1, capability: "ready", services: 2 }],
+      connections: [{ label: "kosmos", publicKey: remoteKey, connection: "dial", status: "connected", generation: 1, services: 2 }],
       services: [
         { id: "cua", name: "CUA driver", kind: "tcp", source: { unixSocket: "/fixture/cua.sock" }, available: true },
         { id: "repub", name: "Republished service", kind: "tcp", source: { peer: "kosmos", service: "ssh" }, available: true },

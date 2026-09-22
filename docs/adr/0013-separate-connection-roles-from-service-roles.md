@@ -19,10 +19,9 @@ an additional authorized channel on an existing connection.
 - Service providers own sources and service access policy. Service consumers
   own local bindings. Connection admission alone does not grant reverse
   access, and a remote peer cannot select a local listening path or port.
-- Retain old-client-to-new-server interoperability for existing wire
-  operations. New-client-to-old-server interoperability is explicitly out of
-  scope. Configuration hard cutover is independent of wire compatibility;
-  reverse service access requires new capability support at both ends.
+- Canonical peer operation requires `kepos/peer-control/1` at both ends.
+  Configuration and wire cutover are coordinated; an old-wire counterpart is
+  not retained as a partially usable connection.
 - Keep existing unqualified HTTP gateway names such as `dsh.localhost`.
   Do not add automatic peer-qualified URLs in this change. Explicit binding
   configuration resolves a real name conflict; do not introduce a second
@@ -60,20 +59,15 @@ per-connection responsibilities of the same peer identity.
 
 The canonical mux/runtime surface is `createMuxPeer` and `startPeer`. It keeps
 the existing control, heartbeat, TCP/HTTP, UDP, and Home wire adapters at the
-boundary while negotiating `kepos/peer-services/1` for reverse byte streams.
+boundary while establishing `kepos/peer-control/1` for reverse byte streams.
 The peer runtime resolves current connections by authenticated public key and
 generation, owns local bindings and service sources, and closes affected
 channels/flows on policy or source changes.
 
-The existing TCP, pairing, control, UDP, and Home-registry contracts should
-retain their old meanings for old clients. Negotiate reverse support
-separately; do not send a new reverse request to a client that has not declared
-support or turn unsupported reverse access into a second outbound dial.
-The current control protocol already has a legacy-peer path, but that is
-evidence of an extension pattern, not proof of compatibility for this change.
-Verify old-client-to-new-server operation with frozen wire fixtures or old
-built clients. Keep legacy wire field names where those clients require them;
-this does not require old configuration fields or old internal role ownership.
+TCP, pairing, control, UDP, and Home-registry remain service primitives.
+Pairing is separate before admission; after approval, the peer must establish
+canonical control. Do not turn an incompatible control relationship into a
+second outbound dial or partial service connection.
 
 ADR 0012 specified outbound upstream connections authenticated with the
 republishing publisher key. The canonical runtime supersedes that role
@@ -97,7 +91,7 @@ implemented by this slice.
 
 Bindings stay configured when a peer is offline and report unavailable.
 Connection loss terminates old channels; new requests can use a replacement
-connection after capability and authorization checks. Do not replay bytes or
+connection after peer-control, catalog, and authorization checks. Do not replay bytes or
 application operations from an old channel. Policy revocation closes affected
 channels, and socket cleanup removes only endpoints owned by that runtime.
 

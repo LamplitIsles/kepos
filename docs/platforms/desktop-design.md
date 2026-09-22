@@ -13,7 +13,7 @@ icons and explicit Open, Copy command, Copy URL, or endpoint actions.
 ## Information hierarchy
 
 - Device names and connection state orient the user. Public keys, connection
-  direction and capability details sit behind a device-details disclosure.
+  direction details sit behind a device-details disclosure.
 - The primary pane shows provided services. Consuming a remote service through
   a local endpoint does not move it to the local device's page. A republished
   service belongs to the device republishing it, even when its source is remote.

@@ -59,17 +59,16 @@ peer identity
 ```
 
 The direction of a connection does not decide which end provides a service.
-Once a connection is authenticated, the two new peers negotiate
-`kepos/peer-services/1` with the `byte-stream-v1` handshake. A `ready` result
-enables named byte-stream opens in either direction. A timeout or an unknown
-handshake is `unsupported`; the runtime never sends a reverse request to a
-legacy endpoint and never creates a second connection to satisfy one.
+Once a canonical connection is authenticated, the two peers establish the
+long-lived `kepos/peer-control/1` relationship. That relationship enables
+named byte-stream opens in either direction, subject to authorization and the
+remote catalog; the runtime never sends a reverse request to a legacy endpoint
+or creates a second connection to satisfy one.
 
-Legacy server-side service protocols remain installed at the wire boundary.
-An old subscriber can still pair with an upgraded accept side, read Home, and
-use established TCP, HTTP, and UDP operations. It does not receive the new
-reverse capability. New-client → old-server compatibility is intentionally not
-implemented.
+Home, TCP, HTTP, and UDP remain service primitives, but an admitted canonical
+peer must establish `kepos/peer-control/1` before it can use them. An old wire
+counterpart is closed during protocol establishment rather than being retained
+as a partially usable connection.
 
 ## Configuration and ownership
 
@@ -184,7 +183,7 @@ runtime uses the existing observation, heartbeat, mux, and cleanup seams.
 
 The native desktop host owns one canonical peer runtime, WebView, tray/menu
 surface, paths, diagnostics, singleton lock, and shutdown. The peer surface
-shows the public identity, relationship direction/capability, services,
+shows the public identity, relationship direction, services,
 bindings, gateway, and pairing state. It does not expose private seeds. The
 desktop pairing invitation admits one unknown candidate temporarily; approval
 persists the public key as an `accept` peer but does not add service grants.
@@ -201,9 +200,9 @@ reconnects it through the host IPC. Admission and service grants remain
 separate. The UI is a status/service console with the canonical action metadata
 for supported services; it does not grow a general configuration editor,
 reverse-service UI, or reverse UDP interface. Previously built Android binaries
-are the frozen legacy-client interoperability targets; they are not a second
-fresh-build runtime or configuration source. The Bare host protocol remains
-the lifecycle boundary between Kotlin and the Worklet.
+must be redistributed with canonical peer control before they can join admitted
+peer relationships. The Bare host protocol remains the lifecycle boundary
+between Kotlin and the Worklet.
 
 ### Nix/Home Manager
 
@@ -236,7 +235,6 @@ tokens, or candidate addresses. The stable operational distinctions are:
 
 ```text
 offline       configured peer/source has no usable current connection
-unsupported   connected peer lacks the reverse capability
 unauthorized  authenticated peer lacks the service grant/catalog entry
 conflicting   multiple visible same-name services require an explicit binding
 ```
@@ -252,4 +250,4 @@ Those boundaries are deliberate and are described in
 - [ADR 0012: Explicit service republication](adr/0012-explicit-service-republication.md) — historical publisher wording retained where it describes the existing wire contract; canonical peer identity supersedes its role exception.
 - [ADR 0010: Publisher identity state and TOML policy](adr/0010-publisher-identity-state-and-toml-policy.md) — historical state decision; canonical `peer.json` and peer TOML supersede its runtime ownership.
 - [ADR 0008: Share one HyperDHT node per device runtime](adr/0008-share-one-hyperdht-node-per-device-runtime.md) — transport lifecycle contract retained by host integrations.
-- [ADR 0003: Android subscriber and Bare host boundaries](adr/0003-android-subscriber-and-bare-host-boundaries.md) — legacy client/host boundary retained.
+- [ADR 0003: Android subscriber and Bare host boundaries](adr/0003-android-subscriber-and-bare-host-boundaries.md) — historical Android/Bare host boundary.

@@ -72,7 +72,6 @@ test("desktop controller sends the latest canonical snapshot after page readines
       connection: "accept",
       status: "reconnecting",
       generation: 2,
-      capability: "ready",
       services: 0,
     }] },
   });
@@ -86,7 +85,6 @@ test("desktop controller sends the latest canonical snapshot after page readines
       connection: "accept",
       status: "reconnecting",
       generation: 2,
-      capability: "ready",
       services: 0,
     }] },
   })));

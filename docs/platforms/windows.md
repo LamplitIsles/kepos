@@ -109,7 +109,7 @@ the candidate range alone does not guarantee an established UDX path.
 Closing the main window hides it. **Open Kepos** restores it and **Quit Kepos**
 closes service channels, bindings, gateway, WebView, tray, and the peer runtime
 idempotently. Offline bindings remain configured and unavailable. A disconnect
-terminates active streams; reconnect performs fresh capability and ACL checks
+terminates active streams; reconnect performs fresh peer-control and ACL checks
 and never replays old bytes.
 
 For a future key-preserving cutover, select the intended existing Windows peer

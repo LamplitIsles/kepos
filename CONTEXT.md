@@ -122,8 +122,7 @@ endpoint, or a local UDP port when `kind = "udp"`. Missing or empty service
 grants deny access, and a binding never republishes its target.
 
 The runtime stores one seed-only `peer.json` and never probes legacy role state
-at startup. The existing old-client-to-new-server Home/TCP/HTTP/UDP wire
-surface remains available, while reverse byte streams require the negotiated
-`kepos/peer-services/1` capability. Reverse UDP remains unsupported. See
+at startup. Every admitted canonical peer establishes `kepos/peer-control/1`
+before it can use services. Reverse UDP remains unsupported. See
 [ADR 0013](docs/adr/0013-separate-connection-roles-from-service-roles.md) and
 the [CLI contract](docs/cli.md) for operational details.

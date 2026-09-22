@@ -100,16 +100,15 @@ intended service's `allow` list. A source or downstream grant can be revoked
 independently; affected channels close, bindings remain configured, and new
 requests wait for a fresh connection/catalog/ACL check.
 
-Unknown candidates cannot read Home or open services. A legacy Android client
-can still pair with a canonical accept side and consume established TCP,
-HTTP, and UDP services, but cannot initiate reverse CUA service opens because
-it does not advertise the peer-services capability.
+Unknown candidates cannot read Home or open services. After pairing approval,
+the Android peer must establish the canonical `kepos/peer-control/1` contract
+before it can use any service.
 
 ## Verification boundary
 
 The repository verifies the transport with temporary Unix/TCP listeners,
-representative NDJSON and large payloads, real local HyperDHT testnets, and
-old-client wire paths. Those automated checks do not install dsh or the
+representative NDJSON and large payloads, and real local HyperDHT testnets.
+Those automated checks do not install dsh or the
 cua-driver, operate a real Mac desktop, validate a production network path, or
 perform a live GUI trial.
 

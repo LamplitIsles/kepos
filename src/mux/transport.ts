@@ -221,20 +221,11 @@ export interface RunningMuxSubscriber {
   ) => Promise<void>;
 }
 
-/**
- * The capability advertised by a canonical peer runtime.  The legacy
- * publisher/subscriber wire adapters deliberately do not advertise this
- * value, which lets a peer fail reverse opens without guessing at a second
- * connection or silently falling back to an old role.
- */
-export type PeerCapability = "ready" | "unsupported";
-
 export interface MuxPeerOptions {
   authorized?: boolean;
   /** Configured connection ownership; service direction never changes it. */
   connection: "dial" | "accept";
   accept: (serviceId: string) => Promise<Duplex>;
-  capabilityTimeoutMs?: number;
   heartbeat?: false | HeartbeatOptions;
   /** Provider-owned full catalog snapshots carried by peer-control/1. */
   catalog?: {
@@ -287,7 +278,6 @@ export interface MuxPeerOptions {
 }
 
 export interface RunningMuxPeer {
-  capability: Promise<PeerCapability>;
   controlReady: Promise<ControlNegotiation>;
   udp: SubscriberDatagramConnection;
   open: (serviceId: string) => Promise<Duplex>;
@@ -862,8 +852,16 @@ function createAcceptPeerControl(
   outer: OuterStream,
   options: MuxPeerOptions,
 ): RunningControlChannel {
+  const control = options.heartbeat === false ? {} : (options.heartbeat ?? {});
+  const establishmentTimeoutMs = positiveInteger(
+    control.establishmentTimeoutMs,
+    defaultControlEstablishmentTimeoutMs,
+  );
+  const schedule = control.schedule ?? scheduleHeartbeat;
   let closed = false;
   let outerClosed = false;
+  let established = false;
+  let cancelEstablishmentTimer: (() => void) | undefined;
   let channel: MuxChannel | undefined;
   let messages: ControlMessages | undefined;
   let lastCatalog: string | undefined;
@@ -877,7 +875,10 @@ function createAcceptPeerControl(
   });
   void ready.catch(() => undefined);
   const reportFailure = (
-    trigger: "control.invalid-message" | "control.unexpected-close",
+    trigger:
+      | "control.establishment.timeout"
+      | "control.invalid-message"
+      | "control.unexpected-close",
   ): void => {
     if (failureReported) return;
     failureReported = true;
@@ -906,6 +907,9 @@ function createAcceptPeerControl(
       id,
       handshake: compact.string,
       onopen: () => {
+        established = true;
+        cancelEstablishmentTimer?.();
+        cancelEstablishmentTimer = undefined;
         settleReady("ready");
         options.onControlReady?.();
         publishCatalog();
@@ -943,22 +947,32 @@ function createAcceptPeerControl(
   });
   outer.once("close", () => {
     outerClosed = true;
+    cancelEstablishmentTimer?.();
+    cancelEstablishmentTimer = undefined;
     if (!readySettled)
       settleFailure(
         new Error("Peer connection closed before control was ready"),
       );
   });
   outer.once("error", () => {
+    cancelEstablishmentTimer?.();
+    cancelEstablishmentTimer = undefined;
     if (!readySettled)
       settleFailure(
         new Error("Peer connection errored before control was ready"),
       );
   });
+  cancelEstablishmentTimer = schedule(
+    establishmentTimeoutMs,
+    establishmentTimedOut,
+  );
   return {
     ready,
     publishCatalog,
     close: () => {
       closed = true;
+      cancelEstablishmentTimer?.();
+      cancelEstablishmentTimer = undefined;
       mux.unpair({ protocol: peerControlProtocol });
       if (!readySettled)
         settleFailure(new Error("Peer control channel closed"));
@@ -975,6 +989,16 @@ function createAcceptPeerControl(
     if (readySettled) return;
     readySettled = true;
     readyReject(error);
+  }
+  function establishmentTimedOut(): void {
+    if (closed || established) return;
+    const error = new Error(
+      `Peer control channel timed out after ${establishmentTimeoutMs}ms`,
+    );
+    reportFailure("control.establishment.timeout");
+    settleFailure(error);
+    closed = true;
+    outer.destroy(error);
   }
   function publishCatalog(): void {
     const encoded = options.catalog && serializeCatalog(options.catalog.snapshot());
@@ -1872,10 +1896,6 @@ function directionFields(
   };
 }
 
-const peerCapabilityProtocol = "kepos/peer-services/1";
-const peerCapabilityHandshake = "byte-stream-v1";
-const defaultPeerCapabilityTimeoutMs = 2_000;
-
 /**
  * Install the canonical, symmetric service surface on one authenticated
  * outer stream.  This is intentionally a single Protomux instance: legacy
@@ -1897,21 +1917,10 @@ export function createMuxPeer(
     stream: MuxTunnel;
   }>();
   const controlChannels = new Set<MuxChannel>();
-  const capabilityChannels = new Set<MuxChannel>();
   let pairingChannel: MuxChannel | undefined;
   let outgoingPairingChannel: MuxChannel | undefined;
   let pairingOpened = false;
-
-  let capabilitySettled = false;
-  let capabilityResolve!: (result: PeerCapability) => void;
-  const capability = new Promise<PeerCapability>((resolve) => {
-    capabilityResolve = resolve;
-  });
-  void capability.catch(() => undefined);
-  const capabilityTimeout = setTimeout(() => {
-    settleCapability("unsupported");
-  }, positiveInteger(options.capabilityTimeoutMs, defaultPeerCapabilityTimeoutMs));
-  capabilityTimeout.unref?.();
+  let controlEstablished = false;
 
   let controlReadyResolve!: (result: ControlNegotiation) => void;
   let controlReadyReject!: (error: Error) => void;
@@ -1923,50 +1932,6 @@ export function createMuxPeer(
   void controlReady.catch(() => undefined);
 
   const transportSnapshot = options.transportSnapshot;
-  const markCapability = (handshake: string): void => {
-    if (handshake === peerCapabilityHandshake) {
-      settleCapability("ready");
-      return;
-    }
-    settleCapability("unsupported");
-  };
-
-  mux.pair({ protocol: peerCapabilityProtocol }, (id) => {
-    const channel = mux.createChannel({
-      protocol: peerCapabilityProtocol,
-      id,
-      handshake: compact.string,
-      onopen: (handshake) => {
-        markCapability(handshake);
-      },
-      onclose: () => {
-        if (channel) capabilityChannels.delete(channel);
-      },
-    });
-    if (!channel) return;
-    capabilityChannels.add(channel);
-    channel.open(peerCapabilityHandshake);
-  });
-
-  const capabilityId = crypto.randomBytes(16);
-  const capabilityChannel = mux.createChannel({
-    protocol: peerCapabilityProtocol,
-    id: capabilityId,
-    handshake: compact.string,
-    onopen: (handshake) => {
-      markCapability(handshake);
-    },
-    onclose: () => {
-      if (!capabilitySettled) settleCapability("unsupported");
-    },
-  });
-  if (capabilityChannel) {
-    capabilityChannels.add(capabilityChannel);
-    capabilityChannel.open(peerCapabilityHandshake);
-  } else {
-    settleCapability("unsupported");
-  }
-
   let peerControl: RunningControlChannel | undefined;
 
   const startAuthorizedControl = (): void => {
@@ -1977,6 +1942,7 @@ export function createMuxPeer(
         : createDialerPeerControl(mux, outer, options, now);
     void peerControl.ready.then(
       (result) => {
+        controlEstablished = result === "ready";
         if (controlReadySettled) return;
         controlReadySettled = true;
         controlReadyResolve(result);
@@ -2196,6 +2162,9 @@ export function createMuxPeer(
           tunnel.stream.once("close", () => activeServiceChannels.delete(activeChannel));
           try {
             if (!authorized) throw new Error("Peer service access is not approved");
+            if (!controlEstablished) {
+              throw new Error("Peer control is not established");
+            }
             if (!(options.serviceAuthorized?.(openedServiceId) ?? true)) {
               throw new Error(`Service is not authorized: ${openedServiceId}`);
             }
@@ -2260,7 +2229,6 @@ export function createMuxPeer(
   });
 
   outer.once("close", () => {
-    if (!capabilitySettled) settleCapability("unsupported");
     if (!controlReadySettled) {
       controlReadySettled = true;
       controlReadyReject(new Error("Peer connection closed before control was ready"));
@@ -2268,18 +2236,11 @@ export function createMuxPeer(
   });
 
   return {
-    capability,
     controlReady,
     udp: udp.transport,
     async open(serviceId: string): Promise<Duplex> {
       if (closed) throw new Error("Peer connection is closed");
       if (!authorized) throw new Error("Peer service access is not approved");
-      const negotiated = await capability;
-      if (negotiated !== "ready") {
-        throw new Error(
-          "Peer does not support reverse byte-stream services",
-        );
-      }
       const id = crypto.randomBytes(16);
       const emit = createObservationEmitter({
         observe: options.observe,
@@ -2342,18 +2303,14 @@ export function createMuxPeer(
     close(): void {
       if (closed) return;
       closed = true;
-      clearTimeout(capabilityTimeout);
       if (!controlReadySettled) {
         controlReadySettled = true;
         controlReadyReject(new Error("Peer control channel closed"));
       }
       mux.unpair({ protocol });
-      mux.unpair({ protocol: peerCapabilityProtocol });
       peerControl?.close();
       pairingChannel?.close();
       outgoingPairingChannel?.close();
-      for (const channel of capabilityChannels) channel.close();
-      capabilityChannels.clear();
       udp.close();
       for (const channel of activeServiceChannels) {
         channel.stream.closeFrom("peer.close");
@@ -2372,10 +2329,4 @@ export function createMuxPeer(
     ...(pairingTask ? { pairing: pairingTask } : {}),
   };
 
-  function settleCapability(result: PeerCapability): void {
-    if (capabilitySettled) return;
-    capabilitySettled = true;
-    clearTimeout(capabilityTimeout);
-    capabilityResolve(result);
-  }
 }

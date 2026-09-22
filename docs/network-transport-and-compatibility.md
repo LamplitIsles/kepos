@@ -50,11 +50,10 @@ Each runtime loads one seed-only `peer.json` and derives one HyperDHT keypair.
 The canonical `peers` array decides whether this runtime dials or accepts a
 relationship. Service direction is independent of that connection direction.
 
-After authentication, both new peers open the
-`kepos/peer-services/1` capability protocol and exchange `byte-stream-v1`.
-Only a `ready` result permits reverse named byte-stream opens. A timeout or
-unknown handshake becomes `unsupported`; the runtime does not probe an old
-wire format, open a second reverse connection, or silently reroute to another
+After authentication, canonical peers establish the single long-lived
+`kepos/peer-control/1` protocol. Its successful establishment permits reverse
+named byte-stream opens subject to authorization and catalog state. The runtime
+does not probe an old wire format, open a second reverse connection, or silently reroute to another
 peer.
 
 ```text
@@ -168,7 +167,6 @@ choose another peer. The operational distinctions are:
 
 ```text
 offline       no current usable connection/source
-unsupported   connected endpoint lacks peer-services capability
 unauthorized  authenticated peer lacks the service grant
 conflicting   multiple visible same-name services require an explicit binding
 ```
@@ -202,21 +200,14 @@ keeps the established `kepos_publisher_*` names, immediate-peer labels,
 authorization gauges, active-channel gauges, and traffic counters; the
 publisher runtime and shipped dashboard are not reintroduced or redesigned.
 
-## Legacy-client compatibility
+## Canonical protocol boundary
 
-The upgraded accept side retains the existing pairing, Home registry, TCP,
-HTTP, and UDP wire adapters. A frozen old subscriber/client can therefore
-connect to a new server, receive only its authorized catalog, and use the
-established service operations. It does not declare `kepos/peer-services/1`,
-so reverse byte-stream requests are unavailable and do not trigger a second
-dial.
-
-This is a one-way compatibility promise: old client → new server for the
-established operations. New client → old server is not promised and has no
-legacy probing or compatibility fallback. Configuration compatibility is
-separate: old publisher/subscriber TOML tables, flags, contacts, and startup
-state paths are rejected/not read even though the old network wire remains at
-the boundary.
+The accept side retains Home registry, TCP, HTTP, and UDP as service
+primitives, but every admitted canonical peer must establish
+`kepos/peer-control/1`. An incompatible old-wire counterpart is closed within
+the bounded protocol-establishment deadline and cannot use those primitives.
+Pairing remains a separate pre-admission protocol; approval then proceeds into
+normal canonical peer control.
 
 ## Network limits and deferred relays
 
@@ -243,7 +234,7 @@ information. Diagnostics must not contain seeds, secret keys, pairing tokens,
 full candidate addresses, or state files. They are not a stable API.
 
 The repository proves the direct transport with test-owned HyperDHT testnets,
-temporary TCP/Unix/UDP listeners, old-client wire paths, and controllable
-fakes. Those checks do not prove every NAT class, a production relay, or a
+temporary TCP/Unix/UDP listeners, and controllable fakes. Those checks do not
+prove every NAT class, a production relay, or a
 live Mac GUI/cua-driver installation. A later operator smoke procedure is
 documented in [DeepSeek Harness integration](integrations/deepseek-harness.md).

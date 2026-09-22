@@ -34,7 +34,6 @@ import {
 import {
   createMuxPeer,
   type MuxPeerOptions,
-  type PeerCapability,
   type RunningMuxPeer,
 } from "../mux/transport.js";
 import {
@@ -110,7 +109,6 @@ export interface PeerRuntimeConnectionStatus {
   connection: PeerDefinition["connection"];
   status: PeerConnectionStatus;
   generation: number;
-  capability: PeerCapability | "pending";
   services: number;
   error?: string;
 }
@@ -169,7 +167,6 @@ export interface StartPeerOptions {
   observe?: Observe;
   sleep?: (delayMs: number) => Promise<void>;
   connectTimeoutMs?: number;
-  capabilityTimeoutMs?: number;
   serviceAcquisitionTimeoutMs?: number;
   metricsListen?: MetricsListenAddress;
   /** Persist the complete canonical config before pairing is authorized. */
@@ -208,7 +205,6 @@ interface PeerConnection {
   generation: number;
   outer: DhtStream;
   mux: RunningMuxPeer;
-  capability: PeerCapability | "pending";
   catalog?: HomeRegistry;
   closed: boolean;
   error?: string;
@@ -266,7 +262,6 @@ class CanonicalUdpRemote implements UdpPublisherRemote {
       !this.closed &&
       connection !== undefined &&
       !connection.closed &&
-      connection.capability === "ready" &&
       connection.mux.udp.available() &&
       service?.kind === "udp" &&
       service.available !== false
@@ -517,9 +512,7 @@ export async function startPeer(
       pairingCandidates.delete(device.publicKey);
       const entry = peerEntries.get(device.publicKey);
       entry?.current?.mux.authorize();
-      if (entry?.current?.capability === "ready") {
-        entry.current.mux.publishCatalog();
-      }
+      entry?.current?.mux.publishCatalog();
     },
   });
 
@@ -1071,7 +1064,6 @@ export async function startPeer(
       generation,
       outer,
       mux: undefined as unknown as RunningMuxPeer,
-      capability: "pending",
       closed: false,
       udpMappings: new Map(),
     };
@@ -1108,7 +1100,6 @@ export async function startPeer(
         authorized: pairingRequest === undefined && authorized,
         accept: (serviceId) => acceptService(connection, serviceId),
         connection: entry.definition.connection,
-        capabilityTimeoutMs: options.capabilityTimeoutMs,
         catalog: {
           snapshot: () => catalogSnapshotFor(entry),
           receive: (snapshot) => receiveCatalog(connection, snapshot),
@@ -1220,11 +1211,6 @@ export async function startPeer(
     mux.udp.onReset(() => {
       clearCanonicalUdpMappings(connection);
     });
-    void mux.capability.then((capability) => {
-      if (entry.current !== connection) return;
-      connection.capability = capability;
-      updateUdpBindings();
-    });
     outer.once("error", (error) => {
       streamError = error.message;
       streamDiagnosticError = diagnosticError(error);
@@ -1287,8 +1273,6 @@ export async function startPeer(
         startDialing(entry);
       }
     });
-    // A newly accepted stream can be used immediately; the capability promise
-    // is only required by opens in the reverse direction.
     updateHomeServers();
   }
 
@@ -1420,18 +1404,6 @@ export async function startPeer(
         throw new Error("Peer connection changed before service acquisition");
       }
       if (connection && !connection.closed) {
-        if (connection.capability === "pending") {
-          const capability = await waitWithAbort(
-            connection.mux.capability,
-            signal,
-            deadline,
-            now,
-          );
-          connection.capability = capability;
-        }
-        if (connection.capability !== "ready") {
-          throw new Error("Peer does not support reverse byte-stream services");
-        }
         if (serviceId !== "home") {
           await waitForCatalog(connection, signal, deadline);
           const remoteService = connection.catalog?.services.find(
@@ -1480,7 +1452,6 @@ export async function startPeer(
     signal: CancellationSignal | undefined,
     deadline: number,
   ): Promise<void> {
-    if (connection.capability !== "ready") return;
     if (connection.catalog) return;
     while (connection.entry.current === connection && !connection.catalog) {
       throwIfAborted(signal);
@@ -1766,7 +1737,6 @@ export async function startPeer(
         entry?.definition.connection === "dial" &&
         connection &&
         !connection.closed &&
-        connection.capability === "ready" &&
         connection.mux.udp.available() &&
         remote?.kind === "udp" &&
         remote.available !== false,
@@ -2162,7 +2132,6 @@ export async function startPeer(
                   : "connecting"
                 : "offline",
           generation: entry.generation,
-          capability: entry.current?.capability ?? "pending",
           services:
             entry.current?.catalog?.services.length ??
             entry.lastCatalog?.services.length ??

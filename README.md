@@ -88,9 +88,10 @@ listen = { unix_socket = "/run/user/1000/kepos-cua.sock" }
 
 Use `connection = "dial"` on the side that must establish the connection.
 The service direction is independent: once the connection exists, either
-authorized peer can open a byte-stream service if both ends support the peer
-capability. A legacy client can still use the existing server-side TCP, HTTP,
-and UDP operations, but it cannot provide reverse services.
+authorized peer can open a byte-stream service once the canonical
+`kepos/peer-control/1` relationship is established. An incompatible peer is
+closed during protocol establishment rather than retaining any partial service
+access.
 
 Start the runtime with:
 

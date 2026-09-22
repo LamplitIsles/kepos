@@ -7,9 +7,8 @@ are separate policy entries.
 
 The commands are intentionally a hard cutover. `publisher`, `subscriber`, and
 `device` command groups, their role-specific flags, old TOML tables, and old
-state paths are not aliases. They fail as unknown commands/options. Existing
-old clients remain supported at the wire boundary described in
-[network transport and compatibility](network-transport-and-compatibility.md).
+state paths are not aliases. They fail as unknown commands/options. Every
+admitted canonical peer must establish `kepos/peer-control/1`.
 
 ## Commands
 
@@ -260,8 +259,8 @@ connection; service, source, grant, and binding changes close affected active
 channels and UDP flows. Existing bytes are never replayed after reconnect.
 
 The command keeps bindings configured while a peer is offline and reports
-them unavailable. A later connection can serve new requests after capability
-and grant checks. A local Unix binding is removed only when its socket is
+them unavailable. A later canonical peer-control connection can serve new requests
+after catalog and grant checks. A local Unix binding is removed only when its socket is
 still the socket created by this runtime; an occupied or replaced foreign path
 is preserved. Unix endpoints fail clearly on Windows.
 
@@ -281,7 +280,7 @@ npm run kepos -- peer status \
 ```
 
 The running desktop and diagnostics surfaces additionally show connection
-direction, generation, capability (`ready` or `unsupported`), service
+direction, generation, service
 availability, bindings, gateway, and pairing phase. Observations are
 diagnostic, not a stable external API, and must not contain state files,
 seeds, pairing tokens, full addresses, or secret material.
@@ -349,15 +348,10 @@ returns an explicit unsupported result.
 
 ## Compatibility boundary
 
-An upgraded accept side negotiates the `kepos/peer-services/1` capability
-before using reverse byte-stream opens. A legacy client that does not declare
-it is still allowed to use the established Home, pairing, HTTP, TCP, and UDP
-wire operations. Its request for reverse service access is rejected as
-unsupported; Kepos does not silently open a second outbound connection.
-
-The compatibility promise is deliberately one-way: old client → new server
-is supported for the established operations. New client → old server has no
-promise and no fallback path.
+Every admitted canonical peer must establish `kepos/peer-control/1` before
+Home, TCP, HTTP, UDP, or reverse byte-stream service operations are usable.
+An incompatible peer is closed during protocol establishment; Kepos does not
+silently open a second outbound connection or downgrade the canonical contract.
 
 ## Network and firewall boundary
 

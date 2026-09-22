@@ -20,7 +20,6 @@ const snapshot: DesktopSnapshot = {
       connection: "accept",
       status: "connected",
       generation: 2,
-      capability: "ready",
       services: 2,
     }],
     services: [{

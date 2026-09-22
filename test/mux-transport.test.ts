@@ -315,7 +315,7 @@ test("multiplexes independent service streams over one persistent connection", a
   publisher.close();
 });
 
-test("canonical mux peers negotiate one connection and serve both directions", async () => {
+test("canonical mux peers establish peer control without capability negotiation and serve both directions", async () => {
   const [leftOuter, rightOuter] = framedPair();
   const left = createMuxPeer(leftOuter, {
     connection: "dial",
@@ -330,10 +330,17 @@ test("canonical mux peers negotiate one connection and serve both directions", a
   });
 
   try {
-    assert.equal(await left.capability, "ready");
-    assert.equal(await right.capability, "ready");
     assert.equal(await left.controlReady, "ready");
     assert.equal(await right.controlReady, "ready");
+    const Protomux = ProtomuxModule as unknown as {
+      from(stream: Duplex): Iterable<{ protocol: string }>;
+    };
+    assert.equal(
+      [...Protomux.from(leftOuter)].some(
+        (channel) => channel.protocol === "kepos/peer-services/1",
+      ),
+      false,
+    );
 
     const rightService = await left.open("right-service");
     assert.equal(await exchange(rightService, "request"), "left:right-service:request");
@@ -352,6 +359,62 @@ test("canonical mux peers negotiate one connection and serve both directions", a
   } finally {
     left.close();
     right.close();
+  }
+});
+
+test("a canonical peer-control dialer rejects an incompatible control counterpart", async () => {
+  const scheduler = new ManualScheduler();
+  const [canonicalOuter, legacyOuter] = framedPair();
+  const errors: Error[] = [];
+  canonicalOuter.on("error", (error) => errors.push(error));
+  const canonical = createMuxPeer(canonicalOuter, {
+    connection: "dial",
+    accept: async () => prefixService("canonical:"),
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+  });
+  const legacy = createMuxPublisher(legacyOuter, {
+    connect: async () => prefixService("legacy:"),
+    heartbeat: false,
+  });
+
+  try {
+    scheduler.advance(20);
+    await flushFrames();
+    await assert.rejects(canonical.controlReady, /control channel timed out/i);
+    assert.equal(canonicalOuter.destroyCalls, 1);
+    assert.match(errors[0]?.message ?? "", /control channel timed out/i);
+  } finally {
+    canonical.close();
+    legacy.close();
+  }
+});
+
+test("a canonical acceptor rejects an incompatible dialer without a heartbeat watchdog", async () => {
+  const scheduler = new ManualScheduler();
+  const [legacyOuter, acceptOuter] = framedPair();
+  const errors: Error[] = [];
+  acceptOuter.on("error", (error) => errors.push(error));
+  const legacy = createMuxSubscriber(legacyOuter, { heartbeat: false });
+  const accept = createMuxPeer(acceptOuter, {
+    connection: "accept",
+    accept: async () => prefixService("accept:"),
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+  });
+
+  try {
+    assert.equal(scheduler.pending(), 1);
+    await assert.rejects(() => legacy.open("home"), /control is not established/i);
+    scheduler.advance(20);
+    await flushFrames();
+    await assert.rejects(accept.controlReady, /control channel timed out/i);
+    assert.equal(acceptOuter.destroyCalls, 1);
+    assert.equal(scheduler.pending(), 0);
+    assert.match(errors[0]?.message ?? "", /control channel timed out/i);
+  } finally {
+    accept.close();
+    legacy.close();
   }
 });
 
@@ -504,7 +567,7 @@ test("canonical peer control exchanges catalogs without heartbeat watchdogs", as
     assert.deepEqual(acceptCatalogs, [{ services: ["ssh"] }]);
     assert.equal(
       timerDelays.some((delayMs) =>
-        [20_000, 15_000, 10_000].includes(delayMs),
+        [15_000, 10_000].includes(delayMs),
       ),
       false,
     );
@@ -605,8 +668,6 @@ test("canonical mux authorization can promote the same connection", async () => 
   });
 
   try {
-    assert.equal(await candidate.capability, "ready");
-    assert.equal(await approved.capability, "ready");
     await assert.rejects(() => approved.open("before-approval"), /not approved/i);
 
     candidate.authorize();
@@ -638,7 +699,7 @@ test("canonical peer reports source failures, rejects unsupported kinds, and clo
   });
 
   try {
-    await Promise.all([left.capability, right.capability]);
+    await Promise.all([left.controlReady, right.controlReady]);
     await assert.rejects(() => right.open("down"), /source is unavailable/i);
     await assert.rejects(() => right.open("udp"), /UDP service requires/i);
 
@@ -663,6 +724,7 @@ test("canonical peer reports source failures, rejects unsupported kinds, and clo
     accept: async () => new PassThrough(),
   });
   try {
+    await Promise.all([httpLeft.controlReady, httpRight.controlReady]);
     const httpStream = await httpRight.open("http");
     await once(httpStream, "close");
   } finally {
@@ -670,19 +732,6 @@ test("canonical peer reports source failures, rejects unsupported kinds, and clo
     httpRight.close();
   }
 
-  const [unsupportedOuter, unusedOuter] = framedPair();
-  const unsupported = createMuxPeer(unsupportedOuter, {
-    connection: "dial",
-    accept: async () => new PassThrough(),
-    capabilityTimeoutMs: 1,
-  });
-  try {
-    assert.equal(await unsupported.capability, "unsupported");
-    await assert.rejects(() => unsupported.open("service"), /reverse byte-stream/i);
-  } finally {
-    unsupported.close();
-    unusedOuter.destroy();
-  }
 });
 
 test("canonical mux tunnels propagate explicit and empty reset reasons", async () => {
@@ -696,6 +745,7 @@ test("canonical mux tunnels propagate explicit and empty reset reasons", async (
     accept: async () => prefixService("right:"),
   });
   try {
+    await Promise.all([left.controlReady, right.controlReady]);
     const explicit = await right.open("explicit-reset");
     explicit.once("error", () => undefined);
     const explicitClosed = new Promise<void>((resolve) => {
