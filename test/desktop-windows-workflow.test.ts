@@ -221,8 +221,6 @@ fi
   runGit(root, ["config", "user.name", "Workflow Test"]);
   runGit(root, ["add", ".gitignore", "tracked.txt", "scripts"]);
   runGit(root, ["commit", "--quiet", "-m", "fixture"]);
-  runGit(root, ["remote", "add", "origin", "http://forgejo.invalid:17480/kepos.git"]);
-  runGit(root, ["remote", "add", "github", "https://github.example.invalid/kepos.git"]);
 
   const environment = {
     ...isolatedGitEnvironment,
@@ -296,7 +294,7 @@ fi
     assert.match(formalCommand, /C:\\kb\\runs\\formal/);
     assert.match(formalCommand, /BootstrapAsset/);
     assert.match(formalCommand, /kepos-bootstrap\.json/);
-    assert.match(formalCommand, /https:\/\/github\.example\.invalid\/kepos\.git/);
+    assert.doesNotMatch(formalCommand, /-RemoteOrigin/);
 
     const failed = spawnSync("bash", ["scripts/windows/nuc-kep.sh"], {
       cwd: root,
@@ -677,8 +675,6 @@ test("Windows release preserves pre-existing output when it rejects the run", (t
         "v1.2.3",
         "-ReleaseMode",
         "rehearsal",
-        "-RemoteOrigin",
-        "https://example.invalid/kepos.git",
         "-ReleaseArtifactName",
         artifactName,
       ],

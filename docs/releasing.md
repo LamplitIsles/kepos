@@ -101,20 +101,10 @@ running-process refusal, rollback, uninstall, deferred-cleanup, and
 mutable-state-preservation matrix before the ZIP is accepted. Failed runs retain logs under
 `dist/windows/<run-id>/logs` but remove partial publishable ZIPs.
 
-For a formal run, the NUC independently resolves the annotated tag through the
-unauthenticated, NUC-reachable `github` remote. This is deliberately separate
-from local `origin`: the latter may be a host-local Forgejo URL with a
-non-default port and need not be reachable from the NUC. To use another
-reachable public or internal mirror, scope it to the command:
-
-```sh
-KEPOS_WINDOWS_RELEASE_REMOTE="https://forge.example/kepos.git" \
-  WINDOWS_USER=white npm run release:windows -- v0.1.0
-```
-
-The URL must not contain a `user:password@` or token `userinfo@` component.
-It is used only for the NUC's read-only tag verification; the build still uses
-the tracked local source snapshot, never the NUC's existing checkout.
+The release Mac verifies the annotated remote tag before starting a formal
+Windows run. The NUC then builds only the tracked local source snapshot and
+checks the transmitted revision and release metadata; it does not need access
+to a forge or use its existing Kepos checkout.
 
 For a no-tag local rehearsal, use the isolated path:
 

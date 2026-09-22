@@ -15,7 +15,7 @@ test("package metadata owns the supported runtime and canonical checks", async (
   };
   assert.deepEqual(packageJson.engines, {
     node: ">=24 <25",
-    npm: ">=12 <13",
+    npm: ">=11 <13",
   });
   assert.deepEqual(packageJson.devEngines, {
     runtime: {
@@ -25,7 +25,7 @@ test("package metadata owns the supported runtime and canonical checks", async (
     },
     packageManager: {
       name: "npm",
-      version: ">=12 <13",
+      version: ">=11 <13",
       onFail: "error",
     },
   });

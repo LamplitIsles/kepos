@@ -14,7 +14,6 @@ param(
   [ValidateSet('dogfood', 'release')] [string]$Workflow = 'dogfood',
   [string]$ReleaseTag,
   [ValidateSet('release', 'rehearsal')] [string]$ReleaseMode,
-  [string]$RemoteOrigin,
   [string]$ReleaseArtifactName
 )
 
@@ -720,8 +719,8 @@ try {
 
   Import-MsvcEnvironment
   if ($Workflow -eq 'release') {
-    if ([string]::IsNullOrWhiteSpace($ReleaseTag) -or [string]::IsNullOrWhiteSpace($ReleaseMode) -or [string]::IsNullOrWhiteSpace($RemoteOrigin) -or [string]::IsNullOrWhiteSpace($ReleaseArtifactName)) {
-      throw 'release workflow requires tag, mode, origin, and artifact name'
+    if ([string]::IsNullOrWhiteSpace($ReleaseTag) -or [string]::IsNullOrWhiteSpace($ReleaseMode) -or [string]::IsNullOrWhiteSpace($ReleaseArtifactName)) {
+      throw 'release workflow requires tag, mode, and artifact name'
     }
     $releaseVersionOutput = @(Invoke-LoggedNative $Node 'release-version' @(
       '--import',
@@ -744,22 +743,9 @@ try {
       throw "Windows artifact name does not match the shared release contract: $ReleaseArtifactName"
     }
     Write-Host "Release contract: $($releaseVersion.channel) $($releaseVersion.versionName) -> $($releaseVersion.artifactDirectory)"
-    if ($ReleaseMode -eq 'release') {
-      $remoteLines = @(& git.exe ls-remote --tags $RemoteOrigin "refs/tags/$ReleaseTag" "refs/tags/$ReleaseTag^{}" 2>&1)
-      if ($LASTEXITCODE -ne 0) { throw "remote tag lookup failed; see $Logs\remote-tag.log" }
-      $remoteLines | Set-Content -LiteralPath (Join-Path $Logs 'remote-tag.log') -Encoding utf8
-      $refs = @{}
-      foreach ($line in $remoteLines) {
-        if ([string]$line -match '^([0-9a-f]{40,64})\s+(.+)$') { $refs[$matches[2]] = $matches[1] }
-      }
-      $directRef = "refs/tags/$ReleaseTag"
-      $peeledRef = "$directRef^{}"
-      if (-not $refs.ContainsKey($directRef) -or -not $refs.ContainsKey($peeledRef)) { throw "remote $ReleaseTag is not an annotated tag; see $Logs\remote-tag.log" }
-      if ($refs[$peeledRef] -ne $RootRevision) { throw "remote $ReleaseTag does not resolve to release commit $RootRevision" }
-    }
   }
   Require-Version $Node 'Node' '^v24\.'
-  Require-Version $Npm 'npm' '^11\.'
+  Require-Version $Npm 'npm' '^(11|12)\.'
   if (-not (Get-Command cmake.exe -ErrorAction SilentlyContinue)) { throw 'CMake is missing from PATH' }
 
   $BareMake = Join-Path $BuildRepository 'node_modules\.bin\bare-make.cmd'
