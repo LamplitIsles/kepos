@@ -42,6 +42,15 @@ operations. Unix socket sources and bindings are rejected clearly because
 Windows has no compatible endpoint in this host surface. A configured binding
 does not publish its remote service.
 
+Desktop diagnostics are stored at `%LOCALAPPDATA%\\Kepos\\state\\diagnostics`.
+Copy diagnostics from the app to export bounded, redacted normal and critical
+connection evidence; the latest owner-only `fatal.json` survives restart. An
+uncaught JavaScript exception or unhandled rejection is recorded synchronously
+then the desktop exits nonzero. Safe heartbeat and transport counters are
+retained without socket addresses, and Home registry timeouts close only their
+request tunnel instead of escaping as an unhandled stream error. Native
+failures can bypass JavaScript capture and need matching symbols.
+
 Example:
 
 ```toml

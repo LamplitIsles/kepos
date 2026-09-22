@@ -34,6 +34,7 @@ const observationNames = new Set<ObservationName>([
   "outer.accepted",
   "outer.rejected",
   "outer.replaced",
+  "peer.wakeup",
   "pairing.invitation-created",
   "pairing.invitation-expired",
   "pairing.requested",
@@ -91,8 +92,12 @@ const transportNumberFields = [
   "publisherToSubscriberBytesPerSecond",
   "lastPongElapsedMs",
   "missedPongs",
+  "wakeEpoch",
+  "sinceWakeMs",
   "expiresAt",
 ] as const;
+const runIdPattern = /^[0-9a-f]{16}$/;
+const errorCodePattern = /^[A-Z][A-Z0-9_]{0,31}$/;
 
 export const DESKTOP_DIAGNOSTIC_ERROR_CATEGORIES = [
   "unknown",
@@ -132,6 +137,7 @@ export type DesktopDiagnosticDeviceObservation =
       timestamp: string;
       event: "desktop.lifecycle";
       phase: DesktopDiagnosticLifecyclePhase;
+      runId?: string;
     }
   | {
       source: "device";
@@ -140,6 +146,7 @@ export type DesktopDiagnosticDeviceObservation =
       operation: DesktopDiagnosticConfigOperation;
       outcome: DesktopDiagnosticConfigOutcome;
       errorCategory?: DesktopDiagnosticErrorCategory;
+      runId?: string;
     }
   | {
       source: "device";
@@ -149,6 +156,7 @@ export type DesktopDiagnosticDeviceObservation =
       connectionGeneration: number;
       serviceCount: number;
       errorCategory?: DesktopDiagnosticErrorCategory;
+      runId?: string;
     };
 
 export type DesktopDiagnosticObservation =
@@ -170,6 +178,30 @@ export interface DesktopDiagnosticDhtCounters {
   };
 }
 
+export interface DesktopDiagnosticTransportSnapshot {
+  isInitiator?: boolean;
+  connected?: boolean;
+  destroying?: boolean;
+  destroyed?: boolean;
+  remotePublicKey?: string;
+  udx?: Partial<Record<
+    | "rtt"
+    | "cwnd"
+    | "inflight"
+    | "rtoCount"
+    | "retransmits"
+    | "fastRecoveries"
+    | "bbrState"
+    | "bbrBandwidth"
+    | "bytesTransmitted"
+    | "packetsTransmitted"
+    | "bytesReceived"
+    | "packetsReceived"
+    | "packetsDroppedByKernel",
+    number
+  >>;
+}
+
 export interface DesktopDiagnosticTransportEvent {
   source: "transport";
   timestamp: string;
@@ -187,6 +219,7 @@ export interface DesktopDiagnosticTransportEvent {
   remoteFirewall?: "unknown" | "open" | "consistent" | "random";
   localFirewall?: "unknown" | "open" | "consistent" | "random";
   dht?: DesktopDiagnosticDhtCounters;
+  transport?: DesktopDiagnosticTransportSnapshot;
   elapsedMs?: number;
   attempt?: number;
   attemptElapsedMs?: number;
@@ -207,7 +240,12 @@ export interface DesktopDiagnosticTransportEvent {
   publisherToSubscriberBytesPerSecond?: number;
   lastPongElapsedMs?: number;
   missedPongs?: number;
+  wakeEpoch?: number;
+  sinceWakeMs?: number;
   expiresAt?: number;
+  runId?: string;
+  errorCategory?: DesktopDiagnosticErrorCategory;
+  errorCode?: string;
 }
 
 export type DesktopDiagnosticEvent =
@@ -379,6 +417,7 @@ function normalizeDeviceEvent(
       timestamp,
       event: value.event,
       phase: value.phase,
+      ...(normalizeRunId(value.runId) ? { runId: normalizeRunId(value.runId) } : {}),
     };
   }
 
@@ -391,6 +430,7 @@ function normalizeDeviceEvent(
         event: value.event,
         operation: value.operation,
         outcome: value.outcome,
+        ...(normalizeRunId(value.runId) ? { runId: normalizeRunId(value.runId) } : {}),
       };
     }
     if (value.outcome !== "failed") return undefined;
@@ -403,6 +443,7 @@ function normalizeDeviceEvent(
       operation: value.operation,
       outcome: value.outcome,
       errorCategory,
+      ...(normalizeRunId(value.runId) ? { runId: normalizeRunId(value.runId) } : {}),
     };
   }
 
@@ -421,6 +462,7 @@ function normalizeDeviceEvent(
         outcome: value.outcome,
         connectionGeneration,
         serviceCount,
+        ...(normalizeRunId(value.runId) ? { runId: normalizeRunId(value.runId) } : {}),
       };
     }
     const errorCategory = normalizeErrorCategory(value.errorCategory);
@@ -433,6 +475,7 @@ function normalizeDeviceEvent(
       connectionGeneration,
       serviceCount,
       errorCategory,
+      ...(normalizeRunId(value.runId) ? { runId: normalizeRunId(value.runId) } : {}),
     };
   }
 
@@ -487,7 +530,45 @@ function normalizeTransportEvent(
   }
   const dht = normalizeDhtCounters(value.dht);
   if (dht) output.dht = dht;
+  const transport = normalizeTransportSnapshot(value.transport);
+  if (transport) output.transport = transport;
+  const runId = normalizeRunId(value.runId);
+  if (runId) output.runId = runId;
+  const errorCategory = normalizeErrorCategory(value.errorCategory);
+  if (errorCategory) output.errorCategory = errorCategory;
+  if (typeof value.errorCode === "string" && errorCodePattern.test(value.errorCode)) output.errorCode = value.errorCode;
   return output as unknown as DesktopDiagnosticTransportEvent;
+}
+
+function normalizeTransportSnapshot(
+  value: unknown,
+): DesktopDiagnosticTransportSnapshot | undefined {
+  if (!isRecord(value)) return undefined;
+  const output: Record<string, unknown> = {};
+  for (const field of ["isInitiator", "connected", "destroying", "destroyed"] as const) {
+    if (typeof value[field] === "boolean") output[field] = value[field];
+  }
+  const remotePublicKey = normalizeFingerprint(value.remotePublicKey);
+  if (remotePublicKey) output.remotePublicKey = remotePublicKey;
+  const udx = normalizeNumberRecord(value.udx, [
+    "rtt",
+    "cwnd",
+    "inflight",
+    "rtoCount",
+    "retransmits",
+    "fastRecoveries",
+    "bbrState",
+    "bbrBandwidth",
+    "bytesTransmitted",
+    "packetsTransmitted",
+    "bytesReceived",
+    "packetsReceived",
+    "packetsDroppedByKernel",
+  ] as const);
+  if (udx) output.udx = udx;
+  return Object.keys(output).length > 0
+    ? (output as DesktopDiagnosticTransportSnapshot)
+    : undefined;
 }
 
 function normalizeDhtCounters(
@@ -596,6 +677,10 @@ function normalizeErrorCategory(
   value: unknown,
 ): DesktopDiagnosticErrorCategory | undefined {
   return isDesktopDiagnosticErrorCategory(value) ? value : undefined;
+}
+
+function normalizeRunId(value: unknown): string | undefined {
+  return typeof value === "string" && runIdPattern.test(value) ? value : undefined;
 }
 
 function isLifecyclePhase(

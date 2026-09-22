@@ -8,6 +8,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import crypto from "node:crypto";
 import b4a from "b4a";
 
 import type { DesktopSnapshot } from "./protocol.js";
@@ -20,6 +21,7 @@ import {
   type DesktopDiagnosticEvent,
   type DesktopDiagnosticObservation,
 } from "./diagnostics-contract.js";
+import { DESKTOP_FATAL_FILE, type DesktopFatalRecord } from "./fatal.js";
 
 export const DESKTOP_DIAGNOSTIC_ACTIVE_MAX_BYTES = 256 * 1024;
 export const DESKTOP_DIAGNOSTIC_ROTATED_FILE_COUNT = 3;
@@ -31,6 +33,8 @@ export const DESKTOP_DIAGNOSTIC_SHUTDOWN_TIMEOUT_MS = 250;
 export const DESKTOP_DIAGNOSTIC_SUMMARY_MAX_BYTES = 64 * 1024;
 export const DESKTOP_DIAGNOSTIC_SUMMARY_MAX_EVENTS = 200;
 export const DESKTOP_DIAGNOSTIC_ACTIVE_FILE = "diagnostics.log";
+export const DESKTOP_DIAGNOSTIC_CRITICAL_FILE = "critical.log";
+export const DESKTOP_DIAGNOSTIC_CRITICAL_MAX_BYTES = 64 * 1024;
 
 const diagnosticFileNames = [
   DESKTOP_DIAGNOSTIC_ACTIVE_FILE,
@@ -82,6 +86,7 @@ export interface DesktopDiagnosticSink {
   flush(): Promise<void>;
   shutdown(): Promise<void>;
   droppedEventCount(): number;
+  readonly runId?: string;
 }
 
 export interface CreateDesktopDiagnosticSinkOptions {
@@ -106,8 +111,16 @@ export function createDesktopDiagnosticSink(
   const filePaths = diagnosticFileNames.map((name) =>
     path.join(options.directory, name),
   );
+  const criticalPath = path.join(
+    options.directory,
+    DESKTOP_DIAGNOSTIC_CRITICAL_FILE,
+  );
   const fileRecords: RetainedRecord[][] = [[], [], [], []];
   const roles: DesktopDiagnosticRoleSummaries = {};
+  const runId = b4a.toString(crypto.randomBytes(8), "hex");
+  const criticalRecords: RetainedRecord[] = [];
+  let criticalBytes = 0;
+  let criticalWrite = Promise.resolve();
   let activeBytes = 0;
   let initializationError: DesktopDiagnosticErrorCategory | undefined;
   let droppedEvents = 0;
@@ -152,6 +165,14 @@ export function createDesktopDiagnosticSink(
         }
       }
     }
+    try {
+      const source = await fileSystem.readFile(criticalPath, "utf8");
+      criticalRecords.push(...parseRetainedRecords(source));
+      criticalBytes = b4a.byteLength(source, "utf8");
+    } catch (error) {
+      if (!isMissingFile(error))
+        initializationError ??= desktopDiagnosticErrorCategory(error);
+    }
   }
 
   function observe(observation: DesktopDiagnosticObservation): void {
@@ -161,8 +182,9 @@ export function createDesktopDiagnosticSink(
     }
     let record: QueuedRecord;
     try {
-      const line = serializeDesktopDiagnosticEvent(observation);
-      const event = normalizeDesktopDiagnosticEvent(observation);
+      const identified = { ...observation, runId };
+      const line = serializeDesktopDiagnosticEvent(identified);
+      const event = normalizeDesktopDiagnosticEvent(identified);
       if (!event) throw new Error("desktop diagnostic event is invalid");
       const bytes = b4a.byteLength(line, "utf8") + 1;
       if (bytes > DESKTOP_DIAGNOSTIC_EVENT_MAX_BYTES) {
@@ -173,12 +195,39 @@ export function createDesktopDiagnosticSink(
       droppedEvents++;
       return;
     }
+    if (isCritical(record.event)) {
+      appendCritical(record);
+    }
     if (queue.length >= DESKTOP_DIAGNOSTIC_QUEUE_LIMIT) {
       droppedEvents++;
       return;
     }
     queue.push(record);
     drain();
+  }
+
+  function appendCritical(record: QueuedRecord): void {
+    criticalWrite = criticalWrite
+      .then(async () => {
+        await ready;
+        if (initializationError !== undefined)
+          throw new Error("diagnostic write unavailable");
+        if (
+          criticalBytes + record.bytes >
+          DESKTOP_DIAGNOSTIC_CRITICAL_MAX_BYTES
+        ) {
+          // Critical evidence is independently bounded; keep the newest sequence.
+          await fileSystem.rm(criticalPath, { force: true });
+          criticalRecords.length = 0;
+          criticalBytes = 0;
+        }
+        await fileSystem.appendFile(criticalPath, `${record.line}\n`);
+        criticalBytes += record.bytes;
+        criticalRecords.push(record);
+      })
+      .catch(() => {
+        droppedEvents++;
+      });
   }
 
   function updateSnapshot(snapshot: DesktopSnapshot): void {
@@ -255,33 +304,65 @@ export function createDesktopDiagnosticSink(
       DESKTOP_DIAGNOSTIC_SUMMARY_MAX_BYTES,
       Math.max(1, maxBytes),
     );
+    let fatal: DesktopFatalRecord | undefined;
+    try {
+      const parsed: unknown = JSON.parse(
+        await fileSystem.readFile(
+          path.join(options.directory, DESKTOP_FATAL_FILE),
+          "utf8",
+        ),
+      );
+      if (
+        isRecord(parsed) &&
+        typeof parsed.runId === "string" &&
+        typeof parsed.message === "string"
+      )
+        fatal = parsed as unknown as DesktopFatalRecord;
+    } catch (error) {
+      if (!isMissingFile(error)) droppedEvents++;
+    }
     const base = {
       platform,
+      runId,
       droppedEvents,
       roles: {
         ...(roles.peer ? { peer: { ...roles.peer } } : {}),
       },
       events: [] as DesktopDiagnosticEvent[],
+      ...(fatal ? { fatal } : {}),
     };
     const retained = recordsForSummary(
-      fileRecords,
+      [...fileRecords, criticalRecords],
       activeRecord,
       activeRecordPersisted,
       queue,
     );
-    const selected: DesktopDiagnosticEvent[] = [];
-    for (
-      let index = retained.length - 1;
-      index >= 0 && selected.length < DESKTOP_DIAGNOSTIC_SUMMARY_MAX_EVENTS;
-      index -= 1
-    ) {
-      const candidate = [retained[index]!.event, ...selected];
-      const serialized = JSON.stringify({ ...base, events: candidate });
+    const prioritized = [
+      ...retained.filter((record) => isCritical(record.event)).reverse(),
+      ...retained.filter((record) => !isCritical(record.event)).reverse(),
+    ];
+    const retainedOrder = new Map(
+      retained.map((record, index) => [record.line, index]),
+    );
+    let selected: RetainedRecord[] = [];
+    for (const record of prioritized) {
+      if (selected.length >= DESKTOP_DIAGNOSTIC_SUMMARY_MAX_EVENTS) break;
+      const candidate = [...selected, record].sort(
+        (left, right) =>
+          retainedOrder.get(left.line)! - retainedOrder.get(right.line)!,
+      );
+      const serialized = JSON.stringify({
+        ...base,
+        events: candidate.map(({ event }) => event),
+      });
       if (b4a.byteLength(serialized, "utf8") <= summaryLimit) {
-        selected.unshift(retained[index]!.event);
+        selected = candidate;
       }
     }
-    const summary = JSON.stringify({ ...base, events: selected });
+    const summary = JSON.stringify({
+      ...base,
+      events: selected.map(({ event }) => event),
+    });
     if (b4a.byteLength(summary, "utf8") > summaryLimit) {
       throw new Error("desktop diagnostic summary exceeds 64 KiB");
     }
@@ -309,6 +390,7 @@ export function createDesktopDiagnosticSink(
 
   return {
     directory: options.directory,
+    runId,
     ready,
     observe,
     updateSnapshot,
@@ -326,6 +408,7 @@ export function createNoopDesktopDiagnosticSink(
   let droppedEvents = 0;
   const roles: DesktopDiagnosticRoleSummaries = {};
   return {
+    runId: "0000000000000000",
     ready: Promise.resolve(),
     observe: () => undefined,
     updateSnapshot(snapshot): void {
@@ -371,7 +454,27 @@ function recordsForSummary(
   const retained = [...fileRecords].reverse().flat();
   if (activeRecord && !activeRecordPersisted) retained.push(activeRecord);
   retained.push(...queue);
-  return retained;
+  const unique = new Map<string, RetainedRecord>();
+  for (const record of retained) unique.set(record.line, record);
+  return [...unique.values()].sort((left, right) =>
+    left.event.timestamp.localeCompare(right.event.timestamp),
+  );
+}
+
+function isCritical(event: DesktopDiagnosticEvent): boolean {
+  if (event.source === "device")
+    return event.event === "desktop.lifecycle" || event.outcome === "failed";
+  return (
+    event.event === "outer.attempt" ||
+    event.event === "outer.connected" ||
+    event.event === "outer.accepted" ||
+    event.event === "outer.unhealthy" ||
+    event.event === "outer.retry" ||
+    event.event === "outer.closed" ||
+    event.event === "peer.wakeup" ||
+    event.event === "channel.open-error" ||
+    event.event === "channel.reset"
+  );
 }
 
 function parseRetainedRecords(source: string): RetainedRecord[] {

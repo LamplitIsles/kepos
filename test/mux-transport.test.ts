@@ -13,6 +13,7 @@ import {
   type PairingDecision,
 } from "../src/mux/transport.js";
 import { TokenBucketRateLimiter } from "../src/mux/rate-limit.js";
+import type { Observation } from "../src/mux/observability.js";
 
 const compact = compactModule as { string: unknown };
 
@@ -675,6 +676,7 @@ test("destroys a silent outer after two missed heartbeat replies", async () => {
   const scheduler = new ManualScheduler();
   const [subscriberOuter, publisherOuter] = framedPair();
   const errors: Error[] = [];
+  const observations: Observation[] = [];
   subscriberOuter.on("error", (error) => errors.push(error));
   const publisher = createMuxPublisher(publisherOuter, {
     connect: async () => prefixService("service:"),
@@ -682,6 +684,8 @@ test("destroys a silent outer after two missed heartbeat replies", async () => {
   createMuxSubscriber(subscriberOuter, {
     heartbeat: heartbeatOptions(scheduler),
     now: () => scheduler.now,
+    observe: (observation) => observations.push(observation),
+    outerId: "outer-0123456789abcdef",
   });
 
   await flushFrames();
@@ -694,6 +698,20 @@ test("destroys a silent outer after two missed heartbeat replies", async () => {
 
   assert.equal(subscriberOuter.destroyCalls, 1);
   assert.match(errors[0]?.message ?? "", /heartbeat timed out/i);
+  assert.deepEqual(
+    observations.find(({ event }) => event === "outer.unhealthy"),
+    {
+      component: "kepos",
+      timestamp: new Date(scheduler.now).toISOString(),
+      elapsedMs: 35,
+      role: "subscriber",
+      outerId: "outer-0123456789abcdef",
+      event: "outer.unhealthy",
+      trigger: "heartbeat.timeout",
+      lastPongElapsedMs: 35,
+      missedPongs: 2,
+    },
+  );
 
   publisher.close();
 });

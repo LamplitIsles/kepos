@@ -28,6 +28,30 @@ canonical config and seed-only peer state. It never creates or probes old
 publisher/subscriber state. Desktop and CLI use the same canonical peer lock;
 only one desktop instance may run.
 
+## Crash diagnostics
+
+Desktop diagnostics live beside the state directory at
+`~/.local/state/kepos-neo/diagnostics` (or under `$XDG_STATE_HOME`). Windows
+uses `%LOCALAPPDATA%\\Kepos\\state\\diagnostics`. The in-app **Copy diagnostics**
+action exports a bounded chronological selection of normal observations plus
+independently retained connection failures, retries, resets, and lifecycle
+events. It also includes the latest `fatal.json` record when one exists.
+Transport failures retain only safe connection counters (for example RTT,
+retransmits, packet totals, and kernel drops), the heartbeat timeout phase,
+and a truncated peer fingerprint; socket addresses are never exported.
+HyperDHT wake detection records `peer.wakeup`, and subsequent failure events
+include `wakeEpoch` and `sinceWakeMs` so sleep/wake-correlated reconnects can
+be separated from ordinary network timeouts.
+
+`fatal.json` is owner-only, bounded, replaces the previous fatal record, and
+survives a later launch. It records a redacted JavaScript exception or
+unhandled rejection with a run ID, process/uptime information, and a small peer
+state summary. Kepos persists it synchronously then exits nonzero; it does not
+resume after an unhandled JavaScript failure. Home registry request timeouts
+are handled at the request boundary and close their tunnel without emitting an
+unhandled stream error. Native faults can still bypass JavaScript capture and
+require matching native symbols.
+
 ## Build and install
 
 An initialized recursive checkout and Xcode command-line tools are required:

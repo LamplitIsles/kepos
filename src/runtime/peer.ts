@@ -427,6 +427,29 @@ export async function startPeer(
       bootstrap: options.bootstrap ?? options.config.network?.bootstrap,
       keyPair,
     });
+  const runtimeObserve = createObservationEmitter({
+    observe: options.observe,
+    role: "peer",
+    route,
+    now,
+  });
+  let wakeEpoch = 0;
+  let lastWakeAt: number | undefined;
+  const wakeContext = (): { wakeEpoch?: number; sinceWakeMs?: number } =>
+    lastWakeAt === undefined
+      ? {}
+      : { wakeEpoch, sinceWakeMs: Math.max(0, now() - lastWakeAt) };
+  const onDhtWakeup = (): void => {
+    wakeEpoch++;
+    lastWakeAt = now();
+    runtimeObserve("peer.wakeup", {
+      wakeEpoch,
+      dht: dhtStatsSnapshot(dht),
+    });
+  };
+  const releaseDhtWakeup = (): void => {
+    dht.off?.("wakeup", onDhtWakeup);
+  };
 
   let activeConfig = options.config;
   const peerEntries = new Map<string, PeerEntry>();
@@ -500,7 +523,13 @@ export async function startPeer(
     },
   });
 
-  validateRuntimeConfig(activeConfig, peerKey);
+  try {
+    validateRuntimeConfig(activeConfig, peerKey);
+  } catch (error) {
+    releaseDhtWakeup();
+    if (ownsDht) await dht.destroy({ force: true }).catch(() => undefined);
+    throw error;
+  }
   installConfig(activeConfig);
 
   server = dht.createServer(
@@ -595,6 +624,7 @@ export async function startPeer(
       );
     },
   );
+  dht.on?.("wakeup", onDhtWakeup);
 
   try {
     await server.listen(keyPair);
@@ -904,6 +934,7 @@ export async function startPeer(
 
   async function dialLoop(entry: PeerEntry): Promise<void> {
     let delayMs = minimumReconnectDelayMs;
+    let attempt = 0;
     while (
       !stopped &&
       !entry.stopped &&
@@ -915,16 +946,21 @@ export async function startPeer(
         continue;
       }
       let outer: DhtStream | undefined;
+      let outerObserve: ReturnType<typeof createObservationEmitter> | undefined;
+      let outerObservationId: string | undefined;
       try {
-        const outerObserve = createObservationEmitter({
+        attempt++;
+        outerObservationId = createObservationId("outer");
+        outerObserve = createObservationEmitter({
           observe: options.observe,
           role: "peer",
-          outerId: createObservationId("outer"),
+          outerId: outerObservationId,
           now,
           route,
         });
         outerObserve("outer.attempt", {
           publicKey: entry.definition.publicKey,
+          attempt,
         });
         outer = dht.connect(Buffer.from(entry.definition.publicKey, "hex"), {
           keyPair,
@@ -935,7 +971,7 @@ export async function startPeer(
             remoteAddresses,
             localAddresses,
           ) => {
-            outerObserve(
+            outerObserve?.(
               "outer.holepunch",
               holepunchObservation(
                 remoteFirewall,
@@ -967,7 +1003,15 @@ export async function startPeer(
           transport: dhtStreamSnapshot(outer),
           dht: dhtStatsSnapshot(dht),
         });
-        await installConnection(entry, outer, "dialed", outerObserve);
+        await installConnection(
+          entry,
+          outer,
+          "dialed",
+          outerObserve,
+          true,
+          {},
+          outerObservationId,
+        );
         releaseConnectListeners();
         delayMs = minimumReconnectDelayMs;
         await onceClosed(outer);
@@ -976,6 +1020,15 @@ export async function startPeer(
         entry.error = message;
         if (outer && !outer.destroyed) outer.destroy(new Error(message));
         if (stopped || entry.stopped) return;
+        const failureContext = {
+          attempt,
+          remotePublicKey: entry.definition.publicKey,
+          ...(outer ? { transport: dhtStreamSnapshot(outer) } : {}),
+          ...wakeContext(),
+          ...diagnosticError(error),
+        };
+        outerObserve?.("outer.unhealthy", failureContext);
+        outerObserve?.("outer.retry", { ...failureContext, delayMs });
         options.log?.(
           `Peer connection to ${entry.definition.label} failed: ${message}`,
         );
@@ -999,9 +1052,10 @@ export async function startPeer(
       | "onPairingApproved"
       | "onPairingFailed"
     > = {},
+    existingOuterId?: string,
   ): Promise<void> {
     const generation = ++entry.generation;
-    const outerId = existingObserve ? undefined : createObservationId("outer");
+    const outerId = existingOuterId ?? createObservationId("outer");
     const observe =
       existingObserve ??
       createObservationEmitter({
@@ -1043,7 +1097,7 @@ export async function startPeer(
         now,
         observationRole: "peer",
         observe: options.observe,
-        outerId: outerId ?? createObservationId("outer"),
+        outerId,
         remotePublicKey: entry.definition.publicKey,
         httpRemotePublicKey: entry.definition.publicKey,
         serviceAuthorized: (serviceId) =>
@@ -1152,8 +1206,19 @@ export async function startPeer(
       updateUdpBindings();
     });
     let streamError: string | undefined;
+    let streamDiagnosticError: Record<string, unknown> | undefined;
+    let streamDiagnosticTrigger: string | undefined;
     outer.once("error", (error) => {
       streamError = error.message;
+      streamDiagnosticError = diagnosticError(error);
+      streamDiagnosticTrigger = diagnosticTrigger(error);
+      observe("outer.unhealthy", {
+        trigger: streamDiagnosticTrigger,
+        remotePublicKey: entry.definition.publicKey,
+        transport: dhtStreamSnapshot(outer),
+        ...wakeContext(),
+        ...streamDiagnosticError,
+      });
     });
     outer.once("close", () => {
       connection.closed = true;
@@ -1172,8 +1237,14 @@ export async function startPeer(
       connection.catalog = undefined;
       updateHomeServers();
       observe("outer.closed", {
-        trigger: stopped ? "local.stop" : "stream.close",
+        trigger: stopped
+          ? "local.stop"
+          : (streamDiagnosticTrigger ?? "stream.close"),
+        remotePublicKey: entry.definition.publicKey,
+        transport: dhtStreamSnapshot(outer),
+        ...wakeContext(),
         ...(streamError ? { error: streamError } : {}),
+        ...(streamDiagnosticError ?? {}),
       });
       if (
         pairingCandidates.has(entry.definition.publicKey) &&
@@ -2183,6 +2254,7 @@ export async function startPeer(
   }
 
   async function cleanupStarted(): Promise<void> {
+    releaseDhtWakeup();
     await cleanupAll([
       () => server.close(),
       () => closeServer(gateway?.server),
@@ -2203,6 +2275,58 @@ export async function startPeer(
   function resolvePeerKey(reference: string): string {
     return resolveConfiguredPeerKey(activeConfig.peers, reference);
   }
+}
+
+function diagnosticError(error: unknown): {
+  errorCategory: string;
+  errorCode?: string;
+} {
+  const source =
+    error instanceof Error
+      ? error.message
+      : error &&
+          typeof error === "object" &&
+          "message" in error &&
+          typeof (error as { message?: unknown }).message === "string"
+        ? (error as { message: string }).message
+        : String(error);
+  const rawCode =
+    error && typeof error === "object" && "code" in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+  const errorCode =
+    typeof rawCode === "string" && /^[A-Z][A-Z0-9_]{0,31}$/u.test(rawCode)
+      ? rawCode
+      : undefined;
+  const lower = `${errorCode ?? ""} ${source}`.toLowerCase();
+  const errorCategory =
+    lower.includes("timeout") || lower.includes("timed out")
+      ? "timeout"
+      : lower.includes("refused") || lower.includes("unavailable")
+        ? "unavailable"
+        : lower.includes("permission") || lower.includes("eacces")
+          ? "permission"
+          : lower.includes("invalid")
+            ? "invalid"
+            : "unknown";
+  return { errorCategory, ...(errorCode ? { errorCode } : {}) };
+}
+
+function diagnosticTrigger(error: unknown): string {
+  const message = errorMessage(error).toLowerCase();
+  if (
+    message.includes("heartbeat") &&
+    (message.includes("timeout") || message.includes("timed out"))
+  ) {
+    return "heartbeat.timeout";
+  }
+  if (
+    message.includes("control channel") &&
+    (message.includes("timeout") || message.includes("timed out"))
+  ) {
+    return "control.establishment.timeout";
+  }
+  return "stream.error";
 }
 
 function resolveConfiguredPeerKey(

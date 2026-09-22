@@ -52,6 +52,8 @@ export interface DhtServer {
 }
 
 export interface DhtNode {
+  on?: (event: "wakeup", listener: () => void) => unknown;
+  off?: (event: "wakeup", listener: () => void) => unknown;
   connect: (
     publicKey: Uint8Array,
     options: {

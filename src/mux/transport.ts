@@ -334,6 +334,12 @@ function createSubscriberControlChannel(
   }
 
   const heartbeat = options.heartbeat ?? {};
+  const emit = createObservationEmitter({
+    observe: options.observe,
+    role: options.observationRole ?? "subscriber",
+    outerId: options.outerId,
+    now,
+  });
   const establishmentTimeoutMs = positiveInteger(
     heartbeat.establishmentTimeoutMs,
     defaultControlEstablishmentTimeoutMs,
@@ -408,6 +414,10 @@ function createSubscriberControlChannel(
       queueMicrotask(() => {
         if (outerClosed || outer.destroyed || locallyClosing) return;
         options.onControlUnexpectedClose?.();
+        emit("outer.unhealthy", {
+          trigger: "control.unexpected-close",
+          ...transportFields(options.transportSnapshot),
+        });
         outer.destroy(new Error("Publisher control channel closed unexpectedly"));
       });
     },
@@ -467,6 +477,10 @@ function createSubscriberControlChannel(
       `Publisher control channel timed out after ${establishmentTimeoutMs}ms`,
     );
     options.onControlEstablishmentTimeout?.();
+    emit("outer.unhealthy", {
+      trigger: "control.establishment.timeout",
+      ...transportFields(options.transportSnapshot),
+    });
     settleFailure(error);
     finish();
     destroyOuter(error);
@@ -488,9 +502,15 @@ function createSubscriberControlChannel(
       sendPing();
       return;
     }
-    options.onHeartbeatTimeout?.({
+    const fields = {
       lastPongElapsedMs: Math.max(0, now() - lastPongAt),
       missedPongs,
+    };
+    options.onHeartbeatTimeout?.(fields);
+    emit("outer.unhealthy", {
+      trigger: "heartbeat.timeout",
+      ...fields,
+      ...transportFields(options.transportSnapshot),
     });
     finish();
     destroyOuter(

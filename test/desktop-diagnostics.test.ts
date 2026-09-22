@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
-import {
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  stat,
-} from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { spawn } from "node:child_process";
 
 import {
   createDesktopDiagnosticSink,
@@ -28,6 +23,11 @@ import {
   serializeDesktopDiagnosticsResult,
 } from "../apps/desktop/src/protocol.js";
 import { defaultDesktopDiagnosticsDirectory } from "../apps/desktop/src/paths.js";
+import {
+  DESKTOP_FATAL_FILE,
+  fatalRecord,
+  persistDesktopFatal,
+} from "../apps/desktop/src/fatal.js";
 import type { Observation } from "../src/mux/observability.js";
 
 const timestamp = "2026-08-10T12:00:00.000Z";
@@ -116,6 +116,10 @@ test("desktop diagnostics final boundary is closed and drops hostile values", ()
       punches: { consistent: 1, random: 2, open: 3 },
       relaying: { attempts: 4, successes: 1, aborts: 3 },
     },
+    transport: {
+      remotePublicKey: "cdcdcdcdcdcdcdcd",
+      udx: { rtt: 80, packetsDroppedByKernel: 2 },
+    },
     elapsedMs: 12,
     bytes: 42,
   });
@@ -126,7 +130,39 @@ test("desktop diagnostics final boundary is closed and drops hostile values", ()
   );
   assert.doesNotMatch(serialized, new RegExp("ab".repeat(32)));
   assert.doesNotMatch(serialized, new RegExp("ff".repeat(64)));
-  assert.doesNotMatch(serialized, /"transport":|"udx":|"destroyed":/);
+  assert.match(serialized, /"transport":/);
+  assert.match(serialized, /"udx":\{"rtt":80,"packetsDroppedByKernel":2\}/);
+
+  assert.deepEqual(
+    normalizeDesktopDiagnosticEvent({
+      component: "kepos",
+      timestamp,
+      elapsedMs: 100,
+      event: "peer.wakeup",
+      role: "peer",
+      route: "auto",
+      wakeEpoch: 2,
+      sinceWakeMs: 0,
+      dht: {
+        punches: { consistent: 1, random: 2, open: 3 },
+        relaying: { attempts: 4, successes: 1, aborts: 3 },
+      },
+    }),
+    {
+      source: "transport",
+      timestamp,
+      role: "peer",
+      event: "peer.wakeup",
+      route: "auto",
+      elapsedMs: 100,
+      wakeEpoch: 2,
+      sinceWakeMs: 0,
+      dht: {
+        punches: { consistent: 1, random: 2, open: 3 },
+        relaying: { attempts: 4, successes: 1, aborts: 3 },
+      },
+    },
+  );
 
   assert.deepEqual(
     normalizeDesktopDiagnosticEvent(
@@ -242,7 +278,9 @@ test("desktop diagnostics persistence and copy boundaries remain private", async
         output,
         /192\.168|49737|Users\/neil|secret-token|secret-value|do-not-copy|https:\/\//,
       );
-      assert.doesNotMatch(output, /"transport":|"udx":|"destroyed":/);
+      assert.match(output, /"transport":/);
+      assert.match(output, /"udx":/);
+      assert.doesNotMatch(output, /"remoteHost":|"remotePort":|"nested":/);
       assert.doesNotMatch(output, new RegExp("ff".repeat(64)));
     }
     await sink.shutdown();
@@ -251,7 +289,83 @@ test("desktop diagnostics persistence and copy boundaries remain private", async
   }
 });
 
-test("desktop diagnostics rotate, retain four files, and read after restart", async () => {
+test("desktop fatal evidence is bounded, redacted, and retained across a new sink", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-desktop-fatal-"));
+  try {
+    persistDesktopFatal(
+      root,
+      "0123456789abcdef",
+      "unhandledRejection",
+      new Error(
+        "Bearer raw-token-value token=secret-value at /Users/neil/private https://example.test/a",
+      ),
+    );
+    const fatal = await readFile(path.join(root, DESKTOP_FATAL_FILE), "utf8");
+    assert.match(fatal, /0123456789abcdef/);
+    assert.doesNotMatch(
+      fatal,
+      /raw-token-value|secret-value|Users\/neil|https:\/\//,
+    );
+    assert.equal(
+      fatalRecord("0123456789abcdef", "startup", new Error("startup failed"))
+        .runtimeVersion,
+      process.version,
+    );
+    const sink = createDesktopDiagnosticSink({ directory: root });
+    await sink.ready;
+    const summary = await sink.createSummary();
+    assert.match(summary, /unhandledRejection/);
+    await sink.shutdown();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("fatal child paths persist evidence and terminate nonzero even when persistence fails", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-desktop-fatal-child-"));
+  try {
+    for (const mode of ["throw", "reject", "startup"] as const) {
+      const directory = path.join(root, mode);
+      const result = await runFatalChild(directory, mode);
+      assert.equal(result, 1);
+      const fatal = await readFile(path.join(directory, "fatal.json"), "utf8");
+      assert.doesNotMatch(
+        fatal,
+        /raw-token-value|secret-value|\bab{32}\b|authorization:\s*bearer/i,
+      );
+    }
+    const blocked = path.join(root, "blocked");
+    await readFile(path.join(root, "throw"), "utf8").catch(() => undefined);
+    await import("node:fs/promises").then(({ writeFile }) =>
+      writeFile(blocked, "not a directory"),
+    );
+    assert.equal(await runFatalChild(blocked, "write-failure"), 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function runFatalChild(
+  directory: string,
+  mode: string,
+): Promise<number | null> {
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "test/fixtures/desktop-fatal-child.ts",
+      directory,
+      mode,
+    ],
+    { cwd: process.cwd(), stdio: "ignore" },
+  );
+  return await new Promise((resolve) =>
+    child.once("exit", (code) => resolve(code)),
+  );
+}
+
+test("desktop diagnostics retain critical peer evidence through routine churn", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-desktop-diagnostics-"));
   try {
     const sink = createDesktopDiagnosticSink({
@@ -259,6 +373,37 @@ test("desktop diagnostics rotate, retain four files, and read after restart", as
       platform: "darwin",
     });
     await sink.ready;
+    sink.observe(
+      transportObservation({
+        event: "outer.attempt",
+        outerId: "outer-aaaaaaaaaaaaaaaa",
+        attempt: 1,
+      }),
+    );
+    sink.observe(
+      transportObservation({
+        event: "outer.connected",
+        outerId: "outer-aaaaaaaaaaaaaaaa",
+        attempt: 1,
+      }),
+    );
+    sink.observe(
+      transportObservation({
+        event: "outer.unhealthy",
+        outerId: "outer-aaaaaaaaaaaaaaaa",
+        errorCategory: "timeout",
+        attempt: 1,
+      }),
+    );
+    sink.observe(
+      transportObservation({
+        event: "outer.retry",
+        outerId: "outer-aaaaaaaaaaaaaaaa",
+        errorCategory: "timeout",
+        attempt: 1,
+        delayMs: 100,
+      }),
+    );
     for (let index = 0; index < 4_000; index += 1) {
       sink.observe(
         transportObservation({
@@ -283,12 +428,28 @@ test("desktop diagnostics rotate, retain four files, and read after restart", as
     const summary = JSON.parse(await sink.createSummary()) as {
       platform: string;
       droppedEvents: number;
-      events: unknown[];
+      events: Array<{ event: string; outerId?: string; bytes?: number }>;
     };
     assert.equal(summary.platform, "darwin");
     assert.equal(summary.droppedEvents, 0);
     assert.ok(summary.events.length <= 200);
     assert.ok(summary.events.length > 0);
+    assert.deepEqual(
+      summary.events
+        .filter(({ outerId }) => outerId === "outer-aaaaaaaaaaaaaaaa")
+        .map(({ event }) => event),
+      ["outer.attempt", "outer.connected", "outer.unhealthy", "outer.retry"],
+    );
+    assert.equal(summary.events.at(-1)?.bytes, 3_999);
+    await waitFor(async () => {
+      try {
+        return /"event":"outer.connected"/.test(
+          await readFile(path.join(root, "critical.log"), "utf8"),
+        );
+      } catch {
+        return false;
+      }
+    }, "critical lifecycle evidence was not persisted");
     await sink.shutdown();
 
     const restarted = createDesktopDiagnosticSink({
@@ -406,9 +567,12 @@ test("desktop diagnostic sinks remove roles absent from the current snapshot", a
 });
 
 test("desktop diagnostics tolerate queue overflow, write failure, and a stalled shutdown", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "kepos-desktop-diagnostics-failure-"));
+  const root = await mkdtemp(
+    path.join(tmpdir(), "kepos-desktop-diagnostics-failure-"),
+  );
   const never = new Promise<void>(() => undefined);
-  const missing = (): Error => Object.assign(new Error("missing"), { code: "ENOENT" });
+  const missing = (): Error =>
+    Object.assign(new Error("missing"), { code: "ENOENT" });
   const hangingFileSystem: DesktopDiagnosticFileSystem = {
     mkdir: async () => undefined,
     readFile: async () => {
@@ -450,7 +614,7 @@ test("desktop diagnostics tolerate queue overflow, write failure, and a stalled 
     await failing.ready;
     failing.observe(transportObservation());
     await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(failing.droppedEventCount(), 1);
+    assert.ok(failing.droppedEventCount() >= 1);
     await failing.shutdown();
 
     const rotatingFileSystem: DesktopDiagnosticFileSystem = {
@@ -525,7 +689,12 @@ test("desktop diagnostics command is bounded and serialized with controller comm
     denyPairing: async () => undefined,
     copyDiagnostics: async () => {
       await pending;
-      return JSON.stringify({ platform: "win32", droppedEvents: 0, roles: {}, events: [] });
+      return JSON.stringify({
+        platform: "win32",
+        droppedEvents: 0,
+        roles: {},
+        events: [],
+      });
     },
     quit: async () => undefined,
   });
@@ -538,11 +707,16 @@ test("desktop diagnostics command is bounded and serialized with controller comm
   await Promise.all([copy, quit]);
   assert.equal(JSON.parse(sent[0] ?? "null").type, "diagnosticsResult");
   assert.equal(sent.length, 1);
-  assert.ok(Buffer.byteLength(serializeDesktopDiagnosticsResult({
-    type: "diagnosticsResult",
-    ok: false,
-    errorCategory: "timeout",
-  })) < 64 * 1024);
+  assert.ok(
+    Buffer.byteLength(
+      serializeDesktopDiagnosticsResult({
+        type: "diagnosticsResult",
+        ok: false,
+        errorCategory: "timeout",
+      }),
+    ) <
+      64 * 1024,
+  );
   const copied = serializeDesktopDiagnosticsResult({
     type: "diagnosticsResult",
     ok: true,

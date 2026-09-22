@@ -25,6 +25,10 @@
       "bare": "bare-fs/promises",
       "default": "node:fs/promises"
     },
+    "node:fs": {
+      "bare": "bare-fs",
+      "default": "node:fs"
+    },
     "node:http": {
       "bare": "bare-http1",
       "default": "node:http"
@@ -54,10 +58,10 @@
       "default": "node:url"
     }
   },
-  "packageManager": "npm@11.16.0",
+  "packageManager": "npm@12.0.2",
   "engines": {
     "node": ">=24 <25",
-    "npm": ">=11 <12"
+    "npm": ">=12 <13"
   },
   "devEngines": {
     "runtime": {
@@ -67,7 +71,7 @@
     },
     "packageManager": {
       "name": "npm",
-      "version": ">=11 <12",
+      "version": ">=12 <13",
       "onFail": "error"
     }
   },
@@ -91,7 +95,7 @@
     "desktop:build": "tsx scripts/build-desktop.ts",
     "desktop:check": "npm run desktop:typecheck && node --import tsx --test \"test/desktop-*.test.ts\"",
     "desktop:install": "npm run desktop:build && tsx scripts/install-desktop.ts",
-    "desktop:native-check": "npm run desktop:build && node --import tsx --test --test-concurrency=1 test/native/desktop-quit.native.ts test/native/desktop-binding.native.ts",
+    "desktop:native-check": "npm run desktop:build && node --import tsx --test --test-concurrency=1 test/native/desktop-quit.native.ts test/native/desktop-binding.native.ts test/native/desktop-fatal.native.ts",
     "desktop:run": "npm run desktop:build && dist/desktop/Kepos.app/Contents/MacOS/Kepos",
     "desktop:typecheck": "tsc -p tsconfig.desktop.json --noEmit",
     "web:dev": "npm run dev --workspace @lamplitisles/kepos-web",

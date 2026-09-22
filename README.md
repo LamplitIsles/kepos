@@ -49,6 +49,7 @@ can continue with:
 - [Nix, container, and Kubernetes deployment](docs/deployment.md)
 - [Network transport and compatibility](docs/network-transport-and-compatibility.md)
 - [Platform guides](docs/platforms/)
+- [Desktop crash diagnostics and native limitations](docs/platforms/macos.md#crash-diagnostics)
 - [DeepSeek Harness integration](docs/integrations/deepseek-harness.md)
 
 ## Minimal peer configuration
@@ -143,21 +144,21 @@ operation. This repository has not converted real NUC or Mac state.
 
 ## Supported surfaces
 
-| Surface | Canonical boundary |
-| --- | --- |
-| Android | One canonical peer runtime in the foreground service; key/QR/deep-link onboarding, canonical config/state, supported service actions, no reverse-service UI or reverse UDP |
-| macOS | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix byte-stream endpoints |
-| Windows | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix sockets fail clearly |
-| Headless CLI | Node.js 24 `peer` setup/key/status/pair/convert/run commands, gateway, TCP/HTTP/UDP service paths |
-| Nix / Home Manager | Declarative `services.kepos.peer` config and a supervised `kepos peer run` unit |
-| Container | Non-root image; deployment owns the canonical state directory, network, and supervision |
+| Surface            | Canonical boundary                                                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Android            | One canonical peer runtime in the foreground service; key/QR/deep-link onboarding, canonical config/state, supported service actions, no reverse-service UI or reverse UDP |
+| macOS              | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix byte-stream endpoints                                                                  |
+| Windows            | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix sockets fail clearly                                                                   |
+| Headless CLI       | Node.js 24 `peer` setup/key/status/pair/convert/run commands, gateway, TCP/HTTP/UDP service paths                                                                          |
+| Nix / Home Manager | Declarative `services.kepos.peer` config and a supervised `kepos peer run` unit                                                                                            |
+| Container          | Non-root image; deployment owns the canonical state directory, network, and supervision                                                                                    |
 
 The repository's Kubernetes path is an operator-owned gateway pattern, not a
 shipped cluster product. See [deployment](docs/deployment.md).
 
 ## Develop
 
-Requirements: Node.js 24, npm 11, and initialized Git submodules for desktop
+Requirements: Node.js 24, npm 12, and initialized Git submodules for desktop
 development.
 
 ```sh
