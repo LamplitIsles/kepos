@@ -289,6 +289,8 @@ export interface RunningMuxPeer {
   pairing?: Promise<void>;
   /** Send the current provider catalog if it materially changed. */
   publishCatalog: () => void;
+  /** Immediately run the dial-owned liveness probe after runtime wake. */
+  probeLiveness: () => boolean;
 }
 
 export type ControlNegotiation = "disabled" | "legacy" | "ready";
@@ -322,6 +324,7 @@ export class TerminalPairingError extends Error {
 interface RunningControlChannel {
   close: () => void;
   publishCatalog?: () => void;
+  probeLiveness?: () => boolean;
   ready: Promise<ControlNegotiation>;
 }
 
@@ -755,7 +758,7 @@ function createDialerPeerControl(
   if (heartbeatEnabled) arm(establishmentTimeoutMs, establishmentTimedOut);
   channel.open("1");
 
-  return { close: stop, publishCatalog, ready };
+  return { close: stop, publishCatalog, probeLiveness, ready };
 
   function arm(delayMs: number, callback: () => void): void {
     cancelTimer?.();
@@ -767,6 +770,14 @@ function createDialerPeerControl(
     messages.ping.send(pendingSequence);
     arm(responseTimeoutMs, missPong);
   }
+  function probeLiveness(): boolean {
+    // A normal interval may already be awaiting its pong. Reusing that
+    // watchdog avoids a second wake-specific timeout and overlapping probes.
+    if (closed || !opened || !heartbeatEnabled || pendingSequence !== undefined)
+      return false;
+    sendPing();
+    return true;
+  }
   function publishCatalog(): void {
     const encoded = options.catalog && serializeCatalog(options.catalog.snapshot());
     if (encoded === undefined || encoded === lastCatalog) return;
@@ -776,13 +787,19 @@ function createDialerPeerControl(
   function receiveCatalog(encoded: string): void {
     const snapshot = parseCatalog(encoded);
     if (snapshot === undefined) {
-      const error = new Error("Peer control received an invalid catalog snapshot");
-      reportFailure({ trigger: "control.invalid-message" });
-      finish();
-      destroyOuter(error);
+      rejectInvalidCatalog();
       return;
     }
-    options.catalog?.receive(snapshot);
+    try {
+      options.catalog?.receive(snapshot);
+    } catch {
+      rejectInvalidCatalog();
+    }
+  }
+  function rejectInvalidCatalog(): void {
+    reportFailure({ trigger: "control.invalid-message" });
+    finish();
+    destroyOuter(new Error("Peer control received an invalid catalog snapshot"));
   }
   function establishmentTimedOut(): void {
     if (closed || opened) return;
@@ -843,7 +860,12 @@ function createDialerPeerControl(
     readyReject(error);
   }
   function destroyOuter(error: Error): void {
-    if (!outer.destroyed) outer.destroy(error);
+    if (!outer.destroyed) {
+      // The failure is already delivered through onControlFailure (and
+      // controlReady when applicable). Do not depend on an Error event whose
+      // owner may have released the outer during teardown.
+      outer.destroy();
+    }
   }
 }
 
@@ -920,7 +942,7 @@ function createAcceptPeerControl(
         queueMicrotask(() => {
           if (closed || outerClosed || outer.destroyed) return;
           reportFailure("control.unexpected-close");
-          outer.destroy(new Error("Peer control channel closed unexpectedly"));
+          outer.destroy();
         });
       },
     });
@@ -998,7 +1020,7 @@ function createAcceptPeerControl(
     reportFailure("control.establishment.timeout");
     settleFailure(error);
     closed = true;
-    outer.destroy(error);
+    outer.destroy();
   }
   function publishCatalog(): void {
     const encoded = options.catalog && serializeCatalog(options.catalog.snapshot());
@@ -1009,11 +1031,19 @@ function createAcceptPeerControl(
   function receiveCatalog(encoded: string): void {
     const snapshot = parseCatalog(encoded);
     if (snapshot === undefined) {
-      reportFailure("control.invalid-message");
-      outer.destroy(new Error("Peer control received an invalid catalog snapshot"));
+      rejectInvalidCatalog();
       return;
     }
-    options.catalog?.receive(snapshot);
+    try {
+      options.catalog?.receive(snapshot);
+    } catch {
+      rejectInvalidCatalog();
+    }
+  }
+  function rejectInvalidCatalog(): void {
+    reportFailure("control.invalid-message");
+    closed = true;
+    outer.destroy();
   }
 }
 
@@ -2300,6 +2330,7 @@ export function createMuxPeer(
     },
     authorize,
     publishCatalog: () => peerControl?.publishCatalog?.(),
+    probeLiveness: () => peerControl?.probeLiveness?.() ?? false,
     close(): void {
       if (closed) return;
       closed = true;

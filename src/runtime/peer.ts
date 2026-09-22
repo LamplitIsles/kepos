@@ -39,6 +39,7 @@ import {
 import {
   createObservationEmitter,
   createObservationId,
+  type EmitObservation,
   type Observe,
 } from "../mux/observability.js";
 import { connectionOptionsForRoute } from "../mux/route.js";
@@ -204,6 +205,7 @@ interface PeerConnection {
   entry: PeerEntry;
   generation: number;
   outer: DhtStream;
+  observe: EmitObservation;
   mux: RunningMuxPeer;
   catalog?: HomeRegistry;
   closed: boolean;
@@ -441,6 +443,21 @@ export async function startPeer(
       wakeEpoch,
       dht: dhtStatsSnapshot(dht),
     });
+    // Wake belongs to the dialer-owned liveness path. A current accept-side
+    // outer continues to respond to probes but never starts one itself.
+    for (const entry of peerEntries.values()) {
+      if (entry.definition.connection !== "dial") continue;
+      const connection = entry.current;
+      if (!connection || connection.closed) continue;
+      if (connection.mux.probeLiveness()) {
+        connection.observe("outer.wakeup-probe", {
+          remotePublicKey: entry.definition.publicKey,
+          generation: connection.generation,
+          wakeEpoch,
+          transport: dhtStreamSnapshot(connection.outer),
+        });
+      }
+    }
   };
   const releaseDhtWakeup = (): void => {
     dht.off?.("wakeup", onDhtWakeup);
@@ -1063,6 +1080,7 @@ export async function startPeer(
       entry,
       generation,
       outer,
+      observe,
       mux: undefined as unknown as RunningMuxPeer,
       closed: false,
       udpMappings: new Map(),
@@ -1543,24 +1561,18 @@ export async function startPeer(
   }
 
   function receiveCatalog(connection: PeerConnection, snapshot: unknown): void {
+    if (connection.entry.current !== connection || connection.closed) return;
     let registry: HomeRegistry;
     try {
       registry = parseCatalogSnapshot(snapshot);
     } catch (error) {
-      connection.outer.destroy(
-        error instanceof Error ? error : new Error(String(error)),
-      );
-      return;
+      throw error instanceof Error ? error : new Error(String(error));
     }
     if (
       registry.publisher.publisherKey !== connection.entry.definition.publicKey
     ) {
-      connection.outer.destroy(
-        new Error("Peer catalog identity does not match authenticated peer"),
-      );
-      return;
+      throw new Error("Peer catalog identity does not match authenticated peer");
     }
-    if (connection.entry.current !== connection || connection.closed) return;
     connection.catalog = registry;
     connection.entry.lastCatalog = registry;
     connection.error = undefined;

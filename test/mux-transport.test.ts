@@ -383,7 +383,7 @@ test("a canonical peer-control dialer rejects an incompatible control counterpar
     await flushFrames();
     await assert.rejects(canonical.controlReady, /control channel timed out/i);
     assert.equal(canonicalOuter.destroyCalls, 1);
-    assert.match(errors[0]?.message ?? "", /control channel timed out/i);
+    assert.equal(errors.length, 0);
   } finally {
     canonical.close();
     legacy.close();
@@ -411,7 +411,7 @@ test("a canonical acceptor rejects an incompatible dialer without a heartbeat wa
     await assert.rejects(accept.controlReady, /control channel timed out/i);
     assert.equal(acceptOuter.destroyCalls, 1);
     assert.equal(scheduler.pending(), 0);
-    assert.match(errors[0]?.message ?? "", /control channel timed out/i);
+    assert.equal(errors.length, 0);
   } finally {
     accept.close();
     legacy.close();
@@ -462,6 +462,80 @@ test("canonical dial control is the only heartbeat initiator while accept respon
     );
     reverse.destroy();
     assert.equal(acceptScheduler.pending(), 0);
+  } finally {
+    dial.close();
+    accept.close();
+  }
+});
+
+test("wake probes reuse the dial heartbeat watchdog and never activate the acceptor", async () => {
+  const dialScheduler = new ManualScheduler();
+  const acceptScheduler = new ManualScheduler();
+  const [dialOuter, acceptOuter] = framedPair();
+  const dial = createMuxPeer(dialOuter, {
+    connection: "dial",
+    accept: async () => prefixService("dial:"),
+    heartbeat: heartbeatOptions(dialScheduler),
+  });
+  const accept = createMuxPeer(acceptOuter, {
+    connection: "accept",
+    accept: async () => prefixService("accept:"),
+    heartbeat: heartbeatOptions(acceptScheduler),
+  });
+
+  try {
+    await flushFrames();
+    await Promise.all([dial.controlReady, accept.controlReady]);
+    const writesBeforeWake = dialOuter.writeCalls;
+    assert.equal(dial.probeLiveness(), true);
+    assert.equal(dial.probeLiveness(), false);
+    assert.equal(dialOuter.writeCalls, writesBeforeWake + 1);
+    assert.equal(dialScheduler.pending(), 1);
+    assert.equal(accept.probeLiveness(), false);
+    assert.equal(acceptScheduler.pending(), 0);
+    await flushFrames();
+    assert.equal(dialOuter.destroyed, false);
+    assert.equal(acceptOuter.destroyed, false);
+    assert.equal(dialScheduler.pending(), 1);
+  } finally {
+    dial.close();
+    accept.close();
+  }
+});
+
+test("a failed wake probe follows the existing dial unhealthy path", async () => {
+  const scheduler = new ManualScheduler();
+  const [dialOuter, acceptOuter] = framedPair();
+  const failures: Array<Record<string, unknown>> = [];
+  const dial = createMuxPeer(dialOuter, {
+    connection: "dial",
+    accept: async () => prefixService("dial:"),
+    heartbeat: heartbeatOptions(scheduler),
+    now: () => scheduler.now,
+    onControlFailure: (fields) => failures.push(fields),
+  });
+  const accept = createMuxPeer(acceptOuter, {
+    connection: "accept",
+    accept: async () => prefixService("accept:"),
+    heartbeat: heartbeatOptions(new ManualScheduler()),
+  });
+
+  try {
+    await flushFrames();
+    await Promise.all([dial.controlReady, accept.controlReady]);
+    dialOuter.dropWrites = true;
+    assert.equal(dial.probeLiveness(), true);
+    scheduler.advance(10);
+    scheduler.advance(10);
+    await flushFrames();
+    assert.equal(dialOuter.destroyCalls, 1);
+    assert.deepEqual(failures, [
+      {
+        trigger: "heartbeat.timeout",
+        lastPongElapsedMs: 20,
+        missedPongs: 2,
+      },
+    ]);
   } finally {
     dial.close();
     accept.close();
@@ -606,8 +680,76 @@ test("accept control reports malformed catalog input with the canonical trigger"
 
     assert.deepEqual(failures, [{ trigger: "control.invalid-message" }]);
     assert.equal(acceptOuter.destroyCalls, 1);
-    assert.match(errors[0]?.message ?? "", /invalid catalog/i);
+    assert.equal(errors.length, 0);
   } finally {
+    accept.close();
+  }
+});
+
+test("accept control owns JSON-valid catalog schema failures", async () => {
+  const [dialOuter, acceptOuter] = framedPair();
+  const failures: Array<Record<string, unknown>> = [];
+  const errors: Error[] = [];
+  acceptOuter.on("error", (error) => errors.push(error));
+  const accept = createMuxPeer(acceptOuter, {
+    connection: "accept",
+    accept: async () => prefixService("accept:"),
+    catalog: {
+      snapshot: () => ({ services: [] }),
+      receive: () => {
+        throw new Error("catalog schema is invalid");
+      },
+    },
+    onControlFailure: (fields) => failures.push(fields),
+  });
+  const raw = openRawPeerControlChannel(dialOuter);
+
+  try {
+    await flushFrames();
+    assert.equal(await accept.controlReady, "ready");
+    raw.sendCatalog(JSON.stringify({ publisher: { publisherKey: "bad" } }));
+    await flushFrames();
+
+    assert.deepEqual(failures, [{ trigger: "control.invalid-message" }]);
+    assert.equal(acceptOuter.destroyCalls, 1);
+    assert.equal(errors.length, 0);
+  } finally {
+    accept.close();
+  }
+});
+
+test("dial control owns JSON-valid catalog publisher identity failures", async () => {
+  const [dialOuter, acceptOuter] = framedPair();
+  const failures: Array<Record<string, unknown>> = [];
+  const errors: Error[] = [];
+  dialOuter.on("error", (error) => errors.push(error));
+  const dial = createMuxPeer(dialOuter, {
+    connection: "dial",
+    accept: async () => prefixService("dial:"),
+    catalog: {
+      snapshot: () => ({ services: [] }),
+      receive: () => {
+        throw new Error("catalog publisher identity does not match");
+      },
+    },
+    onControlFailure: (fields) => failures.push(fields),
+  });
+  const accept = createMuxPeer(acceptOuter, {
+    connection: "accept",
+    accept: async () => prefixService("accept:"),
+    catalog: { snapshot: () => ({ publisher: { publisherKey: "wrong" } }), receive: () => undefined },
+  });
+
+  try {
+    await flushFrames();
+    assert.equal(await accept.controlReady, "ready");
+    await flushFrames();
+
+    assert.deepEqual(failures, [{ trigger: "control.invalid-message" }]);
+    assert.equal(dialOuter.destroyCalls, 1);
+    assert.equal(errors.length, 0);
+  } finally {
+    dial.close();
     accept.close();
   }
 });
@@ -641,7 +783,7 @@ test("canonical dial control reports one heartbeat failure and destroys its oute
     await flushFrames();
 
     assert.equal(dialOuter.destroyCalls, 1);
-    assert.match(errors[0]?.message ?? "", /heartbeat timed out/i);
+    assert.equal(errors.length, 0);
     assert.deepEqual(failures, [
       {
         trigger: "heartbeat.timeout",

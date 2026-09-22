@@ -15,6 +15,7 @@ export type ObservationName =
   | "outer.accepted"
   | "outer.rejected"
   | "outer.replaced"
+  | "outer.wakeup-probe"
   | "peer.wakeup"
   | "pairing.invitation-created"
   | "pairing.invitation-expired"

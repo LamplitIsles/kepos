@@ -234,6 +234,96 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
   }
 });
 
+test("runtime wake immediately probes only the current dial outer", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-wake-probe-"));
+  const testnet = await createHyperDhtTestnet(2);
+  let dialDht: DhtNode | undefined;
+  let acceptDht: DhtNode | undefined;
+  let dialPeer: RunningPeer | undefined;
+  let acceptPeer: RunningPeer | undefined;
+  const dialObservations: Observation[] = [];
+  const acceptObservations: Observation[] = [];
+  try {
+    const dialState = path.join(root, "dial", "peer");
+    const acceptState = path.join(root, "accept", "peer");
+    const dialSetup = await setupPeer({ stateDir: dialState });
+    const acceptSetup = await setupPeer({ stateDir: acceptState });
+    const dialIdentity = await loadPeerIdentity(dialState);
+    const acceptIdentity = await loadPeerIdentity(acceptState);
+    dialDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(dialIdentity.seed),
+    });
+    acceptDht = createDht({
+      bootstrap: testnet.bootstrap,
+      keyPair: keyPairFromSeed(acceptIdentity.seed),
+    });
+    let wakeListener: (() => void) | undefined;
+    const originalOn = dialDht.on?.bind(dialDht);
+    const originalOff = dialDht.off?.bind(dialDht);
+    dialDht.on = (event, listener) => {
+      if (event === "wakeup") wakeListener = listener;
+      return originalOn?.(event, listener);
+    };
+    dialDht.off = (event, listener) => {
+      if (event === "wakeup" && wakeListener === listener)
+        wakeListener = undefined;
+      return originalOff?.(event, listener);
+    };
+
+    acceptPeer = await startPeer({
+      stateDir: acceptState,
+      dht: acceptDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "dial", publicKey: dialSetup.publicKey, connection: "accept" }],
+        services: [],
+        bindings: [],
+      }),
+      observe: (observation) => acceptObservations.push(observation),
+    });
+    dialPeer = await startPeer({
+      stateDir: dialState,
+      dht: dialDht,
+      config: parsePeerConfig({
+        gateway: { port: 0 },
+        peers: [{ label: "accept", publicKey: acceptSetup.publicKey, connection: "dial" }],
+        services: [],
+        bindings: [],
+      }),
+      observe: (observation) => dialObservations.push(observation),
+    });
+    await waitFor(
+      () =>
+        dialPeer?.status().connections[0]?.status === "connected" &&
+        acceptPeer?.status().connections[0]?.status === "connected",
+    );
+    const generation = dialPeer.status().connections[0]?.generation;
+    assert.equal(typeof wakeListener, "function");
+    wakeListener?.();
+    wakeListener?.();
+    await waitFor(
+      () => dialObservations.filter(({ event }) => event === "outer.wakeup-probe").length === 1,
+    );
+    await delay(20);
+
+    assert.equal(dialPeer.status().connections[0]?.generation, generation);
+    assert.equal(dialPeer.status().connections[0]?.status, "connected");
+    assert.equal(acceptPeer.status().connections[0]?.status, "connected");
+    assert.equal(
+      acceptObservations.some(({ event }) => event === "outer.wakeup-probe"),
+      false,
+    );
+  } finally {
+    await dialPeer?.stop().catch(() => undefined);
+    await acceptPeer?.stop().catch(() => undefined);
+    await dialDht?.destroy({ force: true }).catch(() => undefined);
+    await acceptDht?.destroy({ force: true }).catch(() => undefined);
+    await testnet.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("canonical service actions select an explicit same-ID peer without fallback", async () => {
   const root = await mkdtemp(
     path.join(tmpdir(), "kepos-peer-service-selection-"),
