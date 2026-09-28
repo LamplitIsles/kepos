@@ -94,9 +94,9 @@ public_key = "<nuc-peer-public-key>"
 connection = "dial"
 
 [[services]]
-id = "cua"
-name = "CUA driver"
-source = { unix_socket = "/run/user/1000/cua-driver.sock" }
+id = "ssh"
+name = "SSH"
+source = { local_port = 22 }
 allow = ["<nuc-peer-public-key>"]
 
 [[bindings]]
@@ -125,18 +125,17 @@ explicitly. Expiry and denial close the candidate and do not leave a live
 binding.
 
 HTTP services retain `http://<service-id>.localhost:17480/`. Raw TCP services
-and Unix bindings expose their configured local endpoint. If several peers
+expose their configured local endpoint. If several peers
 offer the same HTTP service ID, the UI/runtime reports an ambiguity and the
 operator must configure an explicit binding; it never selects by reconnect
 order. UDP service cards copy a loopback endpoint and do not open a browser.
 Those cards are actionable only for forward bindings targeting a dial-side
 peer; accept-side UDP bindings remain unavailable.
 
-For the DSH use case, the canonical Mac service can publish the cua-driver Unix
-socket. A NUC-side binding to that service carries the NDJSON byte stream and
-inline image bytes transparently. The automated repository test uses a
-temporary Unix socket and HyperDHT testnet; it is not a live CUA driver or GUI
-trial.
+For the DSH use case, a Mac service can publish a local TCP port. A binding to
+that service carries the byte stream transparently. The automated repository
+test uses temporary TCP listeners and a HyperDHT testnet; it is not a live DSH
+or GUI trial.
 
 ## Lifecycle and cutover
 

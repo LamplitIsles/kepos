@@ -246,7 +246,6 @@ class BareRuntime(
     service = data.getValue("service").jsonPrimitive.content,
     listen = data["listen"]?.jsonObject?.let { listen ->
       listen["localPort"]?.jsonPrimitive?.content
-        ?: listen["unixSocket"]?.jsonPrimitive?.content
         ?: "unknown"
     } ?: "unknown",
     port = data["port"]?.jsonPrimitive?.intOrNull,

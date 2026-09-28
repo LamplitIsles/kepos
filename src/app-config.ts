@@ -234,32 +234,25 @@ function serializeService(service: PeerService): Record<string, unknown> {
 
 function serializeSource(source: PeerService["source"]): Record<string, unknown> {
   if ("localPort" in source) return { local_port: source.localPort };
-  if ("unixSocket" in source) return { unix_socket: source.unixSocket };
   return { peer: source.peer, service: source.service };
 }
 
 function serializeListen(
   listen: PeerBinding["listen"],
 ): Record<string, unknown> {
-  return "localPort" in listen
-    ? { local_port: listen.localPort }
-    : { unix_socket: listen.unixSocket };
+  return { local_port: listen.localPort };
 }
 
 function parseTomlSource(value: unknown, field: string): PeerService["source"] {
   const source = requireTable(value, field);
   rejectUnknownFields(source, field, [
     "local_port",
-    "unix_socket",
     "peer",
     "service",
   ]);
   const raw: Record<string, unknown> = {};
   if (Object.prototype.hasOwnProperty.call(source, "local_port")) {
     raw.localPort = source.local_port;
-  }
-  if (Object.prototype.hasOwnProperty.call(source, "unix_socket")) {
-    raw.unixSocket = source.unix_socket;
   }
   if (Object.prototype.hasOwnProperty.call(source, "peer")) raw.peer = source.peer;
   if (Object.prototype.hasOwnProperty.call(source, "service")) {
@@ -270,13 +263,10 @@ function parseTomlSource(value: unknown, field: string): PeerService["source"] {
 
 function parseTomlListen(value: unknown, field: string): PeerBinding["listen"] {
   const listen = requireTable(value, field);
-  rejectUnknownFields(listen, field, ["local_port", "unix_socket"]);
+  rejectUnknownFields(listen, field, ["local_port"]);
   const raw: Record<string, unknown> = {};
   if (Object.prototype.hasOwnProperty.call(listen, "local_port")) {
     raw.localPort = listen.local_port;
-  }
-  if (Object.prototype.hasOwnProperty.call(listen, "unix_socket")) {
-    raw.unixSocket = listen.unix_socket;
   }
   return raw as unknown as PeerBinding["listen"];
 }

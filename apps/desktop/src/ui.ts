@@ -115,7 +115,7 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
   function bindingFor(peer, device, serviceId) {
     return peer.bindings.find(function (binding) { return !device.local && (binding.peer === device.name || binding.peer === device.key) && binding.service === serviceId; });
   }
-  function endpoint(binding) { return binding.port ? '127.0.0.1:' + binding.port : binding.listen && binding.listen.unixSocket ? 'unix://' + binding.listen.unixSocket : ''; }
+  function endpoint(binding) { return binding.port ? '127.0.0.1:' + binding.port : ''; }
   function serviceToken(service) { return encodeURIComponent(service.peer || '') + '/' + encodeURIComponent(service.id); }
   function selectedDevice() { return snapshot && snapshot.peer && deviceList(snapshot.peer).find(function (device) { return device.key === selected; }); }
   function showToast(text) {
@@ -145,7 +145,6 @@ export function renderDesktopUi(options: DesktopUiOptions = {}): string {
   function sourceLabel(service) {
     var source = service.source || {};
     if (source.localPort) return '127.0.0.1:' + source.localPort;
-    if (source.unixSocket) return source.unixSocket;
     if (source.peer) return 'Via ' + source.peer + ' / ' + source.service;
     return service.id;
   }

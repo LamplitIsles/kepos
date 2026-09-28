@@ -7,7 +7,6 @@ import {
   type Server,
   type Socket,
 } from "node:net";
-import { lstat, unlink } from "node:fs/promises";
 import process from "node:process";
 import type { Duplex } from "node:stream";
 
@@ -398,11 +397,6 @@ interface BindingRuntime {
   server?: Server;
   udp?: RunningPeerUdpBinding;
   port?: number;
-  unixOwnership?: {
-    path: string;
-    dev: number;
-    ino: number;
-  };
 }
 
 export async function startPeer(
@@ -1326,17 +1320,6 @@ export async function startPeer(
         throw error;
       }
     }
-    if ("unixSocket" in service.source) {
-      try {
-        const socket = await connectUnixSocket(service.source.unixSocket);
-        clearLocalSourceError(service.id);
-        return socket;
-      } catch (error) {
-        recordLocalSourceError(service.id, errorMessage(error));
-        updateHomeServers();
-        throw error;
-      }
-    }
     const upstreamKey = resolvePeerKey(service.source.peer);
     if (upstreamKey === connection.entry.definition.publicKey) {
       throw new Error("Upstream source cannot use the requesting peer");
@@ -1611,13 +1594,7 @@ export async function startPeer(
 
   async function startBinding(binding: PeerBinding): Promise<void> {
     const kind = peerBindingKind(binding);
-    if ("unixSocket" in binding.listen && process.platform === "win32") {
-      throw new Error("Unix socket bindings are unsupported on Windows");
-    }
     if (kind === "udp") {
-      if (!("localPort" in binding.listen)) {
-        throw new Error("UDP bindings require a localPort endpoint");
-      }
       const bindingKeyValue = bindingKey(binding, resolvePeerKey);
       if (bindingRuntimes.has(bindingKeyValue)) return;
       const udp = await listenPeerUdpBinding(
@@ -1639,46 +1616,23 @@ export async function startPeer(
     }
     const bindingKeyValue = bindingKey(binding, resolvePeerKey);
     if (bindingRuntimes.has(bindingKeyValue)) return;
-    const unixPath =
-      "unixSocket" in binding.listen ? binding.listen.unixSocket : undefined;
-    if (unixPath !== undefined) {
-      if (await pathExists(unixPath)) {
-        throw new Error(`Unix binding path is already occupied: ${unixPath}`);
-      }
-    }
     const listener = createServer({ allowHalfOpen: true }, (socket) => {
       socket.pause();
       void openBindingSocket(socket, binding);
     });
-    let unixOwnership: BindingRuntime["unixOwnership"];
     try {
       await listenBinding(listener, binding.listen);
       const address = listener.address();
       const port =
         address && typeof address !== "string" ? address.port : undefined;
-      if (unixPath !== undefined) {
-        const stat = await lstat(unixPath);
-        if (!stat.isSocket()) {
-          throw new Error(`Unix binding did not create a socket: ${unixPath}`);
-        }
-        unixOwnership = { path: unixPath, dev: stat.dev, ino: stat.ino };
-      }
       bindingRuntimes.set(bindingKeyValue, {
         binding,
         kind,
         server: listener,
         ...(port === undefined ? {} : { port }),
-        ...(unixOwnership ? { unixOwnership } : {}),
       });
     } catch (error) {
       await closeServer(listener).catch(() => undefined);
-      // A failed listen never proves ownership.  In particular, an occupied
-      // path may belong to another process; never unlink it as rollback.
-      if (unixOwnership) {
-        await unlinkOwnedSocket(unixOwnership.path, unixOwnership).catch(
-          () => undefined,
-        );
-      }
       throw error;
     }
   }
@@ -1723,12 +1677,6 @@ export async function startPeer(
     await runtime.udp?.close().catch(() => undefined);
     if (runtime.server)
       await closeServer(runtime.server).catch(() => undefined);
-    if (runtime.unixOwnership) {
-      await unlinkOwnedSocket(
-        runtime.unixOwnership.path,
-        runtime.unixOwnership,
-      ).catch(() => undefined);
-    }
   }
 
   function updateUdpBindings(): void {
@@ -1850,15 +1798,6 @@ export async function startPeer(
       return { available: false, error: localSourceError };
     }
     if ("localPort" in service.source) return { available: true };
-    if ("unixSocket" in service.source) {
-      if (process.platform === "win32") {
-        return {
-          available: false,
-          error: "Unix socket sources are unsupported on Windows",
-        };
-      }
-      return { available: true };
-    }
     const upstreamSource = service.source as Extract<
       PeerServiceSource,
       { peer: string }
@@ -1905,9 +1844,6 @@ export async function startPeer(
         kind: service.kind === "udp" ? "udp" : "tcp",
         port: service.source.localPort,
       };
-    }
-    if ("unixSocket" in service.source) {
-      return { kind: "tcp", endpoint: `unix://${service.source.unixSocket}` };
     }
     return undefined;
   }
@@ -2103,9 +2039,6 @@ export async function startPeer(
         kind: "udp",
         ...(runtime.port === undefined ? {} : { port: runtime.port }),
       };
-    }
-    if ("unixSocket" in binding.listen) {
-      return { kind: "tcp", endpoint: `unix://${binding.listen.unixSocket}` };
     }
     const port = runtime?.port ?? binding.listen.localPort;
     return { kind: "tcp", ...(port === undefined ? {} : { port }) };
@@ -2392,15 +2325,6 @@ async function connectLoopback(port: number): Promise<Socket> {
   return socket;
 }
 
-async function connectUnixSocket(socketPath: string): Promise<Socket> {
-  if (process.platform === "win32") {
-    throw new Error("Unix socket sources are unsupported on Windows");
-  }
-  const socket = createConnection({ path: socketPath, allowHalfOpen: true });
-  await waitForSocket(socket);
-  return socket;
-}
-
 async function waitForSocket(socket: Socket): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const onConnect = (): void => {
@@ -2431,11 +2355,7 @@ async function listenBinding(
       resolve();
     };
     server.once("listening", onListening);
-    if ("localPort" in listen) {
-      server.listen(listen.localPort, "127.0.0.1");
-    } else {
-      server.listen(listen.unixSocket);
-    }
+    server.listen(listen.localPort, "127.0.0.1");
   });
 }
 
@@ -2444,31 +2364,6 @@ async function closeServer(server: Server | undefined): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
-}
-
-async function pathExists(filePath: string): Promise<boolean> {
-  try {
-    await lstat(filePath);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-async function unlinkOwnedSocket(
-  socketPath: string,
-  expected?: { dev: number; ino: number },
-): Promise<void> {
-  try {
-    const stat = await lstat(socketPath);
-    if (!stat.isSocket()) return;
-    if (expected && (stat.dev !== expected.dev || stat.ino !== expected.ino))
-      return;
-    await unlink(socketPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
 }
 
 async function waitWithAbort<T>(

@@ -46,7 +46,7 @@ service's immediate `allow` list. Approval never broadens service grants.
 The app presents the authenticated catalog and keeps its current
 `*.localhost` service convention. Canonical presentation metadata supplies
 the action and URL/copy value: supported HTTP actions open their unqualified
-URL, while supported raw TCP/Unix actions copy their endpoint or command. For
+URL, while supported raw TCP actions copy their endpoint or command. For
 example:
 
 ```text
@@ -56,7 +56,7 @@ http://navidrome.localhost:17480/
 The built-in mappings continue to use loopback TCP/HTTP listeners for dsh,
 Navidrome, SSH, and other supported services. UDP entries are filtered from
 the Android service directory; SOCKS5 UDP ASSOCIATE and game UDP operation are
-outside this client boundary. No Android Unix-socket or reverse-service
+outside this client boundary. No Android reverse-service
 configuration UI is implied by the catalog.
 
 ## Canonical configuration boundary

@@ -48,7 +48,7 @@ connection = "accept"
 [[services]]
 id = "cua"
 name = "Cua driver"
-source = { unix_socket = "/tmp/cua.sock" }
+source = { local_port = 3001 }
 allow = ["${peerKey}"]
 
 [[services]]
@@ -74,7 +74,7 @@ allow = ["${otherPeerKey}"]
 [[bindings]]
 peer = "nuc"
 service = "cua"
-listen = { unix_socket = "/tmp/nuc-cua.sock" }
+listen = { local_port = 0 }
 
 [[bindings]]
 peer = "phone"
@@ -110,7 +110,7 @@ listen = { local_port = 0 }
           id: "cua",
           name: "Cua driver",
           kind: "tcp",
-          source: { unixSocket: "/tmp/cua.sock" },
+          source: { localPort: 3001 },
           allow: [peerKey],
         },
         {
@@ -140,7 +140,7 @@ listen = { local_port = 0 }
         {
           peer: "nuc",
           service: "cua",
-          listen: { unixSocket: "/tmp/nuc-cua.sock" },
+          listen: { localPort: 0 },
         },
         {
           peer: "phone",
@@ -183,7 +183,7 @@ test("canonical config round-trips strict snake_case and defaults TCP and grants
   assert.deepEqual(parseKeposConfig(source), config);
 });
 
-test("canonical serializer emits every source and binding variant", () => {
+test("canonical serializer emits local and upstream source variants", () => {
   const config: PeerConfig = {
     peers: [
       { label: "nuc", publicKey: peerKey, connection: "accept" },
@@ -191,10 +191,10 @@ test("canonical serializer emits every source and binding variant", () => {
     ],
     services: [
       {
-        id: "unix-service",
-        name: "Unix service",
+        id: "local-service",
+        name: "Local service",
         kind: "tcp",
-        source: { unixSocket: "/tmp/unix-service.sock" },
+        source: { localPort: 3001 },
         allow: [peerKey],
       },
       {
@@ -209,8 +209,8 @@ test("canonical serializer emits every source and binding variant", () => {
     bindings: [
       {
         peer: "nuc",
-        service: "unix-service",
-        listen: { unixSocket: "/tmp/bound.sock" },
+        service: "local-service",
+        listen: { localPort: 3002 },
       },
       {
         peer: "mac",
@@ -220,7 +220,7 @@ test("canonical serializer emits every source and binding variant", () => {
     ],
   };
   const source = serializeKeposConfig(config);
-  assert.match(source, /unix_socket = "/);
+  assert.match(source, /local_port = 3002/);
   assert.match(source, /peer = "mac"/);
   assert.match(source, /max_publisher_to_subscriber_bps = 1000/);
   assert.match(source, /local_port = 0/);
@@ -292,7 +292,7 @@ test("invalid references, variants, endpoints, and policy values are clear", () 
   };
   assert.throws(
     () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, source: { localPort: 22, unixSocket: "/tmp/x" } }] }),
-    /exactly one|variant|endpoint/i,
+    /unknown/i,
   );
   assert.throws(
     () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, source: { peer: "missing", service: "ssh" } }] }),
@@ -304,11 +304,11 @@ test("invalid references, variants, endpoints, and policy values are clear", () 
   );
   assert.throws(
     () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, source: { unixSocket: "relative.sock" } }] }),
-    /absolute Unix socket/i,
+    /local port or peer service/i,
   );
   assert.throws(
     () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, kind: "udp", source: { unixSocket: "/tmp/udp.sock" } }] }),
-    /UDP|Unix.*UDP/i,
+    /local port or peer service/i,
   );
   assert.throws(
     () => parsePeerConfig({ ...base, services: [{ ...base.services[0]!, allow: [otherPeerKey] }] }),

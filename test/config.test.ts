@@ -28,7 +28,7 @@ function baseConfig(): PeerConfig {
         id: "cua",
         name: "CUA driver",
         kind: "http",
-        source: { unixSocket: "/tmp/kepos-cua.sock" },
+        source: { localPort: 3000 },
         allow: [otherPeerKey],
         maxPublisherToSubscriberBps: 2_000_000,
       },
@@ -44,7 +44,7 @@ function baseConfig(): PeerConfig {
       {
         peer: peerKey,
         service: "cua",
-        listen: { unixSocket: "/tmp/kepos-cua-binding.sock" },
+        listen: { localPort: 0 },
       },
     ],
   });
@@ -61,13 +61,11 @@ test("canonical config parses all peer, service, binding, and network variants",
     id: "cua",
     name: "CUA driver",
     kind: "http",
-    source: { unixSocket: "/tmp/kepos-cua.sock" },
+    source: { localPort: 3000 },
     allow: [otherPeerKey],
     maxPublisherToSubscriberBps: 2_000_000,
   });
-  assert.deepEqual(config.bindings[1]?.listen, {
-    unixSocket: "/tmp/kepos-cua-binding.sock",
-  });
+  assert.deepEqual(config.bindings[1]?.listen, { localPort: 0 });
   assert.equal(config.network?.route, "public");
 });
 
@@ -103,7 +101,7 @@ test("canonical config keeps endpoint variants exclusive and bounded", () => {
   const minimal = { peers: [], services: [], bindings: [] };
   assert.throws(
     () => parsePeerConfig({ ...minimal, services: [{ id: "ssh", name: "SSH", source: { localPort: 22, unixSocket: "/tmp/x" } }] }),
-    /exactly one/i,
+    /unknown/i,
   );
   assert.throws(
     () => parsePeerConfig({ ...minimal, services: [{ id: "ssh", name: "SSH", source: { peer: "x" } }] }),
@@ -115,7 +113,7 @@ test("canonical config keeps endpoint variants exclusive and bounded", () => {
   );
   assert.throws(
     () => parsePeerConfig({ ...minimal, services: [{ id: "ssh", name: "SSH", source: { unixSocket: "relative.sock" } }] }),
-    /absolute/i,
+    /local port or peer service/i,
   );
   assert.throws(
     () => parsePeerConfig({ ...minimal, bindings: [{ peer: peerKey, service: "ssh", listen: { localPort: 65_536 } }] }),
@@ -145,11 +143,11 @@ test("canonical config keeps endpoint variants exclusive and bounded", () => {
   );
   assert.throws(
     () => parsePeerConfig({ ...minimal, bindings: [{ peer: peerKey, service: "ssh", kind: "udp", listen: { unixSocket: "/tmp/udp.sock" } }] }),
-    /UDP|Unix/i,
+    /unknown/i,
   );
   assert.throws(
     () => parsePeerConfig({ ...minimal, services: [{ id: "ssh", name: "SSH", kind: "udp", source: { unixSocket: "/tmp/udp.sock" } }] }),
-    /UDP|Unix/i,
+    /local port or peer service/i,
   );
 });
 
@@ -223,11 +221,11 @@ test("canonical config rejects malformed scalar boundaries before runtime use", 
   );
   assert.throws(
     () => parsePeerConfig({ ...minimal, services: [{ id: "ssh", name: "SSH", source: { unixSocket: "/tmp/a\u0000.sock" } }] }),
-    /absolute|socket/,
+    /local port or peer service/,
   );
   assert.throws(
     () => parsePeerConfig({ ...minimal, services: [{ id: "ssh", name: "SSH", source: { unixSocket: `/${"x".repeat(103)}` } }] }),
-    /103/,
+    /local port or peer service/,
   );
   assert.throws(
     () => parsePeerConfig({ ...withPeer, services: [{ id: "ssh", name: "SSH", source: { peer: "phone", service: "ssh" }, allow: "bad" }] }),

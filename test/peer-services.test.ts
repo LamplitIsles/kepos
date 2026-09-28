@@ -4,7 +4,7 @@ import { request as httpRequest } from "node:http";
 import { createSocket, type Socket } from "node:dgram";
 import { createConnection, createServer, type Server } from "node:net";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Duplex } from "node:stream";
@@ -36,7 +36,7 @@ const createHyperDhtTestnet = require("hyperdht/testnet") as (
   destroy: () => Promise<void>;
 }>;
 
-test("canonical peers exchange two-way Unix and TCP byte streams over one connection", async () => {
+test("canonical peers exchange two-way TCP byte streams over one connection", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-services-"));
   const testnet = await createHyperDhtTestnet(3);
   let aDht: DhtNode | undefined;
@@ -69,8 +69,11 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
         socket.end(Buffer.concat([Buffer.from("cua-reply:"), ...chunks]));
       });
     });
-    const aSourcePath = path.join(root, "a", "cua.sock");
-    await listenUnix(aSource, aSourcePath);
+    await listenTcp(aSource);
+    const aSourceAddress = aSource.address();
+    if (!aSourceAddress || typeof aSourceAddress === "string") {
+      throw new Error("test TCP source did not receive an address");
+    }
 
     bSource = createServer((socket) => {
       const chunks: Buffer[] = [];
@@ -85,7 +88,6 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
       throw new Error("test TCP source did not receive an address");
     }
 
-    const bBindingPath = path.join(root, "b", "cua-binding.sock");
     const aConfig = parsePeerConfig({
       gateway: { port: 0 },
       peers: [
@@ -95,7 +97,7 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
         {
           id: "cua",
           name: "cua-driver",
-          source: { unixSocket: aSourcePath },
+          source: { localPort: aSourceAddress.port },
           allow: [bSetup.publicKey],
         },
       ],
@@ -131,7 +133,7 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
         {
           peer: "mac",
           service: "cua",
-          listen: { unixSocket: bBindingPath },
+          listen: { localPort: 0 },
         },
       ],
     });
@@ -169,8 +171,10 @@ test("canonical peers exchange two-way Unix and TCP byte streams over one connec
       ),
       Buffer.from("b-reply:large:" + "x".repeat(256 * 1024)),
     );
+    const bBindingPort = bPeer.status().bindings[0]?.port;
+    assert.equal(typeof bBindingPort, "number");
     assert.deepEqual(
-      await requestUnix(bBindingPath, Buffer.from('ndjson:{"image":"inline"}')),
+      await requestTcp(bBindingPort!, Buffer.from('ndjson:{"image":"inline"}')),
       Buffer.from('cua-reply:ndjson:{"image":"inline"}'),
     );
     await waitFor(
@@ -1361,8 +1365,11 @@ test("a canonical peer republishes an upstream service only when explicitly conf
         socket.end(Buffer.concat([Buffer.from("upstream:"), ...chunks]));
       });
     });
-    const sourcePath = path.join(root, "mac", "cua.sock");
-    await listenUnix(source, sourcePath);
+    await listenTcp(source);
+    const sourceAddress = source.address();
+    if (!sourceAddress || typeof sourceAddress === "string") {
+      throw new Error("test TCP source did not receive an address");
+    }
 
     macPeer = await startPeer({
       stateDir: macState,
@@ -1377,7 +1384,7 @@ test("a canonical peer republishes an upstream service only when explicitly conf
             id: "cua",
             name: "CUA",
             kind: "tcp",
-            source: { unixSocket: sourcePath },
+            source: { localPort: sourceAddress.port },
             allow: [nucSetup.publicKey],
           },
         ],
@@ -1740,12 +1747,6 @@ test("canonical peer keeps offline bindings configured and reports local source 
           allow: [],
         },
         {
-          id: "unix",
-          name: "Unix",
-          source: { unixSocket: path.join(root, "source.sock") },
-          allow: [],
-        },
-        {
           id: "upstream",
           name: "Upstream",
           source: { peer: "remote", service: "remote-service" },
@@ -1770,10 +1771,6 @@ test("canonical peer keeps offline bindings configured and reports local source 
     const status = peer.status();
     assert.equal(
       status.services.find(({ id }) => id === "tcp")?.available,
-      true,
-    );
-    assert.equal(
-      status.services.find(({ id }) => id === "unix")?.available,
       true,
     );
     assert.deepEqual(
@@ -1930,34 +1927,12 @@ test("canonical peer records and expires a failed local source acquisition", asy
   }
 });
 
-test("canonical peer rejects occupied Unix bindings and disabled pairing", async () => {
+test("canonical peer rejects disabled pairing", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kepos-peer-errors-"));
-  const occupiedPath = path.join(root, "occupied.sock");
   const stateDir = path.join(root, "peer");
   let peer: RunningPeer | undefined;
   try {
     await setupPeer({ stateDir });
-    await writeFile(occupiedPath, "foreign");
-    const config = parsePeerConfig({
-      gateway: { port: 0 },
-      peers: [
-        { label: "remote", publicKey: "44".repeat(32), connection: "accept" },
-      ],
-      services: [],
-      bindings: [
-        {
-          peer: "remote",
-          service: "remote-service",
-          listen: { unixSocket: occupiedPath },
-        },
-      ],
-    });
-    await assert.rejects(
-      startPeer({ stateDir, config, dht: createFakeDht() }),
-      /already occupied/i,
-    );
-    assert.equal(await readFile(occupiedPath, "utf8"), "foreign");
-
     peer = await startPeer({
       stateDir,
       config: parsePeerConfig({
@@ -2135,16 +2110,6 @@ async function listenTcp(server: Server): Promise<void> {
   });
 }
 
-async function listenUnix(server: Server, socketPath: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(socketPath, () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-}
-
 async function closeServer(server: Server | undefined): Promise<void> {
   if (!server?.listening) return;
   await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -2218,10 +2183,6 @@ function readStream(stream: import("node:stream").Duplex): Promise<Buffer> {
 
 function requestTcp(port: number, payload: Buffer): Promise<Buffer> {
   return requestSocket({ port }, payload);
-}
-
-function requestUnix(socketPath: string, payload: Buffer): Promise<Buffer> {
-  return requestSocket({ path: socketPath }, payload);
 }
 
 function requestHttp(port: number, requestPath: string): Promise<string> {

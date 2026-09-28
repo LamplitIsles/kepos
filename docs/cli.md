@@ -82,10 +82,10 @@ public_key = "<phone-peer-public-key>"
 connection = "dial"
 
 [[services]]
-id = "cua"
-name = "CUA driver"
-source = { unix_socket = "/run/user/1000/cua-driver.sock" }
-allow = ["<nuc-peer-public-key>"]
+id = "ssh"
+name = "SSH"
+source = { local_port = 22 }
+allow = ["<mac-peer-public-key>"]
 
 [[services]]
 id = "navidrome"
@@ -95,15 +95,15 @@ source = { local_port = 4533 }
 allow = ["<phone-peer-public-key>"]
 
 [[services]]
-id = "mac-cua"
-name = "Mac CUA through NUC"
-source = { peer = "mac", service = "cua" }
+id = "mac-ssh"
+name = "Mac SSH through NUC"
+source = { peer = "mac", service = "ssh" }
 allow = ["<phone-peer-public-key>"]
 
 [[bindings]]
 peer = "mac"
-service = "cua"
-listen = { unix_socket = "/run/user/1000/kepos-cua.sock" }
+service = "ssh"
+listen = { local_port = 2222 }
 
 [[bindings]]
 peer = "phone"
@@ -122,13 +122,11 @@ one source, and an immediate-peer `allow` list. A missing or empty `allow` list
 denies the service. A source is exactly one of:
 
 - `source = { local_port = 1234 }`, a fixed loopback TCP/UDP source;
-- `source = { unix_socket = "/absolute/path.sock" }`, a byte-stream source;
 - `source = { peer = "label-or-key", service = "upstream-id" }`, an explicit
   upstream service selected from one configured peer.
 
-Service ports are fixed positive ports. Unix paths are absolute and bounded by
-the host socket limit. A Unix source cannot provide a UDP service. A binding
-owns a local loopback TCP port, local loopback UDP port, or Unix socket;
+Service ports are fixed positive ports. A binding owns a local loopback TCP
+or UDP port;
 `local_port = 0` asks the OS for an ephemeral port. Omit `kind` for the
 byte-stream/TCP default and use `kind = "udp"` for a forward UDP binding.
 Remote peers cannot choose a local path, port, or target. Reverse UDP is not a
@@ -260,9 +258,7 @@ channels and UDP flows. Existing bytes are never replayed after reconnect.
 
 The command keeps bindings configured while a peer is offline and reports
 them unavailable. A later canonical peer-control connection can serve new requests
-after catalog and grant checks. A local Unix binding is removed only when its socket is
-still the socket created by this runtime; an occupied or replaced foreign path
-is preserved. Unix endpoints fail clearly on Windows.
+after catalog and grant checks.
 
 `[metrics]` enables the existing Prometheus series on a separate
 read-only `/metrics` listener. `--metrics-listen host:port` overrides the

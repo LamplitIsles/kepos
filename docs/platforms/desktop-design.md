@@ -43,7 +43,7 @@ determine whether the card offers Open.
 - A byte-stream service without a local binding offers Open through the HTTP
   gateway by default. This is a browser shortcut, not a guarantee that its
   source speaks HTTP.
-- A service with a configured local TCP or Unix binding offers a copy action
+- A service with a configured local TCP binding offers a copy action
   for its local endpoint or a service-specific command or connection URL.
   It does not offer Open, even when the source speaks HTTP.
 - UDP services never offer browser Open. A configured UDP binding supplies

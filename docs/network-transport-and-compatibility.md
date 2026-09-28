@@ -34,7 +34,7 @@ The layers have different contracts:
 
 | Layer | Kepos responsibility | Mechanism |
 | --- | --- | --- |
-| Local service | Fixed TCP/HTTP/Unix byte stream or fixed-target IPv4 UDP | Node/Bare local sockets |
+| Local service | Fixed TCP/HTTP byte stream or fixed-target IPv4 UDP | Node/Bare local sockets |
 | Service tunnel | Open, data, half-close, reset, status, flow control | Protomux + `Duplex` |
 | UDP service operation | Datagram boundaries, bounded flow IDs/fragments | SecretStream unordered messages |
 | Peer security | Authenticate configured public key and encrypt bytes | Noise SecretStream |
@@ -75,27 +75,26 @@ reconnect.
 Canonical service sources are exactly one of:
 
 - fixed loopback `local_port`;
-- fixed absolute `unix_socket` for a byte stream;
 - an explicit `peer` plus upstream `service` ID.
 
-Bindings own a local loopback TCP/UDP port or Unix socket for one remote peer
+Bindings own a local loopback TCP/UDP port for one remote peer
 and service. Set the binding kind to `udp` for a forward datagram listener;
 UDP bindings require a loopback port and use the authenticated connection's
 existing bounded UDP envelopes. A UDP binding is usable only for a configured
 `dial` peer; a binding targeting an `accept` peer remains unavailable because
 local UDP consumption is forward-only. A byte-stream binding is the default
-and Unix endpoints remain byte-stream only. The endpoint is selected locally;
+and uses a TCP port. The endpoint is selected locally;
 remote messages cannot choose it. An imported service is not published merely
 because it has a binding.
 
 Republication is a new local service entry:
 
 ```text
-peer A service cua
+peer A service ssh
         ^
         | NUC consumes exact peer/service source
         v
-peer B service mac-cua -- own name + own allowlist --> peer C
+peer B service mac-ssh -- own name + own allowlist --> peer C
 ```
 
 The upstream peer authorizes the republisher's key. The republisher's service
@@ -234,7 +233,7 @@ information. Diagnostics must not contain seeds, secret keys, pairing tokens,
 full candidate addresses, or state files. They are not a stable API.
 
 The repository proves the direct transport with test-owned HyperDHT testnets,
-temporary TCP/Unix/UDP listeners, and controllable fakes. Those checks do not
+temporary TCP/UDP listeners, and controllable fakes. Those checks do not
 prove every NAT class, a production relay, or a
-live Mac GUI/cua-driver installation. A later operator smoke procedure is
+live Mac GUI installation. A later operator smoke procedure is
 documented in [DeepSeek Harness integration](integrations/deepseek-harness.md).

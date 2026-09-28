@@ -85,10 +85,10 @@ gateway     local HTTP host/port/domain
 metrics     optional Prometheus host/port listener
 ```
 
-A service source is exactly one fixed loopback port, fixed Unix socket, or
+A service source is exactly one fixed loopback port or
 peer/service reference. A binding endpoint is local and cannot be selected by
 remote input. Unknown fields, old role tables, obsolete flags, incomplete
-references, invalid paths/ports, duplicate labels/keys/IDs, and duplicate
+references, invalid ports, duplicate labels/keys/IDs, and duplicate
 bindings fail parsing. Empty or missing service `allow` is deny-by-default.
 
 The runtime owns the active config, peer entries keyed by authenticated public
@@ -99,15 +99,15 @@ checked again against the current local grant.
 
 ## Service channels and republication
 
-For a local source, `acceptService` connects to the configured loopback port or
-Unix socket. For an upstream source, it opens the selected service on the
+For a local source, `acceptService` connects to the configured loopback port.
+For an upstream source, it opens the selected service on the
 current connection to that exact peer. The republisher does not dial an
 upstream because it is a provider; it uses whichever configured relationship
 is current. Its downstream service has its own ID, name, and `allow` list.
 
 ```text
 Mac peer --(Mac dials NUC; NUC accepts)--> NUC peer
-  Mac service: cua  -- authorized upstream open --> NUC service: mac-cua
+  Mac service: ssh  -- authorized upstream open --> NUC service: mac-ssh
                                                     -- authorized downstream open --> phone
 ```
 
@@ -126,8 +126,8 @@ reconnect never replays bytes or application actions.
 
 ## Local endpoint behavior
 
-TCP and Unix byte streams share the same `Duplex` bridge and half-close
-semantics. A UDP binding owns a local loopback datagram listener and maps each
+TCP byte streams use the `Duplex` bridge and half-close semantics. A UDP
+binding owns a local loopback datagram listener and maps each
 local flow to the existing bounded forward UDP envelopes on the authenticated
 connection. It is usable only when its configured peer is a `dial` peer;
 accept-side UDP bindings remain unavailable and do not create reverse UDP.
@@ -136,10 +136,6 @@ unavailable until the remote catalog and grant are current. A client
 connection is paused while it waits for acquisition and is destroyed on
 timeout, cancellation, revocation, or source failure.
 
-Unix paths are absolute and bounded by the platform socket limit. Unix sources
-and bindings fail clearly on Windows. A binding refuses an occupied path; it
-does not unlink a pre-existing socket. On shutdown or reconfiguration, Kepos
-unlinks only a socket whose device/inode still matches the socket it created.
 TCP port `0` is supported for bindings and the selected port is exposed in
 status. Service source ports are fixed positive ports.
 

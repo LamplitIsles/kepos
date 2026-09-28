@@ -38,8 +38,7 @@ where the platform supports those permissions. The canonical config uses
 `peers`, `services`, and `bindings`; role-specific tables/flags are removed.
 
 Windows supports local loopback TCP sources/bindings and TCP/HTTP/UDP service
-operations. Unix socket sources and bindings are rejected clearly because
-Windows has no compatible endpoint in this host surface. A configured binding
+operations. A configured binding
 does not publish its remote service.
 
 Desktop diagnostics are stored at `%LOCALAPPDATA%\\Kepos\\state\\diagnostics`.

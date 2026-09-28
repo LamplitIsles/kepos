@@ -84,8 +84,7 @@ startup never falls back to the old contact policy or probes old state.
 ## Working scope
 
 The first new reverse-access slice targets Mac/Linux byte streams, with
-loopback TCP and Unix sockets as local endpoints, and cua-driver as the
-end-to-end acceptance application. Preserve existing forward HTTP/TCP/UDP
+loopback TCP ports as local endpoints. Preserve existing forward HTTP/TCP/UDP
 behaviour; reverse UDP and additional platform interfaces are not assumed
 implemented by this slice.
 

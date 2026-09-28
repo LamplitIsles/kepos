@@ -58,7 +58,7 @@ The fixed local endpoint or authorized upstream published service that supplies
 a published service.
 
 **Service Binding**:
-A locally owned TCP, UDP, or Unix entry point for consuming one named service
+A locally owned TCP or UDP entry point for consuming one named service
 from one peer. UDP bindings are forward datagram listeners over the
 authenticated connection and require a local loopback port plus a dial-side
 peer relationship. An accept-side UDP binding remains unavailable; creating a
@@ -116,10 +116,10 @@ scrapers without requiring a publisher runtime.
 
 The canonical TOML names these concepts as `peers`, `services`, and
 `bindings`. A peer entry supplies a public key and this runtime's `dial` or
-`accept` direction. A service source is one fixed loopback port, fixed Unix
-socket, or explicit peer/service source; a binding owns a local TCP or Unix
-endpoint, or a local UDP port when `kind = "udp"`. Missing or empty service
-grants deny access, and a binding never republishes its target.
+`accept` direction. A service source is one fixed loopback port or explicit
+peer/service source; a binding owns a local TCP port or a local UDP port when
+`kind = "udp"`. Missing or empty service grants deny access, and a binding
+never republishes its target.
 
 The runtime stores one seed-only `peer.json` and never probes legacy role state
 at startup. Every admitted canonical peer establishes `kepos/peer-control/1`

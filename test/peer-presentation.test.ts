@@ -88,7 +88,6 @@ test("canonical service presentation preserves actions and endpoint semantics", 
 test("canonical presentations never turn raw or unsupported UDP services into HTTP opens", () => {
   const services = [
     { id: "raw", name: "Raw", kind: "tcp" as const },
-    { id: "unix", name: "Unix", kind: "tcp" as const },
     { id: "game", name: "Game", kind: "udp" as const },
   ];
   const withoutUdp = createServicePresentations(
@@ -97,7 +96,7 @@ test("canonical presentations never turn raw or unsupported UDP services into HT
     new Map([["raw", { kind: "tcp" as const }]]),
     { supportsUdp: false },
   );
-  assert.deepEqual(withoutUdp.map(({ id }) => id), ["raw", "unix"]);
+  assert.deepEqual(withoutUdp.map(({ id }) => id), ["raw"]);
   assert.deepEqual(
     withoutUdp.find(({ id }) => id === "raw"),
     {
@@ -108,22 +107,6 @@ test("canonical presentations never turn raw or unsupported UDP services into HT
       icon: "port",
     },
   );
-  assert.deepEqual(
-    createServicePresentations(
-      [{ id: "unix", name: "Unix", kind: "tcp" }],
-      17_480,
-      new Map([["unix", { kind: "tcp", endpoint: "unix:///tmp/kepos.sock" }]]),
-    ),
-    [{
-      id: "unix",
-      name: "Unix",
-      access: "tcp",
-      action: "copy-endpoint",
-      icon: "port",
-      copyText: "unix:///tmp/kepos.sock",
-    }],
-  );
-
   assert.deepEqual(
     createServicePresentations(
       [

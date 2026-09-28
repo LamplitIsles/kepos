@@ -15,9 +15,9 @@ The canonical configuration keeps those concerns separate:
 
 - `peers` names authenticated peers and says whether this runtime dials or
   accepts each relationship;
-- `services` publishes a fixed loopback TCP/UDP port, Unix socket, or explicitly
+- `services` publishes a fixed loopback TCP/UDP port or explicitly
   selected peer/service source with an immediate-peer `allow` list;
-- `bindings` owns local TCP/UDP or Unix entry points for services on another
+- `bindings` owns local TCP/UDP entry points for services on another
   peer. Set `kind = "udp"` for a forward datagram binding; its listener is
   always a local loopback port and its target must be a dial-side peer.
 
@@ -75,15 +75,15 @@ public_key = "<mac-peer-public-key>"
 connection = "accept"
 
 [[services]]
-id = "cua"
-name = "CUA driver"
-source = { unix_socket = "/run/user/1000/cua-driver.sock" }
-allow = ["<nuc-peer-public-key>"]
+id = "ssh"
+name = "SSH"
+source = { local_port = 22 }
+allow = ["<mac-peer-public-key>"]
 
 [[bindings]]
 peer = "mac"
-service = "cua"
-listen = { unix_socket = "/run/user/1000/kepos-cua.sock" }
+service = "ssh"
+listen = { local_port = 2222 }
 ```
 
 Use `connection = "dial"` on the side that must establish the connection.
@@ -118,7 +118,7 @@ The canonical runtime also preserves the existing Prometheus series and
 service-action mapping. Add `[metrics] host = "127.0.0.1"` and a `port` to the
 config, or pass `--metrics-listen host:port` to `peer run`; the read-only
 endpoint is reported in peer status. HTTP services open their unqualified
-`.localhost` URL, while raw TCP, Unix, and UDP services expose a copyable
+`.localhost` URL, while raw TCP and UDP services expose a copyable
 endpoint or platform-specific action. Reverse UDP remains unsupported.
 
 ## Identity and cutover
@@ -148,8 +148,8 @@ operation. This repository has not converted real NUC or Mac state.
 | Surface            | Canonical boundary                                                                                                                                                         |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Android            | One canonical peer runtime in the foreground service; key/QR/deep-link onboarding, canonical config/state, supported service actions, no reverse-service UI or reverse UDP |
-| macOS              | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix byte-stream endpoints                                                                  |
-| Windows            | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services; Unix sockets fail clearly                                                                   |
+| macOS              | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services                                                                  |
+| Windows            | One peer runtime in the native desktop app; TCP/HTTP and bounded UDP services                                                                   |
 | Headless CLI       | Node.js 24 `peer` setup/key/status/pair/convert/run commands, gateway, TCP/HTTP/UDP service paths                                                                          |
 | Nix / Home Manager | Declarative `services.kepos.peer` config and a supervised `kepos peer run` unit                                                                                            |
 | Container          | Non-root image; deployment owns the canonical state directory, network, and supervision                                                                                    |

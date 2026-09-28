@@ -33,8 +33,6 @@ export interface ServicePresentation {
 export interface LocalServiceMapping {
   kind: "tcp" | "udp";
   port?: number;
-  /** A Unix endpoint is copied as a named endpoint instead of as a port. */
-  endpoint?: string;
 }
 
 export interface ServicePresentationInput {
@@ -59,8 +57,8 @@ interface BuiltInServiceHandler {
 
 /**
  * The service catalog is deliberately data-only.  Both shipped clients use
- * this same mapping, while the peer runtime supplies the actual port or Unix
- * endpoint learned from its canonical binding state.
+ * this same mapping, while the peer runtime supplies the actual port learned
+ * from its canonical binding state.
  */
 export const BUILT_IN_SERVICE_HANDLERS = Object.freeze({
   bookorbit: {
@@ -208,17 +206,6 @@ export function createServicePresentation(
     };
   }
 
-  if (mapping?.endpoint !== undefined) {
-    return {
-      id: service.id,
-      name: service.name,
-      access: handler.localCommand?.access ?? "tcp",
-      action: "copy-endpoint",
-      icon: handler.localCommand === undefined ? "port" : handler.icon,
-      copyText: mapping.endpoint,
-    };
-  }
-
   if (handler.localCommand !== undefined) {
     return {
       id: service.id,
@@ -269,7 +256,6 @@ function localMapping(
 }
 
 function copyMapping(mapping: LocalServiceMapping): { copyText: string } | Record<string, never> {
-  if (mapping.endpoint !== undefined) return { copyText: mapping.endpoint };
   if (mapping.port !== undefined) return { copyText: `127.0.0.1:${mapping.port}` };
   return {};
 }

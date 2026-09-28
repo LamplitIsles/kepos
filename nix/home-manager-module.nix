@@ -8,7 +8,6 @@
   toml = pkgs.formats.toml {};
   keyPattern = "[0-9a-f]{64}";
   serviceIdPattern = "^[a-z][a-z0-9-]*$";
-  endpointPathType = lib.types.nullOr lib.types.str;
 
   peerType = lib.types.submodule {
     options = {
@@ -29,11 +28,6 @@
         type = lib.types.nullOr (lib.types.ints.between 1 65535);
         default = null;
         description = "Fixed loopback TCP or UDP service source port.";
-      };
-      unixSocket = lib.mkOption {
-        type = endpointPathType;
-        default = null;
-        description = "Absolute Unix socket service source path.";
       };
       peer = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -62,7 +56,7 @@
       source = lib.mkOption {
         type = sourceType;
         default = {};
-        description = "Exactly one loopback port, Unix socket, or peer/service source.";
+        description = "Exactly one loopback port or peer/service source.";
       };
       allow = lib.mkOption {
         type = lib.types.listOf (lib.types.strMatching keyPattern);
@@ -97,11 +91,6 @@
         default = null;
         description = "Loopback TCP or UDP port to own for the binding.";
       };
-      unixSocket = lib.mkOption {
-        type = endpointPathType;
-        default = null;
-        description = "Absolute Unix socket path to own for the binding.";
-      };
     };
   };
 
@@ -113,7 +102,6 @@
 
   sourceValue = source:
     if source.localPort != null then {local_port = source.localPort;}
-    else if source.unixSocket != null then {unix_socket = source.unixSocket;}
     else {inherit (source) peer service;};
 
   serviceEntries = lib.mapAttrsToList (id: service:
@@ -128,9 +116,7 @@
       max_publisher_to_subscriber_bps = service.maxPublisherToSubscriberBps;
     }) cfg.services;
 
-  bindingListen = binding:
-    if binding.localPort != null then {local_port = binding.localPort;}
-    else {unix_socket = binding.unixSocket;};
+  bindingListen = binding: {local_port = binding.localPort;};
 
   bindingEntries = map (binding: {
     inherit (binding) peer service;
@@ -199,7 +185,7 @@ in {
     bindings = lib.mkOption {
       type = lib.types.listOf bindingType;
       default = [];
-      description = "Locally owned TCP, UDP, or Unix bindings for remote services.";
+      description = "Locally owned TCP or UDP bindings for remote services.";
     };
 
     metrics = {
@@ -254,35 +240,14 @@ in {
           let source = service.source;
           in lib.length (lib.filter (selected: selected) [
             (source.localPort != null)
-            (source.unixSocket != null)
             (source.peer != null || source.service != null)
           ]) == 1
           && ((source.peer == null) == (source.service == null))) (lib.attrValues cfg.services);
         message = "services.kepos.peer.services sources must select exactly one complete variant";
       }
       {
-        assertion = lib.all (service:
-          service.source.unixSocket == null || (lib.hasPrefix "/" service.source.unixSocket && builtins.stringLength service.source.unixSocket <= 103)) (lib.attrValues cfg.services);
-        message = "services.kepos.peer Unix socket sources must be absolute and at most 103 characters";
-      }
-      {
-        assertion = lib.all (service:
-          service.kind != "udp" || service.source.unixSocket == null) (lib.attrValues cfg.services);
-        message = "services.kepos.peer UDP services require a localPort or peer/service source";
-      }
-      {
-        assertion = lib.all (binding:
-          lib.length (lib.filter (selected: selected) [
-            (binding.localPort != null)
-            (binding.unixSocket != null)
-          ]) == 1
-          && (binding.unixSocket == null || (lib.hasPrefix "/" binding.unixSocket && builtins.stringLength binding.unixSocket <= 103))) cfg.bindings;
-        message = "services.kepos.peer bindings must select one valid local endpoint";
-      }
-      {
-        assertion = lib.all (binding:
-          binding.kind != "udp" || binding.localPort != null) cfg.bindings;
-        message = "services.kepos.peer UDP bindings require a localPort endpoint";
+        assertion = lib.all (binding: binding.localPort != null) cfg.bindings;
+        message = "services.kepos.peer bindings require a localPort endpoint";
       }
     ];
 

@@ -45,14 +45,6 @@ export interface PeerLocalPortEndpoint {
   localPort: number;
 }
 
-export interface PeerUnixSocketEndpoint {
-  unixSocket: string;
-}
-
-export type PeerListenEndpoint =
-  | PeerLocalPortEndpoint
-  | PeerUnixSocketEndpoint;
-
 export interface PeerUpstreamServiceSource {
   peer: string;
   service: string;
@@ -60,7 +52,6 @@ export interface PeerUpstreamServiceSource {
 
 export type PeerServiceSource =
   | PeerLocalPortEndpoint
-  | PeerUnixSocketEndpoint
   | PeerUpstreamServiceSource;
 
 export interface PeerService {
@@ -75,7 +66,7 @@ export interface PeerService {
 export interface PeerBinding {
   peer: string;
   service: string;
-  listen: PeerListenEndpoint;
+  listen: PeerLocalPortEndpoint;
   /** The established binding transport. Omitted means the historical TCP default. */
   kind?: "tcp" | "udp";
 }
@@ -119,19 +110,6 @@ function parsePeerReference(value: unknown, field: string): string {
   return value;
 }
 
-function parseAbsoluteUnixSocket(value: unknown, field: string): string {
-  if (
-    typeof value !== "string" ||
-    value.length === 0 ||
-    !value.startsWith("/") ||
-    value.includes("\u0000") ||
-    value.length > 103
-  ) {
-    throw new Error(`${field} must be an absolute Unix socket path of at most 103 characters`);
-  }
-  return value;
-}
-
 function parsePeerPort(value: unknown, field: string, allowZero: boolean): number {
   const minimum = allowZero ? 0 : 1;
   if (
@@ -149,19 +127,10 @@ function parsePeerEndpoint(
   value: unknown,
   field: string,
   allowZero: boolean,
-): PeerListenEndpoint {
+): PeerLocalPortEndpoint {
   if (!isRecord(value)) throw new Error(`${field} must be an object`);
-  const hasPort = Object.prototype.hasOwnProperty.call(value, "localPort");
-  const hasSocket = Object.prototype.hasOwnProperty.call(value, "unixSocket");
-  if (hasPort === hasSocket) {
-    throw new Error(`${field} must describe exactly one localPort or unixSocket endpoint`);
-  }
-  if (hasPort) {
-    rejectUnknownFields(value, ["localPort"], field);
-    return { localPort: parsePeerPort(value.localPort, `${field}.localPort`, allowZero) };
-  }
-  rejectUnknownFields(value, ["unixSocket"], field);
-  return { unixSocket: parseAbsoluteUnixSocket(value.unixSocket, `${field}.unixSocket`) };
+  rejectUnknownFields(value, ["localPort"], field);
+  return { localPort: parsePeerPort(value.localPort, `${field}.localPort`, allowZero) };
 }
 
 function parsePeerServiceSource(
@@ -170,26 +139,17 @@ function parsePeerServiceSource(
 ): PeerServiceSource {
   if (!isRecord(value)) throw new Error(`${field} must be an object`);
   const hasLocalPort = Object.prototype.hasOwnProperty.call(value, "localPort");
-  const hasUnixSocket = Object.prototype.hasOwnProperty.call(value, "unixSocket");
   const hasPeer = Object.prototype.hasOwnProperty.call(value, "peer");
   const hasService = Object.prototype.hasOwnProperty.call(value, "service");
-  const endpointCount = Number(hasLocalPort) + Number(hasUnixSocket);
-  if (endpointCount + Number(hasPeer || hasService) === 0) {
-    throw new Error(`${field} must describe a local port, Unix socket, or peer service`);
+  if (!hasLocalPort && !hasPeer && !hasService) {
+    throw new Error(`${field} must describe a local port or peer service`);
   }
-  if (endpointCount > 0 && (hasPeer || hasService)) {
+  if (hasLocalPort && (hasPeer || hasService)) {
     throw new Error(`${field} must describe exactly one source variant`);
-  }
-  if (hasLocalPort && hasUnixSocket) {
-    throw new Error(`${field} must describe exactly one local endpoint`);
   }
   if (hasLocalPort) {
     rejectUnknownFields(value, ["localPort"], field);
     return { localPort: parsePeerPort(value.localPort, `${field}.localPort`, false) };
-  }
-  if (hasUnixSocket) {
-    rejectUnknownFields(value, ["unixSocket"], field);
-    return { unixSocket: parseAbsoluteUnixSocket(value.unixSocket, `${field}.unixSocket`) };
   }
   rejectUnknownFields(value, ["peer", "service"], field);
   if (!hasPeer || !hasService) {
@@ -254,9 +214,6 @@ function parsePeerService(value: unknown, field: string): PeerService {
     throw new Error(`${field}.kind must be tcp, http, or udp`);
   }
   const source = parsePeerServiceSource(value.source, `${field}.source`);
-  if (kind === "udp" && "unixSocket" in source) {
-    throw new Error(`${field}.source Unix sockets cannot provide UDP services`);
-  }
   const maxRate = value.maxPublisherToSubscriberBps as number | undefined;
   if (
     maxRate !== undefined &&
@@ -282,9 +239,6 @@ function parsePeerBinding(value: unknown, field: string): PeerBinding {
     throw new Error(`${field}.kind must be tcp or udp`);
   }
   const listen = parsePeerEndpoint(value.listen, `${field}.listen`, true);
-  if (kind === "udp" && "unixSocket" in listen) {
-    throw new Error(`${field}.listen Unix sockets cannot provide UDP bindings`);
-  }
   return {
     peer: parsePeerReference(value.peer, `${field}.peer`),
     service: parseServiceIdentifier(value.service, `${field}.service`),

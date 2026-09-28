@@ -30,21 +30,21 @@ canonical state with `setup peer`, and supervises one user service.
       };
       phone = {
         publicKey = "<phone-peer-public-key>";
-        connection = "accept";
+        connection = "dial";
       };
     };
 
     services = {
-      cua = {
-        name = "CUA driver";
-        source.unixSocket = "/run/user/1000/cua-driver.sock";
-        allow = ["<nuc-peer-public-key>"];
+      ssh = {
+        name = "SSH";
+        source.localPort = 22;
+        allow = ["<mac-peer-public-key>"];
       };
-      mac-cua = {
-        name = "Mac CUA";
+      mac-ssh = {
+        name = "Mac SSH";
         source = {
           peer = "mac";
-          service = "cua";
+          service = "ssh";
         };
         allow = ["<phone-peer-public-key>"];
       };
@@ -53,8 +53,8 @@ canonical state with `setup peer`, and supervises one user service.
     bindings = [
       {
         peer = "mac";
-        service = "cua";
-        unixSocket = "/run/user/1000/kepos-cua.sock";
+        service = "ssh";
+        localPort = 2222;
       }
       {
         peer = "phone";
@@ -80,10 +80,10 @@ canonical state with `setup peer`, and supervises one user service.
 
 The `peers` attribute name becomes the local peer label. Each `publicKey` is a
 64-character lowercase key and `connection` is exactly `dial` or `accept`.
-Service sources select one of `localPort`, `unixSocket`, or a complete
+Service sources select `localPort` or a complete
 `peer`/`service` pair. Service `allow` values are immediate peer public keys;
 the default empty list denies access. Bindings select one `localPort` (zero is
-ephemeral) or `unixSocket`; set `kind = "udp"` for a forward UDP binding,
+ephemeral); set `kind = "udp"` for a forward UDP binding,
 which requires a local port and a dial-side target peer. An accept-side UDP
 binding remains unavailable; reverse UDP is not provided. A binding consumes a
 remote service; it does not publish it. `metrics.enable` adds the read-only
