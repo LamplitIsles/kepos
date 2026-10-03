@@ -512,7 +512,7 @@ function parseHttpRequestHead(
     }
     const lowerName = name.toLowerCase();
     const trimmedValue = value.trim();
-    if (lowerName === "authorization") {
+    if (lowerName === "kepos-peer") {
       continue;
     }
     if (lowerName === "host") {
@@ -580,7 +580,7 @@ function parseHttpRequestHead(
     head: b4a.from(
       `${requestLine}\r\n${forwardedHeaders.join("\r\n")}${
         forwardedHeaders.length > 0 ? "\r\n" : ""
-      }Authorization: Kepos ${subscriberPublicKey}\r\n\r\n`,
+      }Kepos-Peer: ${subscriberPublicKey}\r\n\r\n`,
       "latin1",
     ),
     ...(contentLength === undefined ? {} : { contentLength }),
@@ -859,7 +859,7 @@ function parseTrailerLine(line: Uint8Array): boolean {
     throw new Error("HTTP chunk trailer is malformed");
   }
   const lowerName = name.toLowerCase();
-  if (lowerName === "authorization") return false;
+  if (lowerName === "kepos-peer") return false;
   if (
     lowerName === "content-length" ||
     lowerName === "transfer-encoding" ||

@@ -34,10 +34,10 @@ also available for HTTP services as `http://dsh.localhost:17480/`.
 
 Use `kind = "http"` only when the target intentionally consumes Kepos's
 immediate-peer assertion. For each HTTP/1.1 request, Kepos removes caller
-`Authorization` fields and inserts:
+`Kepos-Peer` fields, preserves application `Authorization`, and inserts:
 
 ```http
-Authorization: Kepos <authenticated-immediate-peer-public-key>
+Kepos-Peer: <authenticated-immediate-peer-public-key>
 ```
 
 This is not applied to raw TCP, and it is not a substitute for target-side

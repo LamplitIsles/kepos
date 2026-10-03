@@ -144,8 +144,8 @@ The HTTP gateway keeps unqualified names such as
 TCP/HTTP service ID, lookup reports `Service is ambiguous` unless one explicit
 binding selects a peer. Timing, insertion order, and reconnect order never
 select a destination. Raw streams receive no HTTP headers. The HTTP adapter
-removes caller `Authorization` fields and inserts exactly the authenticated
-immediate peer key for each request; it supports HTTP/1.1 and valid `ws://`
+preserves application `Authorization`, removes caller `Kepos-Peer` fields,
+and inserts the authenticated immediate peer key as `Kepos-Peer` for each request; it supports HTTP/1.1 and valid `ws://`
 upgrades only.
 
 UDP remains a fixed-target application mapping, not reverse byte-stream

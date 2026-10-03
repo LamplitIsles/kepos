@@ -324,11 +324,11 @@ replies from an old generation are not replayed. Reverse UDP remains explicitly
 unsupported.
 
 HTTP services use the existing HTTP/1.1 adapter only when `kind = "http"`.
-Every request has caller-supplied `Authorization` fields removed and exactly
-one immediate authenticated-peer header inserted:
+Every request preserves application `Authorization`, removes caller-supplied
+`Kepos-Peer` fields, and inserts exactly one immediate authenticated-peer header:
 
 ```http
-Authorization: Kepos <immediate-peer-public-key>
+Kepos-Peer: <immediate-peer-public-key>
 ```
 
 Ordinary request bodies, sequential keep-alive, and valid `ws://` WebSocket

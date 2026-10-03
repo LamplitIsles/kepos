@@ -111,11 +111,11 @@ consumer and a separate local connection starts at the immediate provider or
 republisher. Protomux carries lifecycle and payload messages while the stream
 backpressure and half-close behavior remain visible to both local sockets.
 
-`http` is an opt-in plaintext HTTP/1.1 adapter. It removes all caller-supplied
-`Authorization` fields and sends exactly one header to the immediate target:
+`http` is an opt-in plaintext HTTP/1.1 adapter. It preserves application `Authorization` fields, removes caller-supplied
+`Kepos-Peer` fields, and sends exactly one identity header to the immediate target:
 
 ```http
-Authorization: Kepos <authenticated-immediate-peer-public-key>
+Kepos-Peer: <authenticated-immediate-peer-public-key>
 ```
 
 This is a device assertion, not a bearer secret. Keep the target private to

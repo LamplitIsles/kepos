@@ -119,6 +119,8 @@ test("rewrites a split Content-Length request and preserves its body", async () 
     [
       "Host: target.example",
       "aUtHoRiZaTiOn: Bearer caller-controlled",
+      "Kepos-Peer: spoofed",
+      "kEpOs-PeEr: spoofed-again",
       `Content-Length: ${body.byteLength}`,
     ],
     body.toString("latin1"),
@@ -128,7 +130,7 @@ test("rewrites a split Content-Length request and preserves its body", async () 
   assert.equal(result.error, undefined);
   const expectedHead = rewriteHttpRequestHead(
     bytes(
-      `POST /upload HTTP/1.1\r\nHost: target.example\r\nContent-Length: ${body.byteLength}\r\n\r\n`,
+      `POST /upload HTTP/1.1\r\nHost: target.example\r\naUtHoRiZaTiOn: Bearer caller-controlled\r\nContent-Length: ${body.byteLength}\r\n\r\n`,
     ),
     subscriberPublicKey,
   );
@@ -139,8 +141,10 @@ test("rewrites a split Content-Length request and preserves its body", async () 
   );
   assert.match(
     result.data.toString("latin1"),
-    new RegExp(`Authorization: Kepos ${subscriberPublicKey}`),
+    new RegExp(`Kepos-Peer: ${subscriberPublicKey}`),
   );
+  assert.equal(result.data.toString("latin1").includes("spoofed"), false);
+  assert.equal(result.data.toString("latin1").match(/kepos-peer:/gi)?.length, 1);
 });
 
 test("rewrites sequential coalesced requests without parsing body bytes as heads", async () => {
@@ -173,10 +177,12 @@ test("rewrites sequential coalesced requests without parsing body bytes as heads
     Buffer.concat([firstHead, body, secondHead]),
   );
   assert.equal(
-    result.data.toString("latin1").match(/Authorization:/g)?.length,
+    result.data.toString("latin1").match(/Authorization:/gi)?.length,
     2,
   );
-  assert.equal(result.data.toString("latin1").includes("forged"), false);
+  assert.match(result.data.toString("latin1"), /Authorization: Basic forged/);
+  assert.match(result.data.toString("latin1"), /AUTHORIZATION: Bearer forged-again/);
+  assert.equal(result.data.toString("latin1").match(/Kepos-Peer:/g)?.length, 2);
 });
 
 test("forwards split chunked bodies and then rewrites the next request", async () => {
@@ -184,7 +190,7 @@ test("forwards split chunked bodies and then rewrites the next request", async (
     "POST /chunked HTTP/1.1\r\nHost: target.example\r\nTransfer-Encoding: chunked\r\nAuthorization: forged\r\n\r\n",
   );
   const chunkedBody = bytes(
-    "4;trace=yes\r\nWiki\r\n5\r\npedia\r\n0\r\nX-Request-Trace: kept\r\nAuthorization: dropped\r\n\r\n",
+    "4;trace=yes\r\nWiki\r\n5\r\npedia\r\n0\r\nX-Request-Trace: kept\r\nAuthorization: retained\r\nKepos-Peer: dropped\r\n\r\n",
   );
   const second = request("GET /after-chunked HTTP/1.1", [
     "Host: target.example",
@@ -200,15 +206,15 @@ test("forwards split chunked bodies and then rewrites the next request", async (
   );
   const rewrittenSecond = rewriteHttpRequestHead(second, subscriberPublicKey);
   const expectedChunkedBody = bytes(
-    "4;trace=yes\r\nWiki\r\n5\r\npedia\r\n0\r\nX-Request-Trace: kept\r\n\r\n",
+    "4;trace=yes\r\nWiki\r\n5\r\npedia\r\n0\r\nX-Request-Trace: kept\r\nAuthorization: retained\r\n\r\n",
   );
   assert.deepEqual(
     result.data,
     Buffer.concat([rewrittenFirst, expectedChunkedBody, rewrittenSecond]),
   );
   assert.equal(
-    result.data.toString("latin1").match(/Authorization:/g)?.length,
-    2,
+    result.data.toString("latin1").match(/Authorization:/gi)?.length,
+    3,
   );
   assert.equal(result.data.toString("latin1").includes("dropped"), false);
 });
@@ -319,7 +325,7 @@ test("rejects incomplete bodies and a malformed second request before forwarding
   const output = result.data.toString("latin1");
   assert.equal(output.includes("/bad"), false);
   assert.equal(output.includes("forged"), false);
-  assert.equal(output.match(/Authorization:/g)?.length, 1);
+  assert.equal(output.match(/Kepos-Peer:/g)?.length, 1);
 
   const bodylessOverflow = await forward([
     Buffer.concat([first, bytes("not a second request")]),
@@ -349,9 +355,9 @@ test("holds WebSocket post-handshake bytes until a split 101 response", async ()
   assert.equal(targetHead.match(/authorization:/gi)?.length, 1);
   assert.match(
     targetHead,
-    new RegExp(`Authorization: Kepos ${subscriberPublicKey}`),
+    new RegExp(`Kepos-Peer: ${subscriberPublicKey}`),
   );
-  assert.equal(targetHead.includes("forged"), false);
+  assert.equal(targetHead.includes("forged"), true);
 
   const response = bytes(
     "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
@@ -423,9 +429,9 @@ test("keeps a rejected WebSocket Upgrade on the ordinary HTTP path", async () =>
   const ordinaryHead = target.requests[1].toString("latin1");
   assert.match(
     ordinaryHead,
-    new RegExp(`Authorization: Kepos ${subscriberPublicKey}`),
+    new RegExp(`Kepos-Peer: ${subscriberPublicKey}`),
   );
-  assert.equal(ordinaryHead.includes("forged-next"), false);
+  assert.equal(ordinaryHead.includes("forged-next"), true);
 
   tunnel.destroy();
   target.destroy();
