@@ -52,8 +52,9 @@ test("inbound TCP requires a grant and the correct authenticated source", () => 
   assert.equal(policy.admit(tcp(remote, local, 53000, 443, 2), "in"), true);
   assert.equal(policy.admit(tcp(local, remote, 443, 53000, 18, 50, 101), "out"), true);
   assert.equal(policy.admit(tcp(remote, local, 53000, 443, 16, 101, 51), "in"), true);
-  policy.setPorts([]);
-  assert.equal(policy.admit(tcp(remote, local, 53000, 443, 16, 101, 51), "in"), false);
+  const revoked = new PacketPolicy(local, remote, []);
+  assert.equal(revoked.admit(tcp(remote, local, 53000, 443, 16, 101, 51), "in"), false);
+  assert.equal(revoked.admit(tcp(remote, local, 53001, 443, 2), "in"), false);
 });
 
 test("outgoing flows admit replies only after a valid SYN-ACK and clear on reconnect", () => {

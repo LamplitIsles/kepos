@@ -77,7 +77,7 @@ test("two fake peers dispatch authenticated VPN frames and enforce port grants",
       queueMicrotask(() => { if (!firewall!(Buffer.from(aKey, "hex"))) handler!(y as unknown as DhtStream); else y.destroy(); });
       return x as unknown as DhtStream;
     } } as unknown as DhtNode;
-    const base = { services: [], bindings: [] };
+    const base = {};
     b = await startVpn({ stateDir: bState, helper: "fake", dht: bDht, openTun: async () => bTun.device,
       config: { ...base, peers: [{ label: "a", publicKey: aKey, connection: "accept" }], vpn: { address: "198.18.0.2", peers: [{ peer: "a", address: "198.18.0.1", allowTcp: [443] }] } } });
     assert.equal(firewall!(Buffer.alloc(32)), true);
@@ -126,7 +126,7 @@ test("a packet dropped by a busy TUN does not create flow state", async () => {
     let readyCount = 0, ready!: () => void;
     const bothReady = new Promise<void>((resolve) => { ready = resolve; });
     running = await startVpn({ stateDir: state, helper: "fake", dht, openTun: async () => tun.device,
-      config: { peers: [{ label: "first", publicKey: firstKey, connection: "accept" }, { label: "second", publicKey: secondKey, connection: "accept" }], services: [], bindings: [],
+      config: { peers: [{ label: "first", publicKey: firstKey, connection: "accept" }, { label: "second", publicKey: secondKey, connection: "accept" }],
         vpn: { address: "198.18.0.2", peers: [{ peer: "first", address: "198.18.0.3", allowTcp: [443] }, { peer: "second", address: "198.18.0.1", allowTcp: [443] }] } },
       log: (line) => { if (line.startsWith("VPN peer connected") && ++readyCount === 2) ready(); },
     });
@@ -174,7 +174,7 @@ test("wrong VPN protocol is closed and does not admit packets", async () => {
         firewall = opts.firewall; handler = onConnection; return { listen: async () => {}, close: async () => {} };
       }, destroy: async () => {} } as unknown as DhtNode;
     running = await startVpn({ stateDir: state, helper: "fake", dht, openTun: async () => tun.device, log: (line) => logs.push(line), now: () => now,
-      config: { peers: [{ label: "remote", publicKey: key, connection: "accept" }], services: [], bindings: [],
+      config: { peers: [{ label: "remote", publicKey: key, connection: "accept" }],
         vpn: { address: "198.18.0.2", peers: [{ peer: "remote", address: "198.18.0.1", allowTcp: "all" }] } } });
     assert.equal(firewall(Buffer.alloc(32)), true);
     assert.equal(firewall(Buffer.from(key, "hex")), false);
@@ -218,7 +218,7 @@ test("VPN startup failure releases the identity lock", { skip: process.platform 
     const state = path.join(root, "peer");
     await setupPeer({ stateDir: state });
     const deps = createDefaultCliDependencies({ stdout: () => {}, stderr: () => {} });
-    deps.loadConfig = async () => ({ peers: [], services: [], bindings: [], vpn: { address: "198.18.0.1", peers: [] } });
+    deps.loadConfig = async () => ({ peers: [], vpn: { address: "198.18.0.1", peers: [] } });
     await assert.rejects(runCli(["peer", "vpn", "--state", state, "--config", path.join(root, "config.toml"), "--tun-helper", path.join(root, "missing")], deps), /TUN helper/);
     const lock = await acquirePeerRuntimeLock(state);
     await lock.release();
@@ -228,7 +228,7 @@ test("VPN startup failure releases the identity lock", { skip: process.platform 
 test("VPN CLI stops the old generation before starting a changed policy", async () => {
   const { runCli, createDefaultCliDependencies } = await import("../src/cli/main.js");
   const events: string[] = [];
-  let config = { peers: [], services: [], bindings: [], vpn: { address: "198.18.0.1", peers: [] } };
+  let config = { peers: [], vpn: { address: "198.18.0.1", peers: [] } };
   let reload!: () => void;
   let secondReady!: () => void;
   const restarted = new Promise<void>((resolve) => { secondReady = resolve; });
@@ -260,7 +260,7 @@ test("VPN CLI stops and unlocks if policy reload is invalid", async () => {
   const deps = createDefaultCliDependencies({ stdout: () => {}, stderr: () => {} });
   deps.loadConfig = async () => {
     if (++reads > 1) throw new Error("invalid changed config");
-    return { peers: [], services: [], bindings: [], vpn: { address: "198.18.0.1", peers: [] } };
+    return { peers: [], vpn: { address: "198.18.0.1", peers: [] } };
   };
   deps.acquirePeerRuntimeLock = async () => ({ release: async () => { events.push("release"); } });
   deps.startVpn = async () => ({ peerKey: "key", interfaceName: "fake0", failed: new Promise<Error>(() => {}), stop: async () => { events.push("stop"); } });
@@ -294,7 +294,7 @@ test("VPN identifies a streamx close during the protocol handshake", async () =>
       destroy: async () => {},
     } as unknown as DhtNode;
     running = await startVpn({ stateDir: state, helper: "fake", dht, openTun: async () => tun.device,
-      config: { peers: [{ label: "remote", publicKey: remoteKey, connection: "dial" }], services: [], bindings: [],
+      config: { peers: [{ label: "remote", publicKey: remoteKey, connection: "dial" }],
         vpn: { address: "198.18.0.1", peers: [{ peer: "remote", address: "198.18.0.2", allowTcp: [] }] } },
       log: (line) => { if (line.includes("Stream was destroyed")) closedLog(line); },
     });
@@ -325,7 +325,7 @@ test("VPN reports the peer and pre-transport phase on DHT connection failure", a
       destroy: async () => {},
     } as unknown as DhtNode;
     running = await startVpn({ stateDir: state, helper: "fake", dht, openTun: async () => tun.device,
-      config: { peers: [{ label: "remote", publicKey: remoteKey, connection: "dial" }], services: [], bindings: [],
+      config: { peers: [{ label: "remote", publicKey: remoteKey, connection: "dial" }],
         vpn: { address: "198.18.0.1", peers: [{ peer: "remote", address: "198.18.0.2", allowTcp: [] }] } },
       log: (line) => { if (line.includes("PEER_CONNECTION_FAILED")) failed(line); },
     });
@@ -349,7 +349,7 @@ test("a failed admitted handshake does not block the next timed retry", async ()
     } as unknown as DhtNode;
     let now = 10_000;
     running = await startVpn({ stateDir: state, helper: "fake", dht, openTun: async () => tun.device, now: () => now,
-      config: { peers: [{ label: "remote", publicKey: key, connection: "accept" }], services: [], bindings: [],
+      config: { peers: [{ label: "remote", publicKey: key, connection: "accept" }],
         vpn: { address: "198.18.0.2", peers: [{ peer: "remote", address: "198.18.0.1", allowTcp: [] }] } } });
     const remote = Buffer.from(key, "hex");
     assert.equal(firewall(remote), false);
@@ -395,7 +395,7 @@ test("VPN handshake and packets work over real Noise SecretStreams with in-memor
         queueMicrotask(() => { if (!firewall(Buffer.from(aKey, "hex"))) handler(y as DhtStream); else y.destroy(); });
         return x as DhtStream;
       } } as unknown as DhtNode;
-    const base = { services: [], bindings: [] };
+    const base = {};
     b = await startVpn({ stateDir: bState, helper: "fake", dht: bDht, openTun: async () => bTun.device,
       config: { ...base, peers: [{ label: "a", publicKey: aKey, connection: "accept" }], vpn: { address: "198.18.0.2", peers: [{ peer: "a", address: "198.18.0.1", allowTcp: [443] }] } } });
     let connected!: () => void;
@@ -433,7 +433,7 @@ test("VPN handshake timeout reports redacted transport packet counters", async (
       }, destroy: async () => {},
     } as unknown as DhtNode;
     running = await startVpn({ stateDir: state, helper: "fake", dht, openTun: async () => tun.device,
-      config: { peers: [{ label: "remote", publicKey: key, connection: "dial" }], services: [], bindings: [],
+      config: { peers: [{ label: "remote", publicKey: key, connection: "dial" }],
         vpn: { address: "198.18.0.1", peers: [{ peer: "remote", address: "198.18.0.2", allowTcp: [] }] } },
       log: (line) => { if (line.includes("opened locally")) opened(); if (line.includes("VPN handshake timeout")) timedOut(line); },
     });
@@ -470,7 +470,7 @@ test("VPN diagnostic errors do not print arbitrary transport data", async () => 
       }, destroy: async () => {},
     } as unknown as DhtNode;
     running = await startVpn({ stateDir: state, helper: "fake", dht, openTun: async () => tun.device,
-      config: { peers: [{ label: "remote", publicKey: key, connection: "dial" }], services: [], bindings: [],
+      config: { peers: [{ label: "remote", publicKey: key, connection: "dial" }],
         vpn: { address: "198.18.0.1", peers: [{ peer: "remote", address: "198.18.0.2", allowTcp: [] }] } },
       log: (line) => { if (line.includes("VPN dial to")) failed(line); },
     });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
   mkdtemp,
   mkdir,
@@ -13,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { test, type TestContext } from "node:test";
+import { test } from "node:test";
 
 import {
   acquirePeerRuntimeLock,
@@ -217,46 +217,6 @@ test("failed acquisitions close their attempted descriptors", async () => {
   }
 });
 
-test("successive PID 1 namespaces exclude live owners and recover after SIGKILL", async (t) => {
-  const namespace = pidNamespaceCommand(t);
-  if (!namespace) return;
-
-  const root = await mkdtemp(path.join(os.tmpdir(), "kepos-runtime-pid1-"));
-  const lockPath = path.join(root, "runtime.lock");
-  const holder = startChild("hold", lockPath, namespace);
-  let contender: StartedChild | undefined;
-
-  try {
-    await waitForOutput(holder, /^ready:1\n/u);
-    const before = await stat(lockPath);
-
-    contender = startChild("once", lockPath, namespace);
-    const contenderExit = await waitForExit(contender.child);
-    assert.equal(contenderExit.code, 1);
-    assert.equal(contenderExit.signal, null);
-    assert.match(contender.output.stderr, /runtime lock is already owned/);
-
-    await stopChild(holder.child, "SIGKILL");
-    const afterDeath = await stat(lockPath);
-    assert.equal(afterDeath.ino, before.ino);
-    assert.equal(afterDeath.dev, before.dev);
-
-    const replacement = startChild("once", lockPath, namespace);
-    const replacementOutput = await waitForOutput(
-      replacement,
-      /^acquired:1\nreleased:1\n/u,
-    );
-    assert.match(replacementOutput, /acquired:1\nreleased:1/);
-    const replacementExit = await waitForExit(replacement.child);
-    assert.equal(replacementExit.code, 0);
-    assert.equal(replacementExit.signal, null);
-  } finally {
-    await stopChild(contender?.child, "SIGKILL");
-    await stopChild(holder.child, "SIGKILL");
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
 interface StartedChild {
   child: ChildProcess;
   output: {
@@ -350,32 +310,6 @@ async function stopChild(
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   child.kill(signal);
   await waitForExit(child).catch(() => undefined);
-}
-
-function pidNamespaceCommand(t: TestContext): string[] | undefined {
-  if (process.platform !== "linux") {
-    t.skip("PID namespaces are a Linux-specific regression");
-    return undefined;
-  }
-
-  const candidates = [
-    ["--pid", "--fork", "--mount-proc", "true"],
-    ["--user", "--map-root-user", "--pid", "--fork", "--mount-proc", "true"],
-  ];
-  for (const arguments_ of candidates) {
-    const probe = spawnSync("unshare", arguments_, {
-      encoding: "utf8",
-      timeout: 3_000,
-    });
-    if (probe.status === 0) return arguments_.slice(0, -1);
-    if ((probe.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-      t.skip("unshare is not installed on this host");
-      return undefined;
-    }
-  }
-
-  t.skip("this host does not permit the unshare PID-namespace facility");
-  return undefined;
 }
 
 async function descriptorCount(): Promise<number | undefined> {

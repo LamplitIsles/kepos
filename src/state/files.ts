@@ -10,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { isWindows } from "which-runtime";
+const isWindows = process.platform === "win32";
 
 export async function pathExists(filePath: string): Promise<boolean> {
   try {

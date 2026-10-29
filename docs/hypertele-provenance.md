@@ -1,5 +1,7 @@
 # Hypertele migration provenance
 
+> Historical discussion of the retired service-proxy product; see [Linux peer VPN](peer-vpn.md) for current behavior.
+
 Hypertele was the executable baseline used before Kepos Neo gained its own
 persistent multiplex transport. No Hypertele source code or npm package is
 shipped in the current Kepos runtime.

@@ -11,12 +11,8 @@ import { parse, stringify } from "smol-toml";
 
 import {
   parsePeerConfig,
-  type PeerBinding,
   type PeerConfig,
-  type PeerGatewayConfig,
-  type PeerMetricsConfig,
   type PeerNetworkConfig,
-  type PeerService,
 } from "./config.js";
 import { parseBootstrapValues } from "./cli/options.js";
 import { parseRoute } from "./mux/route.js";
@@ -39,21 +35,6 @@ export async function loadKeposConfig(
     platform,
   );
   return source === undefined ? undefined : parseKeposConfig(source);
-}
-
-export async function loadKeposBootstrap(
-  configPath?: string,
-  environment?: NodeJS.ProcessEnv,
-  homeDirectory?: string,
-  platform?: NodeJS.Platform,
-): Promise<PeerNetworkConfig["bootstrap"] | undefined> {
-  const config = await loadKeposConfig(
-    configPath,
-    environment,
-    homeDirectory,
-    platform,
-  );
-  return config?.network?.bootstrap;
 }
 
 async function readKeposConfigSource(
@@ -87,16 +68,10 @@ export function parseKeposConfig(source: string): KeposConfig {
   const root = requireTable(value, "config");
   rejectUnknownFields(root, "config", [
     "network",
-    "gateway",
-    "metrics",
     "vpn",
     "peers",
-    "services",
-    "bindings",
   ]);
   if (!Array.isArray(root.peers)) throw new Error("peers must be an array");
-  if (!Array.isArray(root.services)) throw new Error("services must be an array");
-  if (!Array.isArray(root.bindings)) throw new Error("bindings must be an array");
 
   const rawPeers = root.peers.map((value, index) => {
     const peer = requireTable(value, `peers[${index}]`);
@@ -111,60 +86,12 @@ export function parseKeposConfig(source: string): KeposConfig {
       connection: peer.connection,
     };
   });
-  const rawServices = root.services.map((value, index) => {
-    const service = requireTable(value, `services[${index}]`);
-    rejectUnknownFields(service, `services[${index}]`, [
-      "id",
-      "name",
-      "kind",
-      "source",
-      "allow",
-      "max_publisher_to_subscriber_bps",
-    ]);
-    return {
-      id: service.id,
-      name: service.name,
-      ...(service.kind === undefined ? {} : { kind: service.kind }),
-      source: parseTomlSource(service.source, `services[${index}].source`),
-      ...(service.allow === undefined ? {} : { allow: service.allow }),
-      ...(service.max_publisher_to_subscriber_bps === undefined
-        ? {}
-        : {
-            maxPublisherToSubscriberBps:
-              service.max_publisher_to_subscriber_bps,
-          }),
-    };
-  });
-  const rawBindings = root.bindings.map((value, index) => {
-    const binding = requireTable(value, `bindings[${index}]`);
-    rejectUnknownFields(binding, `bindings[${index}]`, [
-      "peer",
-      "service",
-      "listen",
-      "kind",
-    ]);
-    return {
-      peer: binding.peer,
-      service: binding.service,
-      listen: parseTomlListen(binding.listen, `bindings[${index}].listen`),
-      ...(binding.kind === undefined ? {} : { kind: binding.kind }),
-    };
-  });
-
   return parsePeerConfig({
     ...(root.vpn === undefined ? {} : { vpn: parseTomlVpn(root.vpn) }),
     ...(root.network === undefined
       ? {}
       : { network: parseTomlNetwork(root.network) }),
-    ...(root.gateway === undefined
-      ? {}
-      : { gateway: parseTomlGateway(root.gateway) }),
-    ...(root.metrics === undefined
-      ? {}
-      : { metrics: parseTomlMetrics(root.metrics) }),
     peers: rawPeers,
-    services: rawServices,
-    bindings: rawBindings,
   });
 }
 
@@ -175,13 +102,6 @@ export function serializeKeposConfig(config: KeposConfig): string {
       label,
       public_key: publicKey,
       connection,
-    })),
-    services: parsed.services.map(serializeService),
-    bindings: parsed.bindings.map(({ peer, service, listen, kind }) => ({
-      peer,
-      service,
-      listen: serializeListen(listen),
-      ...(kind === undefined || kind === "tcp" ? {} : { kind }),
     })),
   };
   if (parsed.vpn) {
@@ -204,21 +124,6 @@ export function serializeKeposConfig(config: KeposConfig): string {
         : { route: parsed.network.route }),
     };
   }
-  if (parsed.gateway) {
-    value.gateway = {
-      ...(parsed.gateway.port === undefined ? {} : { port: parsed.gateway.port }),
-      ...(parsed.gateway.host === undefined ? {} : { host: parsed.gateway.host }),
-      ...(parsed.gateway.domain === undefined
-        ? {}
-        : { domain: parsed.gateway.domain }),
-    };
-  }
-  if (parsed.metrics) {
-    value.metrics = {
-      ...(parsed.metrics.host === undefined ? {} : { host: parsed.metrics.host }),
-      port: parsed.metrics.port,
-    };
-  }
   const source = stringify(value);
   parseKeposConfig(source);
   return source;
@@ -236,70 +141,6 @@ function parseTomlVpn(value: unknown): unknown {
       rejectUnknownFields(peer, field, ["peer", "address", "allow_tcp"]);
       return { peer: peer.peer, address: peer.address, allowTcp: peer.allow_tcp };
     }),
-  };
-}
-
-function serializeService(service: PeerService): Record<string, unknown> {
-  return {
-    id: service.id,
-    name: service.name,
-    ...(service.kind === "tcp" ? {} : { kind: service.kind }),
-    source: serializeSource(service.source),
-    ...(service.allow.length === 0 ? {} : { allow: service.allow }),
-    ...(service.maxPublisherToSubscriberBps === undefined
-      ? {}
-      : {
-          max_publisher_to_subscriber_bps:
-            service.maxPublisherToSubscriberBps,
-        }),
-  };
-}
-
-function serializeSource(source: PeerService["source"]): Record<string, unknown> {
-  if ("localPort" in source) return { local_port: source.localPort };
-  return { peer: source.peer, service: source.service };
-}
-
-function serializeListen(
-  listen: PeerBinding["listen"],
-): Record<string, unknown> {
-  return { local_port: listen.localPort };
-}
-
-function parseTomlSource(value: unknown, field: string): PeerService["source"] {
-  const source = requireTable(value, field);
-  rejectUnknownFields(source, field, [
-    "local_port",
-    "peer",
-    "service",
-  ]);
-  const raw: Record<string, unknown> = {};
-  if (Object.prototype.hasOwnProperty.call(source, "local_port")) {
-    raw.localPort = source.local_port;
-  }
-  if (Object.prototype.hasOwnProperty.call(source, "peer")) raw.peer = source.peer;
-  if (Object.prototype.hasOwnProperty.call(source, "service")) {
-    raw.service = source.service;
-  }
-  return raw as unknown as PeerService["source"];
-}
-
-function parseTomlListen(value: unknown, field: string): PeerBinding["listen"] {
-  const listen = requireTable(value, field);
-  rejectUnknownFields(listen, field, ["local_port"]);
-  const raw: Record<string, unknown> = {};
-  if (Object.prototype.hasOwnProperty.call(listen, "local_port")) {
-    raw.localPort = listen.local_port;
-  }
-  return raw as unknown as PeerBinding["listen"];
-}
-
-function parseTomlMetrics(value: unknown): PeerMetricsConfig {
-  const metrics = requireTable(value, "metrics");
-  rejectUnknownFields(metrics, "metrics", ["host", "port"]);
-  return {
-    ...(metrics.host === undefined ? {} : { host: metrics.host as string }),
-    port: metrics.port as number,
   };
 }
 
@@ -321,16 +162,6 @@ function parseTomlNetwork(value: unknown): PeerNetworkConfig {
     ...(network.route === undefined
       ? {}
       : { route: parseRoute(String(network.route)) }),
-  };
-}
-
-function parseTomlGateway(value: unknown): PeerGatewayConfig {
-  const gateway = requireTable(value, "gateway");
-  rejectUnknownFields(gateway, "gateway", ["port", "host", "domain"]);
-  return {
-    ...(gateway.port === undefined ? {} : { port: gateway.port as number }),
-    ...(gateway.host === undefined ? {} : { host: gateway.host as string }),
-    ...(gateway.domain === undefined ? {} : { domain: gateway.domain as string }),
   };
 }
 

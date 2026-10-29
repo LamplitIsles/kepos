@@ -15,7 +15,6 @@ import {
 import {
   getPeerPublicKey,
   setupPeer,
-  convertPeerIdentity,
   type SetupPeerResult,
 } from "../state/peer.js";
 import {
@@ -26,14 +25,7 @@ import {
   acquirePeerRuntimeLock,
   type RuntimeLock,
 } from "../runtime/runtime-lock.js";
-import {
-  startPeer,
-  type RunningPeer,
-  type StartPeerOptions,
-} from "../runtime/peer.js";
-import type { Observation, Observe } from "../mux/observability.js";
 import { waitForSignal } from "./signals.js";
-import { parseMetricsListenValue } from "./options.js";
 
 export interface CliDependencies {
   stdout: (line: string) => void;
@@ -42,8 +34,6 @@ export interface CliDependencies {
   saveConfig: (config: PeerConfig, configPath: string) => Promise<void>;
   setupPeer: (options: { stateDir: string }) => Promise<SetupPeerResult>;
   getPeerPublicKey: (stateDir: string) => Promise<string>;
-  convertPeerIdentity: typeof convertPeerIdentity;
-  startPeer: (options: StartPeerOptions) => Promise<RunningPeer>;
   startVpn: typeof import("../vpn/runtime.js").startVpn;
   acquirePeerRuntimeLock: (stateDir: string) => Promise<RuntimeLock>;
   waitForSignal: (stop: () => Promise<void>, signal?: AbortSignal) => Promise<void>;
@@ -60,8 +50,6 @@ export function createDefaultCliDependencies(
     saveConfig: saveKeposConfig,
     setupPeer,
     getPeerPublicKey,
-    convertPeerIdentity,
-    startPeer,
     startVpn: async (options) => (await import("../vpn/runtime.js")).startVpn(options),
     acquirePeerRuntimeLock,
     waitForSignal,
@@ -80,10 +68,8 @@ export const CLI_USAGE = [
   "Commands:",
   "  setup peer       Initialize one canonical peer identity",
   "  peer key         Print the public key for a peer state directory",
-  "  peer status      Inspect canonical configuration and runtime state",
+  "  peer status      Inspect identity and configuration",
   "  peer pair        Add an explicitly approved peer to the config",
-  "  peer convert     Offline-convert one selected legacy identity",
-  "  peer run         Run the canonical peer runtime",
   "  peer vpn         Run the exclusive Linux VPN runtime",
 ].join("\n");
 
@@ -112,20 +98,12 @@ export async function runCli(
     await peerStatusCommand(rest, dependencies);
     return;
   }
-  if (group === "peer" && (action === "pair" || action === "trust")) {
+  if (group === "peer" && action === "pair") {
     await peerPairCommand(rest, dependencies);
-    return;
-  }
-  if (group === "peer" && action === "convert") {
-    await peerConvertCommand(rest, dependencies);
     return;
   }
   if (group === "peer" && action === "vpn") {
     await peerVpnCommand(rest, dependencies);
-    return;
-  }
-  if (group === "peer" && action === "run") {
-    await peerRunCommand(rest, dependencies);
     return;
   }
   throw new Error(`unknown command: ${arguments_.join(" ")}\n\n${CLI_USAGE}`);
@@ -183,15 +161,12 @@ async function peerStatusCommand(
   dependencies.stdout(
     JSON.stringify({
       role: "peer",
-      state: "stopped",
       peerKey,
       config: canonical
         ? {
             peers: canonical.peers.length,
-            services: canonical.services.length,
-            bindings: canonical.bindings.length,
           }
-        : { peers: 0, services: 0, bindings: 0 },
+        : { peers: 0 },
     }),
   );
 }
@@ -216,107 +191,22 @@ async function peerPairCommand(
     throw new Error("--connection must be dial or accept");
   }
   const existing = await dependencies.loadConfig(configPath);
+  const conflict = existing?.peers.find((peer) =>
+    (peer.label === label || peer.publicKey === publicKey) &&
+    (peer.label !== label || peer.publicKey !== publicKey),
+  );
+  if (conflict) throw new Error("peer label or public key belongs to a different peer");
   const next = parsePeerConfig({
-    ...(existing?.network ? { network: existing.network } : {}),
-    ...(existing?.gateway ? { gateway: existing.gateway } : {}),
-    ...(existing?.metrics ? { metrics: existing.metrics } : {}),
+    ...existing,
     peers: [
       ...(existing?.peers ?? []).filter(
         (peer) => peer.publicKey !== publicKey && peer.label !== label,
       ),
       { label, publicKey, connection },
     ],
-    services: existing?.services ?? [],
-    bindings: existing?.bindings ?? [],
   });
   await dependencies.saveConfig(next, configPath);
   dependencies.stdout(`Peer approved: ${label} (${publicKey})`);
-}
-
-async function peerConvertCommand(
-  arguments_: readonly string[],
-  dependencies: CliDependencies,
-): Promise<void> {
-  const options = parseArguments(arguments_, [
-    "--source",
-    "--destination",
-    "--expected-public-key",
-  ]);
-  const result = await dependencies.convertPeerIdentity({
-    source: required(options, "--source"),
-    destination: required(options, "--destination"),
-    expectedPublicKey: required(options, "--expected-public-key"),
-  });
-  dependencies.stdout(`Peer key: ${result.publicKey}`);
-}
-
-async function peerRunCommand(
-  arguments_: readonly string[],
-  dependencies: CliDependencies,
-): Promise<void> {
-  const options = parseArguments(arguments_, [
-    "--state",
-    "--config",
-    "--observations",
-    "--metrics-listen",
-  ]);
-  const mode = options.get("--observations") ?? "human";
-  if (mode !== "human" && mode !== "ndjson") {
-    throw new Error("--observations must be human or ndjson");
-  }
-  const configPath = path.resolve(
-    options.get("--config") ?? defaultKeposConfigPath(),
-  );
-  const stateDir = path.resolve(
-    options.get("--state") ?? defaultKeposPeerStatePath(),
-  );
-  const config = requireConfig(await dependencies.loadConfig(configPath));
-  const metricsListen = options.get("--metrics-listen");
-  const lock = await dependencies.acquirePeerRuntimeLock(stateDir);
-  let cancelReload: (() => void) | undefined;
-  let reloadTask = Promise.resolve();
-  let running: RunningPeer | undefined;
-  try {
-    const started = await dependencies.startPeer({
-      stateDir,
-      config,
-      persistConfig: (nextConfig) => dependencies.saveConfig(nextConfig, configPath),
-      observe: observationWriter(mode, dependencies),
-      ...(metricsListen === undefined
-        ? {}
-        : { metricsListen: parseMetricsListenValue(metricsListen) }),
-    });
-    running = started;
-    const writeStatus = (line: string): void => {
-      if (mode === "ndjson") dependencies.stderr(line);
-      else dependencies.stdout(line);
-    };
-    writeStatus(
-      `Peer running: key=${started.peerKey} gateway=${started.gateway.url}`,
-    );
-    cancelReload = dependencies.scheduleConfigReload(() => {
-      reloadTask = reloadTask.then(async () => {
-        try {
-          const nextConfig = requireConfig(await dependencies.loadConfig(configPath));
-          await started.applyConfig(nextConfig);
-        } catch (error) {
-          dependencies.stderr(`Peer config reload failed: ${errorMessage(error)}`);
-        }
-      });
-    }, 1_000);
-    const stop = async (): Promise<void> => {
-      cancelReload?.();
-      cancelReload = undefined;
-      await reloadTask;
-      await running?.stop();
-    };
-    await dependencies.waitForSignal(stop);
-  } finally {
-    cancelReload?.();
-    await reloadTask;
-    await running?.stop();
-    await lock.release();
-  }
 }
 
 async function peerVpnCommand(arguments_: readonly string[], dependencies: CliDependencies): Promise<void> {
@@ -378,11 +268,11 @@ async function peerVpnCommand(arguments_: readonly string[], dependencies: CliDe
 }
 
 function emptyPeerConfig(): PeerConfig {
-  return { peers: [], services: [], bindings: [] };
+  return { peers: [] };
 }
 
 function requireConfig(config: KeposConfig | undefined): PeerConfig {
-  if (!config) throw new Error("peer run requires a canonical config.toml");
+  if (!config) throw new Error("peer vpn requires a config.toml");
   return parsePeerConfig(config);
 }
 
@@ -411,31 +301,6 @@ function required(options: Map<string, string>, option: string): string {
   const value = options.get(option);
   if (!value) throw new Error(`${option} is required`);
   return value;
-}
-
-function observationWriter(
-  mode: "human" | "ndjson",
-  dependencies: CliDependencies,
-): Observe {
-  return mode === "ndjson"
-    ? (observation) => dependencies.stdout(JSON.stringify(observation))
-    : (observation) => dependencies.stdout(formatObservation(observation));
-}
-
-function formatObservation(observation: Observation): string {
-  const { component: _component, event, timestamp: _timestamp, ...fields } = observation;
-  const details = Object.entries(fields)
-    .map(([key, value]) => `${key}=${formatObservationValue(value)}`)
-    .join(" ");
-  return `${event}${details ? ` ${details}` : ""}`;
-}
-
-function formatObservationValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean" || value === null) {
-    return String(value);
-  }
-  return JSON.stringify(value);
 }
 
 function errorMessage(error: unknown): string {

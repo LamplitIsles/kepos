@@ -1,5 +1,7 @@
 # Kepos Neo 竞争价值分析
 
+> Historical discussion of the retired service-proxy product; see [Linux peer VPN](peer-vpn.md) for current behavior.
+
 状态：讨论稿
 日期：2026-07-10
 

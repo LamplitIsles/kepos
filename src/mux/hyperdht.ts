@@ -97,10 +97,6 @@ export function keyPairFromSeed(seed: string): DhtKeyPair {
   return HyperDHT.keyPair(b4a.from(seed, "hex"));
 }
 
-export function keyPairFromSecretKey(secretKey: string): DhtKeyPair {
-  return HyperDHT.keyPair(b4a.from(secretKey.slice(0, 64), "hex"));
-}
-
 export function dhtStreamSnapshot(stream: DhtStream): unknown {
   const snapshot = stream.toJSON?.();
   const rawSnapshot =
@@ -122,42 +118,6 @@ export function dhtStreamSnapshot(stream: DhtStream): unknown {
     ...base,
     ...(udx ? { udx } : {}),
   });
-}
-
-export function dhtFirewallName(value: number): string {
-  if (value === 1) return "open";
-  if (value === 2) return "consistent";
-  if (value === 3) return "random";
-  return "unknown";
-}
-
-export function holepunchObservation(
-  remoteFirewall: number,
-  localFirewall: number,
-  remoteAddresses: DhtAddress[],
-  localAddresses: DhtAddress[],
-): Record<string, string | number> {
-  return {
-    remoteFirewall: dhtFirewallName(remoteFirewall),
-    localFirewall: dhtFirewallName(localFirewall),
-    remoteAddressCount: remoteAddresses.length,
-    localAddressCount: localAddresses.length,
-  };
-}
-
-export function dhtStatsSnapshot(node: DhtNode): DhtStats {
-  return {
-    punches: {
-      consistent: node.stats.punches.consistent,
-      random: node.stats.punches.random,
-      open: node.stats.punches.open,
-    },
-    relaying: {
-      attempts: node.stats.relaying.attempts,
-      successes: node.stats.relaying.successes,
-      aborts: node.stats.relaying.aborts,
-    },
-  };
 }
 
 function booleanFields(

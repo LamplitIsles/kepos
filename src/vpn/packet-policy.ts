@@ -74,12 +74,6 @@ export class PacketPolicy {
   }
 
   /** Revocation destroys all tracked flows, including established ones. */
-  setPorts(ports: readonly number[] | "all"): void {
-    this.ports = ports === "all" ? "all" : new Set(ports);
-    this.flows.clear();
-    this.closed.clear();
-  }
-
   clear(): void { this.flows.clear(); this.closed.clear(); }
 
   private remove(key: string): void { this.flows.delete(key); this.closed.delete(key); }

@@ -1,7 +1,6 @@
 import b4a from "b4a";
 
 const keyHexPattern = /^[0-9a-f]{64}$/;
-const serviceIdPattern = /^[a-z][a-z0-9-]*$/;
 const peerLabelMaximumBytes = 128;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -26,13 +25,6 @@ function rejectUnknownFields(
   if (unknownField) throw new Error(`${subject} has unknown field: ${unknownField}`);
 }
 
-function parseNonEmptyString(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`${field} must be a non-empty string`);
-  }
-  return value;
-}
-
 export type PeerConnectionDirection = "dial" | "accept";
 
 export interface PeerDefinition {
@@ -41,54 +33,9 @@ export interface PeerDefinition {
   connection: PeerConnectionDirection;
 }
 
-export interface PeerLocalPortEndpoint {
-  localPort: number;
-}
-
-export interface PeerUpstreamServiceSource {
-  peer: string;
-  service: string;
-}
-
-export type PeerServiceSource =
-  | PeerLocalPortEndpoint
-  | PeerUpstreamServiceSource;
-
-export interface PeerService {
-  id: string;
-  name: string;
-  kind: "tcp" | "http" | "udp";
-  source: PeerServiceSource;
-  allow: string[];
-  maxPublisherToSubscriberBps?: number;
-}
-
-export interface PeerBinding {
-  peer: string;
-  service: string;
-  listen: PeerLocalPortEndpoint;
-  /** The established binding transport. Omitted means the historical TCP default. */
-  kind?: "tcp" | "udp";
-}
-
-export function peerBindingKind(binding: PeerBinding): "tcp" | "udp" {
-  return binding.kind ?? "tcp";
-}
-
 export interface PeerNetworkConfig {
   bootstrap?: import("./mux/hyperdht.js").DhtAddress[];
   route?: import("./mux/route.js").Route;
-}
-
-export interface PeerGatewayConfig {
-  port?: number;
-  host?: string;
-  domain?: string;
-}
-
-export interface PeerMetricsConfig {
-  host?: string;
-  port: number;
 }
 
 export interface PeerVpnConfig {
@@ -99,11 +46,7 @@ export interface PeerVpnConfig {
 export interface PeerConfig {
   vpn?: PeerVpnConfig;
   network?: PeerNetworkConfig;
-  gateway?: PeerGatewayConfig;
-  metrics?: PeerMetricsConfig;
   peers: PeerDefinition[];
-  services: PeerService[];
-  bindings: PeerBinding[];
 }
 
 function parsePeerReference(value: unknown, field: string): string {
@@ -129,63 +72,6 @@ function parsePeerPort(value: unknown, field: string, allowZero: boolean): numbe
   return value;
 }
 
-function parsePeerEndpoint(
-  value: unknown,
-  field: string,
-  allowZero: boolean,
-): PeerLocalPortEndpoint {
-  if (!isRecord(value)) throw new Error(`${field} must be an object`);
-  rejectUnknownFields(value, ["localPort"], field);
-  return { localPort: parsePeerPort(value.localPort, `${field}.localPort`, allowZero) };
-}
-
-function parsePeerServiceSource(
-  value: unknown,
-  field: string,
-): PeerServiceSource {
-  if (!isRecord(value)) throw new Error(`${field} must be an object`);
-  const hasLocalPort = Object.prototype.hasOwnProperty.call(value, "localPort");
-  const hasPeer = Object.prototype.hasOwnProperty.call(value, "peer");
-  const hasService = Object.prototype.hasOwnProperty.call(value, "service");
-  if (!hasLocalPort && !hasPeer && !hasService) {
-    throw new Error(`${field} must describe a local port or peer service`);
-  }
-  if (hasLocalPort && (hasPeer || hasService)) {
-    throw new Error(`${field} must describe exactly one source variant`);
-  }
-  if (hasLocalPort) {
-    rejectUnknownFields(value, ["localPort"], field);
-    return { localPort: parsePeerPort(value.localPort, `${field}.localPort`, false) };
-  }
-  rejectUnknownFields(value, ["peer", "service"], field);
-  if (!hasPeer || !hasService) {
-    throw new Error(`${field} peer source requires peer and service`);
-  }
-  return {
-    peer: parsePeerReference(value.peer, `${field}.peer`),
-    service: parseServiceIdentifier(value.service, `${field}.service`),
-  };
-}
-
-function parseServiceIdentifier(value: unknown, field: string): string {
-  if (typeof value !== "string" || !serviceIdPattern.test(value) || value === "home") {
-    throw new Error(`${field} must be a non-reserved lowercase service identifier`);
-  }
-  return value;
-}
-
-function parsePeerAllow(value: unknown, field: string): string[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) throw new Error(`${field} must be an array`);
-  const seen = new Set<string>();
-  return value.map((entry, index) => {
-    const key = parseKeyHex(entry, `${field}[${index}]`);
-    if (seen.has(key)) throw new Error(`duplicate peer service grant: ${key}`);
-    seen.add(key);
-    return key;
-  });
-}
-
 function parsePeerDefinition(value: unknown, field: string): PeerDefinition {
   if (!isRecord(value)) throw new Error(`${field} must be an object`);
   rejectUnknownFields(value, ["label", "publicKey", "connection"], field);
@@ -204,53 +90,6 @@ function parsePeerDefinition(value: unknown, field: string): PeerDefinition {
     throw new Error(`${field}.connection must be dial or accept`);
   }
   return { label, publicKey, connection: value.connection };
-}
-
-function parsePeerService(value: unknown, field: string): PeerService {
-  if (!isRecord(value)) throw new Error(`${field} must be an object`);
-  rejectUnknownFields(
-    value,
-    ["id", "name", "kind", "source", "allow", "maxPublisherToSubscriberBps"],
-    field,
-  );
-  const id = parseServiceIdentifier(value.id, `${field}.id`);
-  const name = parseNonEmptyString(value.name, `${field}.name`);
-  const kind = value.kind === undefined ? "tcp" : value.kind;
-  if (kind !== "tcp" && kind !== "http" && kind !== "udp") {
-    throw new Error(`${field}.kind must be tcp, http, or udp`);
-  }
-  const source = parsePeerServiceSource(value.source, `${field}.source`);
-  const maxRate = value.maxPublisherToSubscriberBps as number | undefined;
-  if (
-    maxRate !== undefined &&
-    (!Number.isSafeInteger(maxRate) || maxRate <= 0)
-  ) {
-    throw new Error(`${field}.maxPublisherToSubscriberBps must be a positive safe integer`);
-  }
-  return {
-    id,
-    name,
-    kind,
-    source,
-    allow: parsePeerAllow(value.allow, `${field}.allow`),
-    ...(maxRate === undefined ? {} : { maxPublisherToSubscriberBps: maxRate }),
-  };
-}
-
-function parsePeerBinding(value: unknown, field: string): PeerBinding {
-  if (!isRecord(value)) throw new Error(`${field} must be an object`);
-  rejectUnknownFields(value, ["peer", "service", "listen", "kind"], field);
-  const kind = value.kind === undefined ? undefined : value.kind;
-  if (kind !== undefined && kind !== "tcp" && kind !== "udp") {
-    throw new Error(`${field}.kind must be tcp or udp`);
-  }
-  const listen = parsePeerEndpoint(value.listen, `${field}.listen`, true);
-  return {
-    peer: parsePeerReference(value.peer, `${field}.peer`),
-    service: parseServiceIdentifier(value.service, `${field}.service`),
-    listen,
-    ...(kind === undefined ? {} : { kind }),
-  };
 }
 
 function resolvePeerReference(
@@ -274,12 +113,10 @@ export function parsePeerConfig(value: unknown): PeerConfig {
   if (!isRecord(value)) throw new Error("peer config must be an object");
   rejectUnknownFields(
     value,
-    ["network", "gateway", "metrics", "vpn", "peers", "services", "bindings"],
+    ["network", "vpn", "peers"],
     "peer config",
   );
   if (!Array.isArray(value.peers)) throw new Error("peers must be an array");
-  if (!Array.isArray(value.services)) throw new Error("services must be an array");
-  if (!Array.isArray(value.bindings)) throw new Error("bindings must be an array");
   const peers = value.peers.map((entry, index) => parsePeerDefinition(entry, `peers[${index}]`));
   const labels = new Set<string>();
   const publicKeys = new Set<string>();
@@ -289,37 +126,10 @@ export function parsePeerConfig(value: unknown): PeerConfig {
     labels.add(peer.label);
     publicKeys.add(peer.publicKey);
   }
-  const services = value.services.map((entry, index) => parsePeerService(entry, `services[${index}]`));
-  const serviceIds = new Set<string>();
-  for (const service of services) {
-    if (serviceIds.has(service.id)) throw new Error(`duplicate service id: ${service.id}`);
-    serviceIds.add(service.id);
-    if ("peer" in service.source) resolvePeerReference(service.source.peer, peers, "service source peer");
-    for (const publicKey of service.allow) {
-      if (!publicKeys.has(publicKey)) {
-        throw new Error(`service ${service.id} allow references an unknown peer public key`);
-      }
-    }
-  }
-  const bindings = value.bindings.map((entry, index) => parsePeerBinding(entry, `bindings[${index}]`));
-  const bindingKeys = new Set<string>();
-  for (const [index, binding] of bindings.entries()) {
-    resolvePeerReference(binding.peer, peers, `bindings[${index}].peer`);
-    const peerKey = keyHexPattern.test(binding.peer)
-      ? binding.peer
-      : peers.find(({ label }) => label === binding.peer)!.publicKey;
-    const key = `${peerKey}\u0000${binding.service}`;
-    if (bindingKeys.has(key)) throw new Error(`duplicate service binding: ${binding.peer}/${binding.service}`);
-    bindingKeys.add(key);
-  }
   return {
     ...(value.vpn === undefined ? {} : { vpn: parsePeerVpn(value.vpn, peers) }),
     ...(value.network === undefined ? {} : { network: parsePeerNetwork(value.network) }),
-    ...(value.gateway === undefined ? {} : { gateway: parsePeerGateway(value.gateway) }),
-    ...(value.metrics === undefined ? {} : { metrics: parsePeerMetrics(value.metrics) }),
     peers,
-    services,
-    bindings,
   };
 }
 
@@ -368,18 +178,6 @@ function parsePeerVpn(value: unknown, peers: readonly PeerDefinition[]): PeerVpn
   return { address, peers: entries };
 }
 
-function parsePeerMetrics(value: unknown): PeerMetricsConfig {
-  if (!isRecord(value)) throw new Error("metrics must be an object");
-  rejectUnknownFields(value, ["host", "port"], "metrics");
-  if (value.port === undefined) throw new Error("metrics.port is required");
-  return {
-    port: parsePeerPort(value.port, "metrics.port", true),
-    ...(value.host === undefined
-      ? {}
-      : { host: parseNonEmptyString(value.host, "metrics.host") }),
-  };
-}
-
 function parsePeerNetwork(value: unknown): PeerNetworkConfig {
   if (!isRecord(value)) throw new Error("network must be an object");
   rejectUnknownFields(value, ["bootstrap", "route"], "network");
@@ -405,14 +203,4 @@ function parsePeerNetwork(value: unknown): PeerNetworkConfig {
 function parsePeerRoute(value: unknown): import("./mux/route.js").Route {
   if (value !== "auto" && value !== "public") throw new Error("network.route must be auto or public");
   return value;
-}
-
-function parsePeerGateway(value: unknown): PeerGatewayConfig {
-  if (!isRecord(value)) throw new Error("gateway must be an object");
-  rejectUnknownFields(value, ["port", "host", "domain"], "gateway");
-  return {
-    ...(value.port === undefined ? {} : { port: parsePeerPort(value.port, "gateway.port", true) }),
-    ...(value.host === undefined ? {} : { host: parseNonEmptyString(value.host, "gateway.host") }),
-    ...(value.domain === undefined ? {} : { domain: parseNonEmptyString(value.domain, "gateway.domain") }),
-  };
 }

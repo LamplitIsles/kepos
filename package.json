@@ -3,61 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/web"
   ],
   "license": "Apache-2.0",
   "type": "module",
-  "imports": {
-    "node:crypto": {
-      "bare": "bare-crypto",
-      "default": "node:crypto"
-    },
-    "node:dgram": {
-      "bare": "bare-dgram",
-      "default": "node:dgram"
-    },
-    "node:events": {
-      "bare": "bare-events",
-      "default": "node:events"
-    },
-    "node:fs/promises": {
-      "bare": "bare-fs/promises",
-      "default": "node:fs/promises"
-    },
-    "node:fs": {
-      "bare": "bare-fs",
-      "default": "node:fs"
-    },
-    "node:http": {
-      "bare": "bare-http1",
-      "default": "node:http"
-    },
-    "node:net": {
-      "bare": "bare-net",
-      "default": "node:net"
-    },
-    "node:os": {
-      "bare": "bare-os",
-      "default": "node:os"
-    },
-    "node:path": {
-      "bare": "bare-path",
-      "default": "node:path"
-    },
-    "node:process": {
-      "bare": "bare-process",
-      "default": "node:process"
-    },
-    "node:stream": {
-      "bare": "bare-stream",
-      "default": "node:stream"
-    },
-    "node:url": {
-      "bare": "bare-url",
-      "default": "node:url"
-    }
-  },
   "packageManager": "npm@12.0.2",
   "engines": {
     "node": ">=24 <25",
@@ -76,28 +25,6 @@
     }
   },
   "scripts": {
-    "android:fetch-bare-kit": "tsx scripts/fetch-bare-kit.ts",
-    "android:bundle": "npm run build:packages && tsc -p tsconfig.bare.json && tsx scripts/build-android-worklet.ts",
-    "android:assemble": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android assembleDebug",
-    "release:android": "tsx scripts/release-android.ts",
-    "release:macos": "tsx scripts/release-macos.ts",
-    "release:windows": "bash scripts/windows/nuc-kep.sh",
-    "release:manifest": "tsx scripts/release-manifest.ts",
-    "release:draft": "tsx scripts/publish-release.ts",
-    "android:install": "npm run android:assemble && adb install -r android/app/build/outputs/apk/debug/app-debug.apk",
-    "android:check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android testDebugUnitTest lintDebug",
-    "android:device-check": "npm run android:fetch-bare-kit && npm run android:bundle && ./android/gradlew -p android connectedDeviceTestAndroidTest",
-    "build:packages": "tsc -b --clean packages/bare-host-protocol packages/kepos-android-worklet && tsc -b packages/bare-host-protocol packages/kepos-android-worklet",
-    "check": "npm run build:packages && npm run typecheck && npm run desktop:typecheck && npm run test:coverage && npm run web:verify",
-    "typecheck": "tsc --noEmit",
-    "test": "npm run build:packages && node --import tsx --test \"test/**/*.test.ts\"",
-    "test:coverage": "node --import tsx --test --test-concurrency=1 --experimental-test-coverage --test-coverage-include=\"src/**/*.ts\" --test-coverage-include=\"packages/*/src/**/*.ts\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info \"test/**/*.test.ts\"",
-    "desktop:build": "tsx scripts/build-desktop.ts",
-    "desktop:check": "npm run desktop:typecheck && node --import tsx --test \"test/desktop-*.test.ts\"",
-    "desktop:install": "npm run desktop:build && tsx scripts/install-desktop.ts",
-    "desktop:native-check": "npm run desktop:build && node --import tsx --test --test-concurrency=1 test/native/desktop-quit.native.ts test/native/desktop-binding.native.ts test/native/desktop-fatal.native.ts",
-    "desktop:run": "npm run desktop:build && dist/desktop/Kepos.app/Contents/MacOS/Kepos",
-    "desktop:typecheck": "tsc -p tsconfig.desktop.json --noEmit",
     "web:dev": "npm run dev --workspace @lamplitisles/kepos-web",
     "web:build": "npm run build --workspace @lamplitisles/kepos-web",
     "web:test": "npm run test --workspace @lamplitisles/kepos-web",
@@ -106,42 +33,25 @@
     "web:deploy:dry-run": "npm run deploy:dry-run --workspace @lamplitisles/kepos-web",
     "web:deploy": "npm run deploy --workspace @lamplitisles/kepos-web",
     "vpn:build": "mkdir -p .build && cc -std=c11 -O2 -Wall -Wextra -Werror -o .build/kepos-tun src/vpn/native/tun.c",
-    "kepos": "tsx src/cli/main.ts"
+    "kepos": "tsx src/cli/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "check": "npm run vpn:build && npm run typecheck && npm test && npm run web:verify"
   },
   "dependencies": {
     "b4a": "^1.8.1",
-    "bare-crypto": "^1.15.3",
-    "bare-dgram": "^1.1.1",
-    "bare-events": "^2.9.1",
-    "bare-fs": "^4.7.4",
-    "bare-http1": "^4.5.7",
-    "bare-net": "^2.3.2",
-    "bare-os": "^3.9.3",
-    "bare-path": "^3.1.1",
-    "bare-process": "^4.5.1",
-    "bare-stream": "^2.13.3",
-    "bare-url": "^2.4.6",
-    "compact-encoding": "^3.3.0",
     "fs-native-extensions": "1.5.1",
     "hypercore-crypto": "^3.7.0",
     "hyperdht": "^6.33.0",
-    "protomux": "^3.11.0",
     "smol-toml": "^1.7.0",
-    "sodium-universal": "^5.0.1",
-    "streamx": "^2.28.0",
-    "tsx": "^4.23.1",
-    "uqr": "^0.1.3",
-    "which-runtime": "^1.4.0"
+    "tsx": "^4.23.1"
   },
   "devDependencies": {
+    "@hyperswarm/secret-stream": "^6.9.1",
     "@types/b4a": "^1.6.5",
     "@types/node": "^26.1.1",
-    "bare-bundle": "1.10.0",
-    "bare-link": "^3.3.0",
-    "bare-pack": "^2.2.1",
-    "extract-zip": "^2.0.1",
-    "https-proxy-agent": "^9.1.0",
     "lefthook": "^2.1.10",
+    "streamx": "^2.28.0",
     "typescript": "^7.0.2",
     "wrangler": "^4.118.0"
   },

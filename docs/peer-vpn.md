@@ -18,8 +18,7 @@ The CLI needs Node and the normal project dependencies, `ip` from iproute2,
 `/dev/net/tun`, and `CAP_NET_ADMIN` in its network namespace for TUN, address,
 and route setup. Run under an appropriately privileged service account or
 namespace; permissions failures and missing executables are reported. The
-helper is a separate binary at `.build/kepos-tun`; this build does not package
-it into desktop or mobile releases. Run `peer vpn` with an explicit helper path:
+helper is a separate binary at `.build/kepos-tun`. Run `peer vpn` with an explicit helper path:
 
 ```sh
 npm run kepos -- peer vpn --state /path/to/peer --config /path/to/config.toml \
@@ -30,9 +29,6 @@ Initialize each identity with `setup peer` and exchange public keys securely.
 Give each peer a different stable IPv4 unicast address. For example, peer A:
 
 ```toml
-services = []
-bindings = []
-
 [[peers]]
 label = "b"
 public_key = "<peer-b-public-key>"
@@ -77,9 +73,7 @@ TUN output can be dropped when another peer is writing to the device.
 The helper owns a nonpersistent TUN. Closing it removes the interface and its
 routes, including on startup failure or process termination. Route creation uses
 `ip route add`, so a conflicting existing route causes startup to fail instead
-of replacing it. VPN mode and `peer run` use the same runtime lock; only one
-can own the identity. Service bindings, the HTTP gateway, service pairing and
-metrics are unavailable while VPN mode runs. Stop VPN mode to use them.
+of replacing it. The VPN runtime uses an identity lock so only one runtime can own the identity.
 
 Existing DNS must resolve a service name to the intended peer's VPN address;
 Kepos does not alter DNS or Caddy, issue certificates, or configure application
