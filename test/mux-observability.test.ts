@@ -369,3 +369,10 @@ test("publisher reports when the local target closes a channel", async () => {
   subscriber.close();
   publisher.close();
 });
+
+test("DHT snapshots omit unrepresentable kernel drop counts", () => {
+  const stream = {
+    rawStream: { packetsTransmitted: 6, socket: { packetsDroppedByKernel: Number((1n << 64n) - 1n) } },
+  } as unknown as DhtStream;
+  assert.deepEqual(dhtStreamSnapshot(stream), { udx: { packetsTransmitted: 6 } });
+});

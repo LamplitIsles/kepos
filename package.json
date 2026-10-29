@@ -105,6 +105,7 @@
     "web:verify": "npm run verify --workspace @lamplitisles/kepos-web",
     "web:deploy:dry-run": "npm run deploy:dry-run --workspace @lamplitisles/kepos-web",
     "web:deploy": "npm run deploy --workspace @lamplitisles/kepos-web",
+    "vpn:build": "mkdir -p .build && cc -std=c11 -O2 -Wall -Wextra -Werror -o .build/kepos-tun src/vpn/native/tun.c",
     "kepos": "tsx src/cli/main.ts"
   },
   "dependencies": {

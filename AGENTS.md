@@ -36,6 +36,11 @@
 
 ## Canonical peer runtime
 
+- The Linux `peer vpn` runtime uses the same peer identity and runtime lock as
+  `peer run` and cannot run concurrently with it. Preserve authenticated
+  peer-to-address binding, default-deny inbound TCP grants, and bounded packet
+  handling. See `docs/peer-vpn.md` for the implemented platform and protocol
+  boundaries; VPN grants do not replace service grants in `peer run`.
 - New repository-owned configuration uses `peers`, `services`, and `bindings`
   in the strict snake_case TOML schema. Use `setup peer`, `peer key`, `peer
   status`, `peer pair`/`peer trust`, `peer convert`, and `peer run`; do not add

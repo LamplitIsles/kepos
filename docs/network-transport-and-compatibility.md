@@ -3,9 +3,11 @@
 Status: current implementation boundary
 Date: 2026-09-11
 
-Kepos connects one authenticated peer identity to another and exposes named
-services at the application boundary. It does not create an IP subnet, carry
-TCP/UDP packets end to end, or accept arbitrary remote targets.
+Kepos connects authenticated peer identities. Its exclusive Linux VPN mode
+carries authorized IPv4 TCP packets; see [peer VPN](peer-vpn.md). Its service
+mode exposes named services at the application boundary and does not carry
+TCP/UDP packets end to end or accept arbitrary remote targets. The remainder
+of this document describes service mode.
 
 ## Current transport stack
 

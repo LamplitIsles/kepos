@@ -207,12 +207,18 @@ function udxStreamSnapshot(rawStream: unknown): Record<string, number> | undefin
       "bytesReceived",
       "packetsReceived",
     ]),
-    ...(socket
-      ? numericFields(socket, ["packetsDroppedByKernel"])
-      : {}),
+    ...(socket ? safeCountField(socket, "packetsDroppedByKernel") : {}),
   };
 
   return Object.keys(snapshot).length > 0 ? snapshot : undefined;
+}
+
+function safeCountField(source: Record<string, unknown>, key: string): Record<string, number> {
+  const value = readProperty(source, key);
+  // Native 64-bit counters may be rounded or expose an unsupported sentinel.
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? { [key]: value }
+    : {};
 }
 
 function numericFields(

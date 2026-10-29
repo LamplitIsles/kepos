@@ -6,8 +6,11 @@ remains the installation and end-user guide.
 
 ## System boundary
 
-Kepos is a service-scoped proxy for split TCP byte streams and bounded UDP
-datagrams. It is not an IP router, VPN, TUN device, or blind target forwarder.
+Kepos has two exclusive runtimes using one peer identity and runtime lock.
+The Linux VPN runtime carries authorized IPv4 TCP packets over Noise and uses
+a TUN interface; see [peer VPN](peer-vpn.md). The service runtime is a
+service-scoped proxy for split TCP byte streams and bounded UDP datagrams.
+The rest of this document describes the service runtime.
 
 ```text
 local client
@@ -73,8 +76,9 @@ as a partially usable connection.
 ## Configuration and ownership
 
 `src/config.ts` is the strict in-memory schema and `src/app-config.ts` is the
-snake_case TOML boundary. The root has only optional `network`/`gateway`/
-`metrics` and required `peers`, `services`, and `bindings` arrays.
+snake_case TOML boundary. The root has optional `network`, `gateway`,
+`metrics`, and `vpn` settings and required `peers`, `services`, and `bindings`
+arrays.
 
 ```text
 peers       authenticated remote identity + local dial/accept direction
@@ -83,6 +87,7 @@ bindings    locally owned endpoint for one remote peer/service
 network     DHT bootstrap and route preference
 gateway     local HTTP host/port/domain
 metrics     optional Prometheus host/port listener
+vpn         local IPv4 address and per-peer address and TCP policy
 ```
 
 A service source is exactly one fixed loopback port or

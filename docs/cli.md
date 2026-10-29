@@ -1,6 +1,6 @@
 # CLI, identity, and configuration
 
-The shipped CLI uses one canonical peer runtime. A peer has one persistent
+The CLI offers a peer service runtime and an exclusive Linux peer VPN runtime. A peer has one persistent
 identity and one configuration owner. Connection direction is selected per
 configured peer; service provision, service consumption, and local bindings
 are separate policy entries.
@@ -8,7 +8,7 @@ are separate policy entries.
 The commands are intentionally a hard cutover. `publisher`, `subscriber`, and
 `device` command groups, their role-specific flags, old TOML tables, and old
 state paths are not aliases. They fail as unknown commands/options. Every
-admitted canonical peer must establish `kepos/peer-control/1`.
+admitted service-runtime peer must establish `kepos/peer-control/1`. VPN mode uses its own versioned handshake.
 
 ## Commands
 
@@ -19,7 +19,8 @@ kepos peer status      Inspect canonical identity/config without starting DHT
 kepos peer pair        Add or replace an explicitly trusted peer in TOML
 kepos peer trust       Alias for peer pair
 kepos peer convert     Offline-convert one selected legacy identity
-kepos peer run         Start the canonical peer runtime
+kepos peer run         Start the canonical service runtime
+kepos peer vpn         Start the exclusive Linux VPN runtime
 ```
 
 Every command accepts only the options shown in its section. `--config` and
@@ -53,7 +54,7 @@ npm run kepos -- peer key \
 
 ## Canonical TOML
 
-The file contains only network/gateway settings and three peer-oriented
+The file contains network/gateway settings, optional VPN settings, and three peer-oriented
 collections. Keys in TOML are snake_case; the in-memory TypeScript API uses
 camelCase.
 
@@ -356,3 +357,9 @@ Operators should admit the HyperDHT candidate listener range, normally
 also uses an ephemeral DHT client socket and HyperDHT manages ephemeral UDX
 connection sockets. The candidate listener range does not cover UDX connection sockets;
 it does not guarantee the encrypted data path by itself.
+
+## Linux peer VPN
+
+See [peer VPN](peer-vpn.md) for the separate Linux runtime, configuration,
+privileges, policy, build, and limitations. VPN mode and service mode share a
+single identity lock and cannot run at the same time.

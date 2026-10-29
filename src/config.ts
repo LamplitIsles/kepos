@@ -91,7 +91,13 @@ export interface PeerMetricsConfig {
   port: number;
 }
 
+export interface PeerVpnConfig {
+  address: string;
+  peers: Array<{ peer: string; address: string; allowTcp: "all" | number[] }>;
+}
+
 export interface PeerConfig {
+  vpn?: PeerVpnConfig;
   network?: PeerNetworkConfig;
   gateway?: PeerGatewayConfig;
   metrics?: PeerMetricsConfig;
@@ -268,7 +274,7 @@ export function parsePeerConfig(value: unknown): PeerConfig {
   if (!isRecord(value)) throw new Error("peer config must be an object");
   rejectUnknownFields(
     value,
-    ["network", "gateway", "metrics", "peers", "services", "bindings"],
+    ["network", "gateway", "metrics", "vpn", "peers", "services", "bindings"],
     "peer config",
   );
   if (!Array.isArray(value.peers)) throw new Error("peers must be an array");
@@ -307,6 +313,7 @@ export function parsePeerConfig(value: unknown): PeerConfig {
     bindingKeys.add(key);
   }
   return {
+    ...(value.vpn === undefined ? {} : { vpn: parsePeerVpn(value.vpn, peers) }),
     ...(value.network === undefined ? {} : { network: parsePeerNetwork(value.network) }),
     ...(value.gateway === undefined ? {} : { gateway: parsePeerGateway(value.gateway) }),
     ...(value.metrics === undefined ? {} : { metrics: parsePeerMetrics(value.metrics) }),
@@ -314,6 +321,51 @@ export function parsePeerConfig(value: unknown): PeerConfig {
     services,
     bindings,
   };
+}
+
+function parseVpnAddress(value: unknown, field: string): string {
+  if (typeof value !== "string") throw new Error(`${field} must be a unicast IPv4 address`);
+  const parts = value.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^(0|[1-9][0-9]{0,2})$/.test(part) || Number(part) > 255)) {
+    throw new Error(`${field} must be a unicast IPv4 address`);
+  }
+  const first = Number(parts[0]);
+  if (first === 0 || first === 127 || first >= 224 || (first === 169 && Number(parts[1]) === 254)) {
+    throw new Error(`${field} must be a unicast IPv4 address`);
+  }
+  return value;
+}
+
+function parsePeerVpn(value: unknown, peers: readonly PeerDefinition[]): PeerVpnConfig {
+  if (!isRecord(value)) throw new Error("vpn must be an object");
+  rejectUnknownFields(value, ["address", "peers"], "vpn");
+  const address = parseVpnAddress(value.address, "vpn.address");
+  if (!Array.isArray(value.peers)) throw new Error("vpn.peers must be an array");
+  if (value.peers.length > 16) throw new Error("vpn supports at most 16 peers");
+  const addresses = new Set([address]);
+  const keys = new Set<string>();
+  const entries = value.peers.map((item, index) => {
+    const field = `vpn.peers[${index}]`;
+    if (!isRecord(item)) throw new Error(`${field} must be an object`);
+    rejectUnknownFields(item, ["peer", "address", "allowTcp"], field);
+    const peer = parsePeerReference(item.peer, `${field}.peer`);
+    resolvePeerReference(peer, peers, `${field}.peer`);
+    const key = keyHexPattern.test(peer) ? peer : peers.find((entry) => entry.label === peer)!.publicKey;
+    if (keys.has(key)) throw new Error(`${field} duplicates a VPN peer`);
+    keys.add(key);
+    const peerAddress = parseVpnAddress(item.address, `${field}.address`);
+    if (addresses.has(peerAddress)) throw new Error(`${field} duplicates a VPN address`);
+    addresses.add(peerAddress);
+    let allowTcp: "all" | number[] = [];
+    if (item.allowTcp === "all") allowTcp = "all";
+    else if (item.allowTcp !== undefined) {
+      if (!Array.isArray(item.allowTcp)) throw new Error(`${field}.allowTcp must be all or an array of TCP ports`);
+      allowTcp = item.allowTcp.map((port, i) => parsePeerPort(port, `${field}.allowTcp[${i}]`, false));
+      if (new Set(allowTcp).size !== allowTcp.length) throw new Error(`${field}.allowTcp contains a duplicate port`);
+    }
+    return { peer, address: peerAddress, allowTcp };
+  });
+  return { address, peers: entries };
 }
 
 function parsePeerMetrics(value: unknown): PeerMetricsConfig {

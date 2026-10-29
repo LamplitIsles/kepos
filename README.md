@@ -3,13 +3,17 @@
 [![CI](https://github.com/LamplitIsles/kepos/actions/workflows/check.yml/badge.svg?branch=main&event=push)](https://github.com/LamplitIsles/kepos/actions/workflows/check.yml)
 [![codecov](https://codecov.io/github/LamplitIsles/kepos/graph/badge.svg?branch=main)](https://app.codecov.io/github/LamplitIsles/kepos)
 
-**Share a service, not a network.**
+**Connect trusted devices and services.**
 
-Kepos gives trusted devices access to selected services without exposing a
-public service port or joining every device to a virtual subnet. Every runtime
-has one persistent peer identity. A peer can dial one configured relationship,
-accept another, provide local services, consume explicitly granted services,
-and bind those services to local endpoints.
+Kepos has a Linux IPv4 peer VPN foundation for direct TCP access between
+explicitly trusted devices, as well as its existing named service proxies.
+VPN mode uses stable per-peer addresses and inbound TCP port grants. It is
+exclusive with the service-proxy runtime for the same identity. See the
+[Linux peer VPN guide](docs/peer-vpn.md) for setup and current limitations.
+
+Each runtime has one persistent peer identity. In service-proxy mode a peer
+can dial one configured relationship, accept another, provide local services,
+consume explicitly granted services, and bind those services to local endpoints.
 
 The canonical configuration keeps those concerns separate:
 
@@ -44,6 +48,7 @@ The **[Kepos user documentation](https://kepos.guion.io/docs/)** is the
 primary installation and end-user guide. Repository operators and contributors
 can continue with:
 
+- [Linux peer VPN](docs/peer-vpn.md)
 - [CLI, identity, and configuration](docs/cli.md)
 - [Developer architecture](docs/architecture.md)
 - [Nix, container, and Kubernetes deployment](docs/deployment.md)

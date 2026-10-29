@@ -44,8 +44,9 @@ export interface CliDependencies {
   getPeerPublicKey: (stateDir: string) => Promise<string>;
   convertPeerIdentity: typeof convertPeerIdentity;
   startPeer: (options: StartPeerOptions) => Promise<RunningPeer>;
+  startVpn: typeof import("../vpn/runtime.js").startVpn;
   acquirePeerRuntimeLock: (stateDir: string) => Promise<RuntimeLock>;
-  waitForSignal: (stop: () => Promise<void>) => Promise<void>;
+  waitForSignal: (stop: () => Promise<void>, signal?: AbortSignal) => Promise<void>;
   scheduleConfigReload: (callback: () => void, intervalMs: number) => () => void;
 }
 
@@ -61,6 +62,7 @@ export function createDefaultCliDependencies(
     getPeerPublicKey,
     convertPeerIdentity,
     startPeer,
+    startVpn: async (options) => (await import("../vpn/runtime.js")).startVpn(options),
     acquirePeerRuntimeLock,
     waitForSignal,
     scheduleConfigReload: (callback, intervalMs) => {
@@ -82,6 +84,7 @@ export const CLI_USAGE = [
   "  peer pair        Add an explicitly approved peer to the config",
   "  peer convert     Offline-convert one selected legacy identity",
   "  peer run         Run the canonical peer runtime",
+  "  peer vpn         Run the exclusive Linux VPN runtime",
 ].join("\n");
 
 export async function runCli(
@@ -115,6 +118,10 @@ export async function runCli(
   }
   if (group === "peer" && action === "convert") {
     await peerConvertCommand(rest, dependencies);
+    return;
+  }
+  if (group === "peer" && action === "vpn") {
+    await peerVpnCommand(rest, dependencies);
     return;
   }
   if (group === "peer" && action === "run") {
@@ -309,6 +316,64 @@ async function peerRunCommand(
     await reloadTask;
     await running?.stop();
     await lock.release();
+  }
+}
+
+async function peerVpnCommand(arguments_: readonly string[], dependencies: CliDependencies): Promise<void> {
+  const options = parseArguments(arguments_, ["--state", "--config", "--tun-helper"]);
+  const stateDir = path.resolve(options.get("--state") ?? defaultKeposPeerStatePath());
+  const configPath = path.resolve(options.get("--config") ?? defaultKeposConfigPath());
+  const helper = path.resolve(required(options, "--tun-helper"));
+  const config = requireConfig(await dependencies.loadConfig(configPath));
+  const lock = await dependencies.acquirePeerRuntimeLock(stateDir);
+  let running: Awaited<ReturnType<CliDependencies["startVpn"]>> | undefined;
+  let cancelReload: (() => void) | undefined;
+  let reloadTask = Promise.resolve();
+  let closing = false;
+  const signalAbort = new AbortController();
+  let signalTask: Promise<void> | undefined;
+  let fatal!: (error: Error) => void;
+  const failed = new Promise<Error>((resolve) => { fatal = resolve; });
+  async function start(next: PeerConfig): Promise<void> {
+    const instance = await dependencies.startVpn({ stateDir, config: next, helper, log: dependencies.stderr });
+    running = instance;
+    void instance.failed.then((error) => { if (!closing && running === instance) fatal(error); });
+    dependencies.stdout(`VPN running: key=${instance.peerKey} interface=${instance.interfaceName}`);
+  }
+  let current = JSON.stringify(config);
+  try {
+    await start(config);
+    cancelReload = dependencies.scheduleConfigReload(() => {
+      reloadTask = reloadTask.then(async () => {
+        if (closing) return;
+        try {
+          const next = requireConfig(await dependencies.loadConfig(configPath));
+          const serialized = JSON.stringify(next);
+          if (serialized === current) return;
+          await running?.stop();
+          running = undefined;
+          current = serialized;
+          await start(next);
+        } catch (error) {
+          fatal(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    }, 1000);
+    const stop = async (): Promise<void> => {
+      closing = true;
+      cancelReload?.();
+      await reloadTask;
+      await running?.stop();
+    };
+    signalTask = dependencies.waitForSignal(stop, signalAbort.signal);
+    const result = await Promise.race([signalTask.then(() => undefined), failed]);
+    if (result) throw result;
+  } finally {
+    closing = true;
+    signalAbort.abort();
+    cancelReload?.();
+    await reloadTask;
+    try { await running?.stop(); } finally { await lock.release(); }
   }
 }
 

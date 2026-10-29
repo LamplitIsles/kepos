@@ -1,7 +1,7 @@
 # Kepos
 
-Kepos connects trusted peers so either end of an established connection can
-consume named services explicitly made available by the other.
+Kepos connects authenticated peers to consume explicitly shared services or
+communicate over a peer VPN.
 
 ## Language
 
@@ -20,8 +20,8 @@ A temporary opportunity to approve another peer's connection. Approval admits
 the peer; access to published services is granted separately.
 
 **Peer**:
-A Kepos participant with one persistent identity that can provide and consume
-authorized services over its connections to other peers.
+A Kepos participant with one persistent identity that can connect to other
+peers for authorized service or VPN access.
 
 **Peer Identity**:
 The persistent cryptographic identity used both to establish and to accept
@@ -41,6 +41,19 @@ peers using the same identity.
 An operator's local, human-readable name for a peer. It identifies the peer in
 configuration, management, and observability surfaces, not a person.
 _Avoid_: Person name, account name
+
+**Peer VPN**:
+An authenticated IP connection between peers, governed by the receiving
+peer's network access policy. It runs separately from the service runtime.
+
+**VPN Address**:
+The configured IP address associated with a peer identity in a peer VPN. Each
+peer enforces the mapping for traffic received from that identity.
+
+**VPN Port Grant**:
+A receiving peer's permission for another peer to initiate TCP connections to
+specified local ports or all supported TCP ports. An absent grant denies new
+inbound connections.
 
 **Service Provider**:
 The peer that makes a named service available and owns its source and access
@@ -126,3 +139,8 @@ at startup. Every admitted canonical peer establishes `kepos/peer-control/1`
 before it can use services. Reverse UDP remains unsupported. See
 [ADR 0013](docs/adr/0013-separate-connection-roles-from-service-roles.md) and
 the [CLI contract](docs/cli.md) for operational details.
+
+The Linux `peer vpn` runtime uses the same peer identity and runtime lock but
+does not run the service gateway or bindings at the same time. Its initial
+overlay supports IPv4 TCP with peer and port grants; see the
+[VPN guide](docs/peer-vpn.md) for the current operational boundaries.

@@ -89,6 +89,7 @@ export function parseKeposConfig(source: string): KeposConfig {
     "network",
     "gateway",
     "metrics",
+    "vpn",
     "peers",
     "services",
     "bindings",
@@ -151,6 +152,7 @@ export function parseKeposConfig(source: string): KeposConfig {
   });
 
   return parsePeerConfig({
+    ...(root.vpn === undefined ? {} : { vpn: parseTomlVpn(root.vpn) }),
     ...(root.network === undefined
       ? {}
       : { network: parseTomlNetwork(root.network) }),
@@ -182,6 +184,12 @@ export function serializeKeposConfig(config: KeposConfig): string {
       ...(kind === undefined || kind === "tcp" ? {} : { kind }),
     })),
   };
+  if (parsed.vpn) {
+    value.vpn = {
+      address: parsed.vpn.address,
+      peers: parsed.vpn.peers.map(({ peer, address, allowTcp }) => ({ peer, address, allow_tcp: allowTcp })),
+    };
+  }
   if (parsed.network) {
     value.network = {
       ...(parsed.network.bootstrap
@@ -214,6 +222,21 @@ export function serializeKeposConfig(config: KeposConfig): string {
   const source = stringify(value);
   parseKeposConfig(source);
   return source;
+}
+
+function parseTomlVpn(value: unknown): unknown {
+  const vpn = requireTable(value, "vpn");
+  rejectUnknownFields(vpn, "vpn", ["address", "peers"]);
+  if (!Array.isArray(vpn.peers)) throw new Error("vpn.peers must be an array");
+  return {
+    address: vpn.address,
+    peers: vpn.peers.map((value, index) => {
+      const field = `vpn.peers[${index}]`;
+      const peer = requireTable(value, field);
+      rejectUnknownFields(peer, field, ["peer", "address", "allow_tcp"]);
+      return { peer: peer.peer, address: peer.address, allowTcp: peer.allow_tcp };
+    }),
+  };
 }
 
 function serializeService(service: PeerService): Record<string, unknown> {
