@@ -25,7 +25,6 @@ export function peerRuntimeLockPath(stateDir: string): string {
 export async function acquirePeerRuntimeLock(
   stateDir: string,
 ): Promise<RuntimeLock> {
-  await mkdir(stateDir, { mode: 0o700, recursive: true });
   return acquireRuntimeLock({
     lockPath: peerRuntimeLockPath(stateDir),
     conflictMessage: "Peer identity is already in use",

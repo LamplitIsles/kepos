@@ -11,7 +11,7 @@ export async function startVpn(options: {
   config: PeerConfig;
   helper: string;
   dht?: DhtNode;
-  openTun?: (options: { helper: string; address: string; peerAddresses: readonly string[] }) => Promise<PacketDevice>;
+  openTun?: (options: { helper: string; address: string; peerAddresses: readonly string[]; dialerPeerAddresses?: readonly string[]; checkRouteConflicts?: boolean }) => Promise<PacketDevice>;
   log?: (message: string) => void;
   onPeerStatus?: (peer: { key: string; label: string; connected: boolean }) => void;
   now?: () => number;
@@ -19,11 +19,16 @@ export async function startVpn(options: {
 }): ReturnType<typeof startVpnEngine> {
   if (!options.config.vpn) throw new Error("VPN mode requires a [vpn] configuration");
   const identity = await loadPeerIdentity(options.stateDir);
+  const dialerPeerAddresses = options.config.vpn.peers.filter((peer) =>
+    options.config.peers.some((definition) =>
+      (definition.label === peer.peer || definition.publicKey === peer.peer) && definition.connection === "dial"),
+  ).map((peer) => peer.address);
   return startVpnEngine({
     keyPair: keyPairFromSeed(identity.seed),
     config: options.config,
     dht: options.dht,
-    openTun: (deviceOptions) => (options.openTun ?? openLinuxTun)({ ...deviceOptions, helper: options.helper, checkRouteConflicts: !!options.enrollment }),
+    openTun: (deviceOptions) => (options.openTun ?? openLinuxTun)({ ...deviceOptions, helper: options.helper, checkRouteConflicts: !!options.enrollment,
+      dialerPeerAddresses }),
     log: options.log,
     onPeerStatus: options.onPeerStatus,
     enrollment: options.enrollment,

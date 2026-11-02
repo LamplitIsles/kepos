@@ -1,6 +1,11 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
+import { loadPeerIdentity } from "../state/peer.js";
+import { keyPairFromSeed } from "../mux/hyperdht.js";
+import { pairWithReceiver, PairError } from "../vpn/pair.js";
+import { checkDialerAddresses } from "../vpn/linux-tun.js";
+import { readInvitation } from "./invitation-input.js";
 
 import {
   loadKeposConfig,
@@ -38,6 +43,9 @@ export interface CliDependencies {
   acquirePeerRuntimeLock: (stateDir: string) => Promise<RuntimeLock>;
   waitForSignal: (stop: () => Promise<void>, signal?: AbortSignal) => Promise<void>;
   scheduleConfigReload: (callback: () => void, intervalMs: number) => () => void;
+  readInvitation: typeof readInvitation;
+  pairWithReceiver: typeof pairWithReceiver;
+  checkDialerAddresses: typeof checkDialerAddresses;
 }
 
 export function createDefaultCliDependencies(
@@ -52,6 +60,9 @@ export function createDefaultCliDependencies(
     getPeerPublicKey,
     startVpn: async (options) => (await import("../vpn/runtime.js")).startVpn(options),
     acquirePeerRuntimeLock,
+    readInvitation,
+    pairWithReceiver,
+    checkDialerAddresses,
     waitForSignal,
     scheduleConfigReload: (callback, intervalMs) => {
       const timer = setInterval(callback, intervalMs);
@@ -70,12 +81,17 @@ export const CLI_USAGE = [
   "  peer key         Print the public key for a peer state directory",
   "  peer status      Inspect identity and configuration",
   "  peer pair        Add an explicitly approved peer to the config",
+  "  peer join        Join a managed receiver using a private invitation",
   "  peer vpn         Run the exclusive Linux VPN runtime",
   "  peer receiver    Run a managed receiver with a device address pool",
   "  peer invite      Create a one-use invitation on the running receiver",
   "  peer devices     List receiver devices",
   "  peer grant       Set a device's inbound TCP grant",
   "  peer revoke      Revoke a receiver device",
+  "",
+  "peer join [--state PATH] [--config PATH] reads the invitation privately from a terminal.",
+  "Defaults: $XDG_STATE_HOME/kepos-neo/peer and $XDG_CONFIG_HOME/kepos/config.toml",
+  "(or ~/.local/state and ~/.config when XDG variables are unset).",
 ].join("\n");
 
 export async function runCli(
@@ -105,6 +121,10 @@ export async function runCli(
   }
   if (group === "peer" && action === "pair") {
     await peerPairCommand(rest, dependencies);
+    return;
+  }
+  if (group === "peer" && action === "join") {
+    await peerJoinCommand(rest, dependencies);
     return;
   }
   if (group === "peer" && action === "vpn") {
@@ -173,20 +193,63 @@ async function setupPeerCommand(
   const stateDir = path.resolve(
     options.get("--state") ?? defaultKeposPeerStatePath(),
   );
-  const result = await dependencies.setupPeer({ stateDir });
-  const configPath = path.resolve(
-    options.get("--config") ?? defaultKeposConfigPath(),
-  );
-  let existing: KeposConfig | undefined;
+  const lock = await dependencies.acquirePeerRuntimeLock(stateDir);
   try {
-    existing = await dependencies.loadConfig(configPath);
-  } catch (error) {
-    if (!isMissingConfigError(error)) throw error;
-  }
-  if (!existing) {
-    await dependencies.saveConfig(emptyPeerConfig(), configPath);
-  }
-  dependencies.stdout(`Peer key: ${result.publicKey}`);
+    const configPath = path.resolve(
+      options.get("--config") ?? defaultKeposConfigPath(),
+    );
+    let existing: KeposConfig | undefined;
+    try {
+      existing = await dependencies.loadConfig(configPath);
+    } catch (error) {
+      if (!isMissingConfigError(error)) throw error;
+    }
+    if (existing && (existing.peers.length || existing.vpn)) await loadPeerIdentity(stateDir);
+    const result = await dependencies.setupPeer({ stateDir });
+    if (!existing) {
+      await dependencies.saveConfig(emptyPeerConfig(), configPath);
+    }
+    dependencies.stdout(`Peer key: ${result.publicKey}`);
+  } finally { await lock.release(); }
+}
+
+async function peerJoinCommand(arguments_: readonly string[], dependencies: CliDependencies): Promise<void> {
+  if (process.platform !== "linux") throw new Error("peer join is supported only on Linux");
+  const options = parseArguments(arguments_, ["--state", "--config"]);
+  const stateDir = path.resolve(options.get("--state") ?? defaultKeposPeerStatePath());
+  const configPath = path.resolve(options.get("--config") ?? defaultKeposConfigPath());
+  const lock = await dependencies.acquirePeerRuntimeLock(stateDir);
+  try {
+    let existing: KeposConfig | undefined;
+    try { existing = await dependencies.loadConfig(configPath); }
+    catch (error) { if (!isMissingConfigError(error)) throw error; }
+    if (existing && (existing.peers.length || existing.vpn)) {
+      throw new Error("Config already contains peers or VPN settings; preserve it and use a separate identity and config");
+    }
+    await dependencies.setupPeer({ stateDir });
+    const identity = await loadPeerIdentity(stateDir);
+    const invitation = await dependencies.readInvitation();
+    let config: PeerConfig;
+    try {
+      config = await dependencies.pairWithReceiver({ invitation, keyPair: keyPairFromSeed(identity.seed), network: existing?.network });
+    } catch (error) {
+      if (error instanceof PairError && error.reason === "unknown") throw new Error("Pairing outcome unknown; the receiver may have admitted this identity. Ask its administrator to inspect peer devices before taking further action; do not replay the invitation.");
+      if (error instanceof PairError) throw new Error(`Pairing ${error.reason}; no admission confirmed. Ask the receiver administrator for guidance.`);
+      throw new Error("Pairing failed; the receiver may have admitted this identity. Ask its administrator to inspect peer devices; do not replay the invitation.");
+    }
+    try {
+      await dependencies.checkDialerAddresses(config.vpn!.address, config.vpn!.peers.map((peer) => peer.address));
+      let current: KeposConfig | undefined;
+      try { current = await dependencies.loadConfig(configPath); }
+      catch (error) { if (!isMissingConfigError(error)) throw error; }
+      if (JSON.stringify(current) !== JSON.stringify(existing)) throw new Error("Config changed during pairing; preserve the current file");
+      await dependencies.saveConfig(config, configPath);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "local error";
+      throw new Error(`Receiver accepted this identity but local configuration was not saved: ${detail}. Ask its administrator to inspect peer devices before taking further action; do not replay the invitation.`);
+    }
+    dependencies.stdout(`Joined receiver; configuration saved to ${configPath}`);
+  } finally { await lock.release(); }
 }
 
 async function peerKeyCommand(

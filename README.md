@@ -10,7 +10,7 @@ npm run vpn:build
 npm run kepos -- setup peer --state /path/to/peer --config /path/to/config.toml
 ```
 
-Run a managed Linux receiver and privately share a one-use invitation to pair a macOS device, or explicitly configure peers with `peer vpn`. See the [VPN guide](docs/peer-vpn.md) for configuration, prerequisites, security boundaries, and limitations. The [CLI reference](docs/cli.md) describes identity and peer admission commands.
+Run a managed Linux receiver and privately share a one-use invitation to pair a Linux or macOS device, or explicitly configure peers with `peer vpn`. On Linux, `peer join` reads the invitation at a hidden terminal prompt and saves the resulting configuration; `peer vpn` connects in the foreground. See the [VPN guide](docs/peer-vpn.md) for configuration, prerequisites, security boundaries, and limitations. The [CLI reference](docs/cli.md) describes identity and peer admission commands.
 
 The current implementation does not provide application UDP, DNS management, subnet routing, or mobile VPN clients. The macOS client is experimental and its managed pairing path has not yet been verified on a real Mac. A peer key identifies a device; applications remain responsible for their own user authentication.
 

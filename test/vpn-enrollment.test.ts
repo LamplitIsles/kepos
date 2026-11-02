@@ -13,6 +13,8 @@ import { pairWithReceiver } from "../src/vpn/pair.js";
 import { formatInvitation } from "../src/vpn/invitation.js";
 import { randomBytes } from "node:crypto";
 import { EnrollmentRejected, type EnrollmentRejection } from "../src/vpn/enrollment-errors.js";
+import { createDefaultCliDependencies, runCli } from "../src/cli/main.js";
+import { loadKeposConfig } from "../src/app-config.js";
 
 class Linked extends Duplex {
   other?: Linked;
@@ -112,7 +114,8 @@ for (const transport of ["linked", "noise"] as const) test(`authenticated ${tran
     await store.grant(dialerKey, [443]);
     let closeAgain!: (error: Error) => void;
     const closedAgain = new Promise<Error>((resolve) => { closeAgain = resolve; });
-    running = await startVpnEngine({ keyPair: receiver, dht: server, now: Date.now,
+    let now = Date.now();
+    running = await startVpnEngine({ keyPair: receiver, dht: server, now: () => now,
       config: { peers: [{ label: "device", publicKey: dialerKey, connection: "accept" }], vpn: { address: "198.18.8.1", peers: [{ peer: "device", address: "198.18.8.2", allowTcp: [443] }] } },
       openTun: async () => ({ name: "fake", packets: { send: async () => { sentPackets++; }, receive: async () => { await closedAgain; } }, closed: closedAgain, close: async () => closeAgain(new Error("closed")) }),
       enrollment: { enroll: (key, secret) => store.enroll(key, secret), changed: () => { changed++; } },
@@ -122,6 +125,19 @@ for (const transport of ["linked", "noise"] as const) test(`authenticated ${tran
     assert.equal(reconnected.vpn?.address, "198.18.8.2");
     assert.deepEqual((await store.list())[0]?.allowTcp, [443]);
     assert.equal(sentPackets, 0);
+    if (process.platform === "linux") {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      now += 1_001;
+      const cliInvite = await store.createInvitation();
+      const configPath = path.join(root, "joined.toml");
+      const deps = createDefaultCliDependencies({ stdout: () => {}, stderr: () => {} });
+      deps.readInvitation = async () => cliInvite;
+      deps.checkDialerAddresses = async () => {};
+      deps.pairWithReceiver = (options) => pairWithReceiver({ ...options, dht: client });
+      await runCli(["peer", "join", "--state", dialerDir, "--config", configPath], deps);
+      assert.deepEqual(await loadKeposConfig(configPath), config);
+      assert.deepEqual((await store.list())[0]?.allowTcp, [443]);
+    }
   } finally { await running?.stop(); await rm(root, { recursive: true, force: true }); }
 });
 

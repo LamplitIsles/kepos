@@ -1,11 +1,12 @@
 # CLI reference
 
-Run the CLI with `npm run kepos -- <command>`. Use `--state` and `--config` to choose explicit locations; otherwise the CLI uses the user's XDG state and config directories. Keep the seed in `peer.json` private and exchange public keys over a trusted channel.
+Run the CLI with `npm run kepos -- <command>`. Use `--state` and `--config` to choose explicit locations; otherwise the defaults are `$XDG_STATE_HOME/kepos-neo/peer` and `$XDG_CONFIG_HOME/kepos/config.toml` (or `~/.local/state/kepos-neo/peer` and `~/.config/kepos/config.toml` when unset). Keep the seed in `peer.json` private and exchange public keys over a trusted channel.
 
 - `setup peer [--state PATH] [--config PATH]` creates or reuses a seed-only identity and creates an empty configuration if none exists.
 - `peer key [--state PATH]` prints the identity's public key.
 - `peer status [--state PATH] [--config PATH]` prints the key and configured peer count. This is configuration status, not a probe of a running process.
 - `peer pair --label LABEL --public-key HEX [--connection dial|accept] [--config PATH]` explicitly adds a trusted peer or changes its direction when both label and key match. Conflicting labels or keys are rejected. The default direction is `accept`. Configure that peer's VPN address and inbound grants separately in TOML.
+- `peer join [--state PATH] [--config PATH]` joins a managed receiver on Linux. Enter the invitation at the hidden interactive terminal prompt; it cannot be supplied as an option. A missing identity is created, an existing one reused, and an empty setup template filled. Existing peers or VPN settings are never overwritten. Disconnect the identity's running VPN first.
 - `peer vpn --tun-helper PATH [--state PATH] [--config PATH]` starts the Linux VPN and reloads changed configuration by restarting it.
 - `peer receiver --tun-helper PATH --pool CIDR [--state PATH] [--config PATH]` runs the managed receiver. Its config supplies one VPN address and no static peers. The pool is an explicitly chosen unused IPv4 network with a /16 through /30 prefix.
 - `peer invite [--state PATH] [--exclude-address IPV4]` asks the running receiver for a ten-minute, single-use bearer invitation. Its output is secret: share it privately and do not copy it to logs. The optional address excludes one currently unassigned usable pool address from this invitation's new allocation; see the recovery procedure in [Peer VPN](peer-vpn.md).

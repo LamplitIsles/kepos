@@ -234,6 +234,7 @@ test("VPN startup failure releases the identity lock", { skip: process.platform 
     await setupPeer({ stateDir: state });
     const deps = createDefaultCliDependencies({ stdout: () => {}, stderr: () => {} });
     deps.loadConfig = async () => ({ peers: [], vpn: { address: "198.18.0.1", peers: [] } });
+    deps.startVpn = async () => { throw new Error("Cannot start TUN helper"); };
     await assert.rejects(runCli(["peer", "vpn", "--state", state, "--config", path.join(root, "config.toml"), "--tun-helper", path.join(root, "missing")], deps), /TUN helper/);
     const lock = await acquirePeerRuntimeLock(state);
     await lock.release();

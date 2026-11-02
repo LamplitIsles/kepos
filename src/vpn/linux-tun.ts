@@ -1,6 +1,7 @@
 import { spawn, execFile } from "node:child_process";
 import type { Readable } from "node:stream";
 import { promisify } from "node:util";
+import { networkInterfaces } from "node:os";
 import { PacketFraming } from "./framing.js";
 
 const exec = promisify(execFile);
@@ -15,6 +16,23 @@ async function readRoutes(): Promise<unknown[]> {
   catch { throw new Error("Cannot inspect existing IPv4 routes"); }
   if (!Array.isArray(routes)) throw new Error("Cannot inspect existing IPv4 routes");
   return routes;
+}
+
+/** Snapshot exact local addresses and explicit host routes, allowing LAN subnets. */
+export async function checkDialerAddresses(address: string, peers: readonly string[], snapshot?: { local: Array<{ name: string; address: string }>; routes: unknown[] }): Promise<void> {
+  const local = snapshot?.local ?? Object.entries(networkInterfaces()).flatMap(([name, entries]) =>
+    (entries ?? []).filter((entry) => entry.family === "IPv4").map((entry) => ({ name, address: entry.address })));
+  const routes = snapshot?.routes ?? await readRoutes();
+  for (const target of [address, ...peers]) {
+    const found = local.find((entry) => entry.address === target);
+    if (found) throw new Error(`IPv4 address ${target} is already assigned on ${found.name}; resolve the address conflict`);
+    const route = routes.find((entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      const item = entry as Record<string, unknown>;
+      return (item.dst === target || item.dst === `${target}/32`) && item.protocol !== "kernel" && item.type !== "local" && item.type !== "broadcast";
+    }) as Record<string, unknown> | undefined;
+    if (route) throw new Error(`IPv4 host route ${target}/32 already exists${typeof route.dev === "string" ? ` on ${route.dev}` : ""}; resolve the route conflict`);
+  }
 }
 
 /** Fail before allocating if the pool overlaps a configured non-default route. */
@@ -33,8 +51,11 @@ export async function openLinuxTun(options: {
   address: string;
   peerAddresses: readonly string[];
   checkRouteConflicts?: boolean;
+  dialerPeerAddresses?: readonly string[];
+  checkAddresses?: typeof checkDialerAddresses;
 }): Promise<{ name: string; packets: PacketFraming; closed: Promise<Error>; close: () => Promise<void> }> {
   if (process.platform !== "linux") throw new Error("VPN TUN is supported only on Linux");
+  if (options.dialerPeerAddresses?.length) await (options.checkAddresses ?? checkDialerAddresses)(options.address, options.dialerPeerAddresses);
   const child = spawn(options.helper, [], { stdio: ["pipe", "pipe", "pipe", "pipe"] });
   child.stdin.on("error", () => undefined);
   child.stdout.on("error", () => undefined);
