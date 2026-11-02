@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.22 <25"
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -13,14 +13,16 @@
     "test": "vitest run",
     "check": "biome check .",
     "check:write": "biome check --write .",
-    "deploy": "npm run verify && wrangler deploy",
-    "deploy:dry-run": "npm run build && wrangler deploy --dry-run",
+    "deploy": "npm run verify && cf deploy",
+    "deploy:dry-run": "cf deploy --dry-run",
     "verify": "npm run build && npm run test && npm run check"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
-    "vite": "^8.1.5",
-    "vitest": "^4.1.10"
+    "@cloudflare/vite-plugin": "2.0.0-beta.v.9",
+    "cf": "1.0.0-beta.27",
+    "vite": "^8.3.5",
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",

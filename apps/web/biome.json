@@ -10,6 +10,6 @@
     "enabled": true
   },
   "files": {
-    "includes": ["**", "!dist", "!node_modules"]
+    "includes": ["**", "!dist", "!.cloudflare", "!.wrangler", "!node_modules"]
   }
 }

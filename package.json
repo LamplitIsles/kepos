@@ -9,13 +9,13 @@
   "type": "module",
   "packageManager": "npm@12.0.2",
   "engines": {
-    "node": ">=24 <25",
+    "node": ">=24.22 <25",
     "npm": ">=11 <13"
   },
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": ">=24 <25",
+      "version": ">=24.22 <25",
       "onFail": "error"
     },
     "packageManager": {
@@ -41,32 +41,28 @@
     "check": "npm run vpn:build && npm run typecheck && npm test && npm run macos:test && npm run web:verify"
   },
   "dependencies": {
-    "b4a": "^1.8.1",
-    "fs-native-extensions": "1.5.1",
+    "b4a": "^1.9.0",
+    "fs-native-extensions": "1.5.3",
     "hypercore-crypto": "^3.7.0",
-    "hyperdht": "^6.33.0",
-    "smol-toml": "^1.7.0",
-    "tsx": "^4.23.1"
+    "hyperdht": "^6.35.0",
+    "smol-toml": "^1.9.1",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
-    "@hyperswarm/secret-stream": "^6.9.1",
+    "@hyperswarm/secret-stream": "^6.9.2",
     "@types/b4a": "^1.6.5",
     "@types/node": "^26.1.1",
     "bare-link": "^4.1.0",
     "bare-pack": "^3.0.2",
     "esbuild": "^0.28.1",
     "lefthook": "^2.1.10",
-    "streamx": "^2.28.0",
-    "typescript": "^7.0.2",
-    "wrangler": "^4.118.0"
+    "streamx": "^2.28.1",
+    "typescript": "^7.0.2"
   },
   "allowScripts": {
     "lefthook@2.1.10": true,
-    "workerd@1.20260730.1": true,
+    "workerd@1.20261101.1": true,
     "esbuild@0.28.1": true
-  },
-  "overrides": {
-    "undici": "7.29.0"
   },
   "optionalDependencies": {
     "llvm-runtime-lld-linux-x64": "^23.1.3"

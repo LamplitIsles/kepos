@@ -24,8 +24,8 @@
 ## Website
 
 - The website lives in `apps/web` and uses the root npm workspace and lockfile.
-- Keep Cloudflare configuration in `apps/web/wrangler.jsonc`.
-- Cloudflare Git Builds are disabled. Run the local Wrangler deploy only after
+- Keep Cloudflare configuration in `apps/web/cloudflare.config.ts`.
+- Cloudflare Git Builds are disabled. Run the local `cf` deploy only after
   the website change has merged and passed checks.
 
 ## Peer VPN

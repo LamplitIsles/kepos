@@ -4,7 +4,7 @@
 
 - Use Node.js 24 and npm from the repository root.
 - Keep dependencies in the root `package-lock.json`; do not create a second lockfile.
-- Keep Cloudflare configuration in `wrangler.jsonc`.
+- Keep Cloudflare configuration in `cloudflare.config.ts`.
 
 ## Content and tests
 
