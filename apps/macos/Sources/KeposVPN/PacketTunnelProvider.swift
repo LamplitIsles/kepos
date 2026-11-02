@@ -1,0 +1,345 @@
+import Foundation
+import NetworkExtension
+import Darwin
+
+private enum TunnelFailure: Error {
+    case configuration, identity, extensionUnavailable, bridge, settings, timeout
+}
+
+private struct WorkletPeer: Decodable {
+    let publicKey: String
+    let label: String
+    let address: String
+    let connected: Bool
+}
+
+private struct WorkletMessage: Decodable {
+    let type: String
+    let address: String?
+    let peers: [WorkletPeer]?
+    let publicKey: String?
+    let connected: Bool?
+    #if KEPOS_ACCEPTANCE_DIAGNOSTICS
+    let event: String?
+    #endif
+}
+
+/// The system extension owns packetFlow, the identity lock and the worklet.
+final class PacketTunnelProvider: NEPacketTunnelProvider {
+    private let queue = DispatchQueue(label: "kepos.packet-tunnel")
+    #if KEPOS_ACCEPTANCE_DIAGNOSTICS
+    private let acceptanceDiagnostics = AcceptanceDiagnostics.systemLogger()
+    #endif
+    #if KEPOS_STATUS_DIAGNOSTICS
+    private let statusDiagnostics = StatusDiagnostics.systemLogger(.provider)
+    #endif
+    private var worklet: BareWorklet?
+    private var ipc: BareIPC?
+    private var decoder = WorkletFrames()
+    private var lockFD: Int32 = -1
+    private var outgoing = WorkletOutput()
+    private var peers: [[String: Any]] = []
+    private var running = false
+    private var stopped = true
+    private var stopping = false
+    private var settingsRequested = false
+    private var settingsApplied = false
+    private var generation = 0
+    private var startCompletion: ((Error?) -> Void)?
+    private var stopCompletion: (() -> Void)?
+    private var timeout: DispatchWorkItem?
+
+    override func startTunnel(options: [String: NSObject]? = nil, completionHandler: @escaping (Error?) -> Void) {
+        queue.async { [self] in
+            guard self.stopped else { completionHandler(TunnelFailure.bridge); return }
+            self.stopped = false
+            self.generation += 1
+            let generation = self.generation
+            self.stopping = false
+            self.settingsRequested = false
+            self.settingsApplied = false
+            self.startCompletion = completionHandler
+            do {
+                guard let config = options?["config"] as? String,
+                      config.utf8.count <= 24_000,
+                      let path = options?["stateDirectory"] as? String,
+                      !path.isEmpty else { throw TunnelFailure.configuration }
+                let directory = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+                let seed = try self.lockAndReadIdentity(directory)
+                let seedHex = seed.map { String(format: "%02x", $0) }.joined()
+                guard let worklet = BareWorklet(configuration: nil),
+                      let bundle = Bundle.main.path(forResource: "macos-worklet", ofType: "bundle") else {
+                    throw TunnelFailure.extensionUnavailable
+                }
+                self.worklet = worklet
+                guard let ipc = startWorkletIPC(start: { worklet.start(bundle, arguments: []) },
+                                                openIPC: { BareIPC(worklet: worklet) }) else {
+                    throw TunnelFailure.extensionUnavailable
+                }
+                self.ipc = ipc
+                self.readIPC()
+                try self.sendControl(["type": "start", "config": config, "seed": seedHex])
+                let timeout = DispatchWorkItem { [weak self] in
+                    guard let self, self.generation == generation else { return }
+                    self.fail(TunnelFailure.timeout)
+                }
+                self.timeout = timeout
+                self.queue.asyncAfter(deadline: .now() + 30, execute: timeout)
+            } catch {
+                self.fail(error)
+            }
+        }
+    }
+
+    override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
+        queue.async { [self] in
+            guard !self.stopped else { completionHandler(); return }
+            self.stopCompletion = completionHandler
+            self.stopping = true
+            self.running = false
+            self.outgoing.discardPackets()
+            do { try self.sendControl(["type": "stop"]) }
+            catch { self.fail(error); return }
+            self.timeout?.cancel()
+            let generation = self.generation
+            let timeout = DispatchWorkItem { [weak self] in
+                guard let self, self.generation == generation else { return }
+                self.fail(TunnelFailure.timeout)
+            }
+            self.timeout = timeout
+            self.queue.asyncAfter(deadline: .now() + 3, execute: timeout)
+        }
+    }
+
+    override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
+        #if KEPOS_STATUS_DIAGNOSTICS
+        let cycle = statusDiagnostics.begin()
+        statusDiagnostics.record(cycle, .handler)
+        #endif
+        queue.async {
+            guard let completionHandler else {
+                #if KEPOS_STATUS_DIAGNOSTICS
+                self.statusDiagnostics.record(cycle, .handlerNoCompletion)
+                #endif
+                return
+            }
+            #if KEPOS_STATUS_DIAGNOSTICS
+            self.statusDiagnostics.record(cycle, self.running ? .providerRunning : .providerStopped)
+            self.statusDiagnostics.record(cycle, .peerCount(self.peers.count))
+            #endif
+            let result: [String: Any] = ["running": self.running, "peers": self.peers]
+            let encoded = try? JSONSerialization.data(withJSONObject: result)
+            #if KEPOS_STATUS_DIAGNOSTICS
+            self.statusDiagnostics.record(cycle, encoded == nil ? .encodeFailed : .encoded)
+            #endif
+            completionHandler(encoded)
+        }
+    }
+
+    private func lockAndReadIdentity(_ directory: URL) throws -> Data {
+        let parent = directory.deletingLastPathComponent()
+        let parentFD = open(parent.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard parentFD >= 0 else { throw TunnelFailure.identity }
+        defer { _ = close(parentFD) }
+        let directoryFD = openat(parentFD, directory.lastPathComponent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard directoryFD >= 0 else { throw TunnelFailure.identity }
+        defer { _ = close(directoryFD) }
+        var directoryStat = stat()
+        guard fstat(directoryFD, &directoryStat) == 0,
+              (directoryStat.st_mode & mode_t(S_IFMT)) == mode_t(S_IFDIR) else { throw TunnelFailure.identity }
+        let lockName = ".\(directory.lastPathComponent).peer.runtime.lock"
+        let descriptor = openat(parentFD, lockName, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { throw TunnelFailure.identity }
+        var lockStat = stat()
+        guard fstat(descriptor, &lockStat) == 0,
+              (lockStat.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
+              (lockStat.st_mode & 0o777) == 0o600,
+              lockStat.st_uid == directoryStat.st_uid,
+              flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            _ = close(descriptor)
+            throw TunnelFailure.identity
+        }
+        lockFD = descriptor
+        return try existingPeerIdentity().readSeed(directoryDescriptor: directoryFD)
+    }
+
+    private func readIPC() {
+        guard !stopped, let ipc else { return }
+        let generation = generation
+        ipc.read { [weak self] data, error in
+            guard let self else { return }
+            self.queue.async {
+                guard !self.stopped, self.generation == generation else { return }
+                guard error == nil, let data, !data.isEmpty else { self.fail(TunnelFailure.bridge); return }
+                do {
+                    // A stopped control frame can reset provider state during
+                    // delivery; do not mutate the stored decoder in its callback.
+                    var decoder = self.decoder
+                    try decoder.append(data) { kind, payload in
+                        guard !self.stopped else { throw TunnelFailure.bridge }
+                        if kind == WorkletFrames.control { try self.receiveControl(payload) }
+                        else if payload.count >= 20 && payload.count <= 1400 {
+                            if self.running {
+                                let written = self.packetFlow.writePackets([payload], withProtocols: [NSNumber(value: AF_INET)])
+                                #if KEPOS_ACCEPTANCE_DIAGNOSTICS
+                                self.acceptanceDiagnostics.packetFlowWrite(written)
+                                #else
+                                _ = written
+                                #endif
+                            } else if !self.stopping { throw TunnelFailure.bridge }
+                        } else { throw TunnelFailure.bridge }
+                    }
+                    if !self.stopped { self.decoder = decoder }
+                    self.readIPC()
+                } catch { self.fail(error) }
+            }
+        }
+    }
+
+    private func receiveControl(_ payload: Data) throws {
+        let value = try JSONDecoder().decode(WorkletMessage.self, from: payload)
+        switch value.type {
+        #if KEPOS_ACCEPTANCE_DIAGNOSTICS
+        case "acceptance-diagnostic":
+            guard let event = value.event, acceptanceDiagnostics.worklet(event) else { throw TunnelFailure.bridge }
+        #endif
+        case "settings":
+            guard !stopping, !settingsRequested, let address = value.address, validAddress(address),
+                  let peers = value.peers, peers.count <= 16 else { throw TunnelFailure.bridge }
+            settingsRequested = true
+            var addresses: [String] = []
+            var keys = Set<String>()
+            for peer in peers {
+                guard validAddress(peer.address), peer.address != address, !addresses.contains(peer.address),
+                      peer.publicKey.utf8.count == 64,
+                      peer.publicKey.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                      keys.insert(peer.publicKey).inserted, !peer.connected,
+                      !peer.label.isEmpty, peer.label.utf8.count <= 128,
+                      !peer.label.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else { throw TunnelFailure.bridge }
+                addresses.append(peer.address)
+                self.peers.append(["publicKey": peer.publicKey, "label": peer.label, "connected": false])
+            }
+            let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
+            let ipv4 = NEIPv4Settings(addresses: [address], subnetMasks: ["255.255.255.255"])
+            ipv4.includedRoutes = addresses.map { NEIPv4Route(destinationAddress: $0, subnetMask: "255.255.255.255") }
+            settings.ipv4Settings = ipv4
+            settings.mtu = 1400
+            let generation = generation
+            setTunnelNetworkSettings(settings) { [weak self] error in
+                guard let self else { return }
+                self.queue.async {
+                    guard !self.stopped, !self.stopping, self.generation == generation else { return }
+                    if error != nil { self.fail(TunnelFailure.settings); return }
+                    self.settingsApplied = true
+                    do { try self.sendControl(["type": "ready"]) }
+                    catch { self.fail(error) }
+                }
+            }
+        case "running":
+            guard !stopping, settingsApplied, !running else { throw TunnelFailure.bridge }
+            running = true
+            timeout?.cancel()
+            timeout = nil
+            let completion = startCompletion
+            startCompletion = nil
+            completion?(nil)
+            readPackets()
+        case "peer":
+            guard settingsRequested, let key = value.publicKey,
+                  let connected = value.connected,
+                  let index = peers.firstIndex(where: { $0["publicKey"] as? String == key }) else { throw TunnelFailure.bridge }
+            if !stopping { peers[index]["connected"] = connected }
+        case "stopped":
+            guard stopping else { throw TunnelFailure.bridge }
+            finish()
+        default: throw TunnelFailure.bridge
+        }
+    }
+
+    private func validAddress(_ value: String) -> Bool {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        let bytes = parts.compactMap { UInt8($0) }
+        guard bytes.count == 4, zip(parts, bytes).allSatisfy({ String($0.1) == $0.0 }) else { return false }
+        return bytes[0] != 0 && bytes[0] != 127 && bytes[0] < 224 && !(bytes[0] == 169 && bytes[1] == 254)
+    }
+
+    private func readPackets() {
+        guard running, !stopped, outgoing.beginPacketRead() else { return }
+        let generation = generation
+        packetFlow.readPackets { [weak self] packets, protocols in
+            guard let self else { return }
+            self.queue.async {
+                guard self.running, !self.stopped, self.generation == generation else { return }
+                self.outgoing.finishPacketRead()
+                do { try self.outgoing.enqueuePackets(packets, protocols: protocols, ipv4: Int(AF_INET)) }
+                catch { self.fail(error); return }
+                self.writeNext()
+                if self.outgoing.isIdle { self.readPackets() }
+            }
+        }
+    }
+
+    private func sendControl(_ value: [String: Any]) throws {
+        let payload = try JSONSerialization.data(withJSONObject: value)
+        guard !stopped else { throw TunnelFailure.bridge }
+        try outgoing.enqueueControl(payload)
+        writeNext()
+    }
+
+    private func writeNext() {
+        guard let ipc, let data = outgoing.next() else { return }
+        let generation = generation
+        ipc.write(data) { [weak self] error in
+            guard let self else { return }
+            self.queue.async {
+                guard !self.stopped, self.generation == generation else { return }
+                self.outgoing.complete()
+                if error != nil { self.fail(TunnelFailure.bridge); return }
+                self.writeNext()
+                if self.outgoing.isIdle { self.readPackets() }
+            }
+        }
+    }
+
+    private func fail(_ error: Error) {
+        guard !stopped else { return }
+        let wasRunning = running
+        let completion = startCompletion
+        startCompletion = nil
+        completion?(TunnelFailure.bridge)
+        if wasRunning { cancelTunnelWithError(TunnelFailure.bridge) }
+        if worklet != nil {
+            // BareKit v2.5.5 termination is asynchronous and has no public
+            // worklet-exit callback. Terminating this dedicated provider process
+            // keeps the identity lock until the OS has stopped every thread and
+            // closed its descriptors. A graceful "stopped" reply takes the
+            // normal finish path only after engine.stop() has completed.
+            _exit(1)
+        }
+        finish()
+    }
+
+    private func finish() {
+        guard !stopped else { return }
+        stopped = true
+        generation += 1
+        running = false
+        timeout?.cancel()
+        timeout = nil
+        ipc?.close()
+        ipc = nil
+        worklet?.terminate()
+        worklet = nil
+        outgoing = WorkletOutput()
+        peers.removeAll()
+        decoder = WorkletFrames()
+        if lockFD >= 0 { _ = flock(lockFD, LOCK_UN); _ = close(lockFD); lockFD = -1 }
+        let start = startCompletion
+        startCompletion = nil
+        start?(TunnelFailure.bridge)
+        let stop = stopCompletion
+        stopCompletion = nil
+        stop?()
+    }
+}

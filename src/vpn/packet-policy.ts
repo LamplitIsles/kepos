@@ -1,3 +1,5 @@
+import { acceptanceEvent } from "./acceptance-diagnostics.js";
+
 /** IPv4 packet admission, independent of any operating-system packet interface. */
 export const VPN_MTU = 1400;
 const MAX_FLOWS = 4096;
@@ -83,7 +85,10 @@ export class PacketPolicy {
     if (!packet) return false;
     const expectedSource = direction === "in" ? this.peerAddress : this.localAddress;
     const expectedDestination = direction === "in" ? this.localAddress : this.peerAddress;
-    if (packet.source !== expectedSource || packet.destination !== expectedDestination) return false;
+    if (packet.source !== expectedSource || packet.destination !== expectedDestination) {
+      if (direction === "in" && packet.source !== expectedSource) acceptanceEvent("source_mismatch");
+      return false;
+    }
     const now = this.now();
     if (now >= this.nextSweep) {
       for (const [key, flow] of this.flows) {

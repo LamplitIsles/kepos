@@ -54,7 +54,11 @@ function fakeTun() {
   const fromHost = new PassThrough(); const toHost = new PassThrough();
   let close!: (error: Error) => void;
   const closed = new Promise<Error>((resolve) => { close = resolve; });
-  return { fromHost, toHost, device: { name: "fake0", packets: new PacketFraming(fromHost, toHost), closed,
+  const framing = new PacketFraming(fromHost, toHost);
+  return { fromHost, toHost, device: { name: "fake0", packets: {
+    send: (packet: Uint8Array) => framing.send(packet),
+    receive: (deliver: (packet: Buffer) => Promise<void>) => framing.receive(deliver),
+  }, closed,
     close: async () => { fromHost.destroy(); toHost.destroy(); close(new Error("closed")); } } };
 }
 
@@ -83,10 +87,13 @@ test("two fake peers dispatch authenticated VPN frames and enforce port grants",
     assert.equal(firewall!(Buffer.alloc(32)), true);
     let connected!: () => void;
     const ready = new Promise<void>((resolve) => { connected = resolve; });
+    const statuses: Array<{ key: string; label: string; connected: boolean }> = [];
     a = await startVpn({ stateDir: aState, helper: "fake", dht: aDht, openTun: async () => aTun.device,
+      onPeerStatus: (status) => statuses.push(status),
       log: (line) => { if (line.startsWith("VPN peer connected")) connected(); },
       config: { ...base, peers: [{ label: "b", publicKey: bKey, connection: "dial" }], vpn: { address: "198.18.0.1", peers: [{ peer: "b", address: "198.18.0.2", allowTcp: [] }] } } });
     await ready;
+    assert.deepEqual(statuses, [{ key: bKey, label: "b", connected: true }]);
     const writer = new PacketFraming(aTun.fromHost);
     const delivered = once(bTun.toHost, "data");
     await writer.send(syn(443));
@@ -97,6 +104,11 @@ test("two fake peers dispatch authenticated VPN frames and enforce port grants",
     await writer.send(syn(22));
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(bTun.toHost.readableLength, 0);
+    await a.stop();
+    assert.deepEqual(statuses, [
+      { key: bKey, label: "b", connected: true },
+      { key: bKey, label: "b", connected: false },
+    ]);
   } finally {
     await a?.stop(); await b?.stop();
     await rm(root, { recursive: true, force: true });
@@ -166,6 +178,7 @@ test("wrong VPN protocol is closed and does not admit packets", async () => {
     await setupPeer({ stateDir: state });
     const key = "cd".repeat(32), tun = fakeTun();
     const logs: string[] = [];
+    const statuses: boolean[] = [];
     let now = 10_000;
     let handler!: (stream: DhtStream) => void;
     let firewall!: (key: Uint8Array) => boolean;
@@ -174,6 +187,7 @@ test("wrong VPN protocol is closed and does not admit packets", async () => {
         firewall = opts.firewall; handler = onConnection; return { listen: async () => {}, close: async () => {} };
       }, destroy: async () => {} } as unknown as DhtNode;
     running = await startVpn({ stateDir: state, helper: "fake", dht, openTun: async () => tun.device, log: (line) => logs.push(line), now: () => now,
+      onPeerStatus: ({ connected }) => statuses.push(connected),
       config: { peers: [{ label: "remote", publicKey: key, connection: "accept" }],
         vpn: { address: "198.18.0.2", peers: [{ peer: "remote", address: "198.18.0.1", allowTcp: "all" }] } } });
     assert.equal(firewall(Buffer.alloc(32)), true);
@@ -191,6 +205,7 @@ test("wrong VPN protocol is closed and does not admit packets", async () => {
     const closed = once(client, "close");
     await new PacketFraming(client).send(Buffer.alloc(20, 0x42));
     await closed;
+    assert.deepEqual(statuses, [], "a rejected greeting must never report a connected peer");
     assert.equal(tun.toHost.readableLength, 0);
     now += 1001;
     assert.equal(firewall(Buffer.from(key, "hex")), false);

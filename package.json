@@ -33,10 +33,12 @@
     "web:deploy:dry-run": "npm run deploy:dry-run --workspace @lamplitisles/kepos-web",
     "web:deploy": "npm run deploy --workspace @lamplitisles/kepos-web",
     "vpn:build": "mkdir -p .build && cc -std=c11 -O2 -Wall -Wextra -Werror -o .build/kepos-tun src/vpn/native/tun.c",
+    "macos:build": "node scripts/build-macos.mjs",
+    "macos:test": "mkdir -p .build && swiftc apps/macos/Sources/KeposVPN/VPNControl.swift apps/macos/Sources/KeposVPN/MenuPresentation.swift apps/macos/Tests/main.swift -o .build/macos-menu-test && .build/macos-menu-test && swiftc apps/macos/Sources/KeposVPN/WorkletFrames.swift apps/macos/Sources/KeposVPN/WorkletStartup.swift apps/macos/Tests/Bridge/main.swift -o .build/macos-bridge-test && .build/macos-bridge-test && swiftc apps/macos/Sources/KeposVPN/ExistingIdentity.swift apps/macos/Tests/Identity/main.swift -o .build/macos-identity-test && .build/macos-identity-test && swiftc apps/macos/Sources/KeposVPN/VPNControl.swift apps/macos/Sources/KeposVPN/ProviderStatus.swift apps/macos/Sources/KeposVPN/StatusDiagnostics.swift apps/macos/Sources/KeposVPN/AcceptanceDiagnostics.swift apps/macos/Sources/KeposVPN/ConnectionMonitor.swift apps/macos/Sources/KeposVPN/ExtensionReplacement.swift apps/macos/Tests/Status/main.swift -o .build/macos-status-test && .build/macos-status-test && swiftc apps/macos/Sources/KeposVPN/VPNControl.swift apps/macos/Sources/KeposVPN/TunnelLifecycle.swift apps/macos/Tests/Lifecycle/main.swift -o .build/macos-lifecycle-test && .build/macos-lifecycle-test",
     "kepos": "tsx src/cli/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
-    "check": "npm run vpn:build && npm run typecheck && npm test && npm run web:verify"
+    "check": "npm run vpn:build && npm run typecheck && npm test && npm run macos:test && npm run web:verify"
   },
   "dependencies": {
     "b4a": "^1.8.1",
@@ -50,17 +52,23 @@
     "@hyperswarm/secret-stream": "^6.9.1",
     "@types/b4a": "^1.6.5",
     "@types/node": "^26.1.1",
+    "bare-link": "^4.1.0",
+    "bare-pack": "^3.0.2",
+    "esbuild": "^0.28.1",
     "lefthook": "^2.1.10",
     "streamx": "^2.28.0",
     "typescript": "^7.0.2",
     "wrangler": "^4.118.0"
   },
   "allowScripts": {
-    "esbuild@0.28.1": true,
     "lefthook@2.1.10": true,
-    "workerd@1.20260730.1": true
+    "workerd@1.20260730.1": true,
+    "esbuild@0.28.1": true
   },
   "overrides": {
     "undici": "7.29.0"
+  },
+  "optionalDependencies": {
+    "llvm-runtime-lld-linux-x64": "^23.1.3"
   }
 }
