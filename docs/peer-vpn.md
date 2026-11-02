@@ -1,4 +1,51 @@
-# Linux peer VPN foundation
+# Peer VPN
+
+## Managed receiver and invitations
+
+A managed Linux receiver accepts up to 16 individually authorized dialers. Each device receives one persistent address and initially may open all TCP ports on the receiver; use `peer grant` to restrict it and `peer revoke` to remove it. The receiver never initiates TCP connections to devices. Traffic between dialers, application UDP, IPv6 and DNS changes are outside this feature. The host firewall and service authentication still apply.
+
+Create a seed-only receiver identity with `setup peer`. Supply its existing intended service address in a configuration with no static peers:
+
+```toml
+peers = []
+[vpn]
+address = "192.168.1.88"
+peers = []
+```
+
+Choose an unused pool that does not overlap the receiver's physical networks or other VPNs. The allocator excludes the receiver address. For illustration only, `198.18.20.0/24` is a benchmarking range, not an assumed production allocation. Start the service and create an invitation from a second shell as the same operating-system user:
+
+```sh
+npm run kepos -- peer receiver --state /path/to/peer --config /path/to/config.toml \
+  --pool 198.18.20.0/24 --tun-helper "$PWD/.build/kepos-tun"
+npm run kepos -- peer invite --state /path/to/peer
+```
+
+Paste the invitation into the Mac menu while disconnected. It contains the receiver's public key and a random bearer secret. The authenticated receiver checks the secret and binds the authenticated joining key to its grant and allocation; a contact from an unknown key alone cannot forward packets. The receiver stores only a hash of the invitation, expires it after ten minutes and consumes it in the same serialized durable state update as the grant. A failed validation or exhausted pool does not consume it. Existing devices keep their address and restricted grant when paired again. Invitation validation uses the receiver's system clock; correct time is necessary.
+
+If the response is lost after the receiver commits, the Mac reports an unknown outcome. Inspect `peer devices` before taking further action; do not automatically replay an uncertain admission. The receiver's private `.<state-name>.receiver/receiver.json` holds allocations, policies and outstanding invitation hashes; its control socket is available only while the service runs. A storage error fails the receiver rather than continuing with a potentially stale policy. Changing an allocation or policy restarts the packet runtime and interrupts connections. The configured pool, receiver address and receiver public key are checked against stored state on restart.
+
+If inspection shows that the affected device was admitted with an address that collides on the Mac, identify it by its public key and record its grant. Deliberately revoke only that device, then issue a new invitation that excludes its old address:
+
+```sh
+npm run kepos -- peer devices --state /path/to/peer
+npm run kepos -- peer revoke --state /path/to/peer --key DEVICE_PUBLIC_KEY
+npm run kepos -- peer invite --state /path/to/peer --exclude-address 198.18.20.2
+```
+
+Replace the example address with the affected device's actual allocation, and share the invitation privately. Issuance rejects an address still assigned to an authorized device. The exclusion applies only to this invitation, is not a global reservation, and does not change other devices' addresses or grants. If another invitation assigns that address before this invitation is used, re-pairing that existing identity is rejected without consuming the invitation; inspect and deliberately revoke it before re-admission. Any bearer can use an invitation, so deliver it to the intended device. A newly admitted device starts with all TCP ports allowed; restore any desired restricted grant explicitly. If the response is lost or the Mac finds another conflict after admission, inspect the receiver again before deciding what to do. Exclusion does not guarantee the new address is conflict-free on the Mac.
+
+The Mac app extension owns the private `Kepos` directory in its app-group container, including the seed-only `peer` identity, runtime lock and `config.json`. The menu asks the provider for public state and does not read or transfer the seed or lock. The provider preserves an existing managed identity; a paired configuration with a missing identity fails rather than generating a replacement. If a previously selected identity is outside this location, setup stops with guidance; any migration or cutover requires a separately authorized operation. The invitation is passed to the provider only for temporary pairing; neither the template nor the receiver store contains its text. The provider saves the public pairing result before reporting success. Disconnect before pairing, and connect separately afterward.
+
+Linux checks the pool against existing non-default routes on startup and before enrollment, and checks allocated peer addresses before adding routes. A pre-commit device-capacity, pool-exhaustion or receiver-route conflict reports a fixed reason to the device and a rate-limited diagnostic to the operator; storage failures and lost responses remain unknown outcomes. The Mac snapshots local IPv4 interface addresses with [getifaddrs](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/freeifaddrs.3.html) and the routing table with [NET_RT_DUMP](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/sysctl.3.html) before applying tunnel settings. It rejects an assigned address already on an interface, a receiver address belonging to the Mac, and an active explicit host route for the receiver. It permits a receiver in an attached LAN subnet and ignores link-layer/cloned host routes such as ARP entries. If a conflict is found after the receiver commits pairing, the Mac reports the conflict and asks the operator to inspect the possible admission before retrying.
+
+These checks are snapshots: they cannot prove later route stability, route precedence, or which physical carrier path HyperDHT will use. An unsigned 0.1/28 App Extension bundle was built on N5 from `daaa0d35cd79c67f6def305ba8b731b8c82ed79f`. The user signed a development build, which was installed in an approved operation, and reported a connection and access. Orc separately observed the installed 0.1/28 `.appex`, connected status, a route to `192.168.1.88` through `utun8`, and trusted TLS and HTTP 200 access to FlickGrove over the VPN on the same LAN, with a transient N5 service. The installed signed executable was not independently byte-matched to that unsigned build. These observations do not establish invitation pairing, WAN/NAT paths, reboot behavior, negative security tests, or accessibility (AX) behavior. A previously approved isolated Mac/N5 test also succeeded with the same receiver and carrier address; neither test proves other routing paths. The prior system-extension implementation failed twice accessing the user's managed group container, and an isolated fixture reproduced the visible failure once; the precise errno was not observed. This app-extension design changes that context but has not reproduced the same red/green result. The earlier generic bridge failure has no established root cause and is not claimed fixed.
+
+The packet tunnel is a user-context app extension: macOS terminates it when that user logs out, and the VPN does not run as a system-wide background service. Apple lists macOS packet-tunnel app extensions as App Store only for distribution; a development-signed build on a registered Mac is a development/test path, not a Developer ID website release. See [TN3134](https://developer.apple.com/documentation/technotes/tn3134-network-extension-provider-deployment). The current development host is not sandboxed so its existing external-identity selection remains visible; a future App Store build also requires host sandboxing and an explicitly authorized approach to any affected existing preferences. No live identity has been migrated by this change.
+
+An earlier system extension may remain registered under the same provider identifier. How macOS chooses between that installed extension and the new app extension has not been verified. For a transition, inspect the installed state and arrange deactivation of the active old system extension under a separately authorized plan; macOS may require a restart. Recheck registration and provider selection afterward: old versions marked for removal at restart do not prove that identifier selection is resolved. The transition does not automatically deactivate the old extension, remove or replace an existing VPN manager, restart the Mac, or move an identity. Preparing managed state may create a Kepos VPN manager if none exists.
+
+## Explicitly configured peers
 
 The exclusive `peer vpn` runtime carries IPv4 TCP packets between explicitly
 configured Kepos identities. It uses a Linux TUN interface, a /32 local
@@ -130,10 +177,10 @@ an already active session still rejects duplicates.
 
 ## Experimental macOS build
 
-The macOS source uses a system-extension `NEPacketTunnelProvider` and a Bare
-worklet for the existing packet policy and authenticated transport. The menu is
-designed to distinguish a running provider from a peer that has completed the VPN
-greeting. On an Apple Silicon Mac, an Apple Development-signed build from commit
+The current source packages a user-context packet-tunnel App Extension and a Bare
+worklet. The menu distinguishes a running provider from a peer that has completed
+the VPN greeting. The following historical tests used the earlier **system
+extension**, not the current App Extension. On an Apple Silicon Mac, an Apple Development-signed build from commit
 `bd8c7d3a9955bad9a5d28ddbf44861210eeed179` activated the system extension,
 started a zero-peer tunnel and showed `VPN: On`. A subsequent stop returned the
 menu to disconnected, and the test identity's lock was available for cleanup.
@@ -293,7 +340,7 @@ diagnostic build. No production DNS, Caddy, NAT, relay or iOS test was performed
 
 `npm run macos:test` runs the platform-independent Swift menu, local bridge,
 and read-only identity tests. `npm run macos:build` creates an unsigned arm64
-app and system-extension bundle at `.build/macos-unsigned`; it refuses to
+app and app-extension bundle at `.build/macos-unsigned`; it refuses to
 replace an existing output. Set `KEPOS_TEAM_ID` to the intended ten-character
 Apple team identifier and, if needed, `KEPOS_BUNDLE_ID` to the intended app
 identifier. A placeholder team ID can be used for build inspection only.

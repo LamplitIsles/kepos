@@ -46,6 +46,25 @@ lifecycle.prepareStart()
 lifecycle.startSubmitted(at: 500)
 lifecycle.requestStop()
 require(lifecycle.observe(.disconnected, at: 501).provider == .disconnected)
+
+// Pairing temporarily starts a provider and deliberately stops it after the
+// public result has been collected; the menu must return to disconnected.
+var pairing = TunnelLifecycle()
+pairing.prepareStart()
+pairing.startSubmitted(at: 550)
+require(pairing.observe(.running, at: 551).provider == .running)
+var stopCalled = false
+pairing.stop { stopCalled = true }
+require(stopCalled)
+let pairingStopped = pairing.observe(.disconnected, at: 552)
+require(pairingStopped.provider == .disconnected && pairingStopped.error == nil)
+
+// Cancellation while the temporary provider is starting is intentional too.
+pairing.prepareStart()
+pairing.startSubmitted(at: 560)
+pairing.stop {}
+let cancelledPairing = pairing.observe(.disconnected, at: 561)
+require(cancelledPairing.provider == .disconnected && cancelledPairing.error == nil)
 var existing = TunnelLifecycle()
 require(existing.observe(.running, at: 600).provider == .running)
 require(existing.observe(.disconnected, at: 601).provider == .failed)

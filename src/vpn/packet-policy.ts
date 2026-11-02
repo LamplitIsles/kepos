@@ -71,6 +71,7 @@ export class PacketPolicy {
     readonly peerAddress: string,
     ports: readonly number[] | "all",
     private readonly now: () => number = Date.now,
+    private readonly allowOutboundInitiation = true,
   ) {
     this.ports = ports === "all" ? "all" : new Set(ports);
   }
@@ -124,6 +125,7 @@ export class PacketPolicy {
     }
     if (!flow) {
       if (!syn || ack || rst) return false;
+      if (direction === "out" && !this.allowOutboundInitiation) return false;
       if (direction === "in" && this.ports !== "all" && !this.ports.has(destinationPort)) return false;
       if (this.flows.size >= MAX_FLOWS) {
         const oldestClosed = this.closed.values().next().value;

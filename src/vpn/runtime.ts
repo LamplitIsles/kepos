@@ -15,6 +15,7 @@ export async function startVpn(options: {
   log?: (message: string) => void;
   onPeerStatus?: (peer: { key: string; label: string; connected: boolean }) => void;
   now?: () => number;
+  enrollment?: Parameters<typeof startVpnEngine>[0]["enrollment"];
 }): ReturnType<typeof startVpnEngine> {
   if (!options.config.vpn) throw new Error("VPN mode requires a [vpn] configuration");
   const identity = await loadPeerIdentity(options.stateDir);
@@ -22,9 +23,10 @@ export async function startVpn(options: {
     keyPair: keyPairFromSeed(identity.seed),
     config: options.config,
     dht: options.dht,
-    openTun: (deviceOptions) => (options.openTun ?? openLinuxTun)({ ...deviceOptions, helper: options.helper }),
+    openTun: (deviceOptions) => (options.openTun ?? openLinuxTun)({ ...deviceOptions, helper: options.helper, checkRouteConflicts: !!options.enrollment }),
     log: options.log,
     onPeerStatus: options.onPeerStatus,
+    enrollment: options.enrollment,
     now: options.now ?? (() => performance.now()),
   });
 }

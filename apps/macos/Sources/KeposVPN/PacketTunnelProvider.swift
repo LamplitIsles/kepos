@@ -2,9 +2,7 @@ import Foundation
 import NetworkExtension
 import Darwin
 
-private enum TunnelFailure: Error {
-    case configuration, identity, extensionUnavailable, bridge, settings, timeout
-}
+private typealias TunnelFailure = ProviderFailure
 
 private struct WorkletPeer: Decodable {
     let publicKey: String
@@ -19,12 +17,15 @@ private struct WorkletMessage: Decodable {
     let peers: [WorkletPeer]?
     let publicKey: String?
     let connected: Bool?
+    let receiverAddress: String?
+    let receiverKey: String?
+    let reason: String?
     #if KEPOS_ACCEPTANCE_DIAGNOSTICS
     let event: String?
     #endif
 }
 
-/// The system extension owns packetFlow, the identity lock and the worklet.
+/// The user-context app extension owns identity, configuration, lock and worklet.
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let queue = DispatchQueue(label: "kepos.packet-tunnel")
     #if KEPOS_ACCEPTANCE_DIAGNOSTICS
@@ -44,6 +45,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var stopping = false
     private var settingsRequested = false
     private var settingsApplied = false
+    private var pairing = false
+    private var pairResult: [String: Any]?
+    private var publicKey: String?
     private var generation = 0
     private var startCompletion: ((Error?) -> Void)?
     private var stopCompletion: (() -> Void)?
@@ -58,14 +62,37 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             self.stopping = false
             self.settingsRequested = false
             self.settingsApplied = false
+            self.pairing = false
+            self.pairResult = nil
             self.startCompletion = completionHandler
             do {
-                guard let config = options?["config"] as? String,
-                      config.utf8.count <= 24_000,
-                      let path = options?["stateDirectory"] as? String,
-                      !path.isEmpty else { throw TunnelFailure.configuration }
-                let directory = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
-                let seed = try self.lockAndReadIdentity(directory)
+                guard let operation = options?["operation"] as? String,
+                      operation == "pair" || operation == "connect" else { throw TunnelFailure.configuration }
+                let invitation = options?["invitation"] as? String
+                guard (operation == "pair") == (invitation != nil),
+                      (invitation?.utf8.count ?? 0) <= 256 else { throw TunnelFailure.configuration }
+                self.pairing = invitation != nil
+                guard let managed = try? self.managedPeer() else { throw TunnelFailure.identity }
+                do { self.lockFD = try managed.acquireLock() }
+                catch ManagedVPNError.identityInUse { throw TunnelFailure.identityInUse }
+                catch { throw TunnelFailure.identity }
+                let current: ManagedConfig?
+                do { current = try managed.store.read() } catch { throw TunnelFailure.identity }
+                if let invitation {
+                    let parts = invitation.split(separator: ":", omittingEmptySubsequences: false)
+                    guard parts.count == 3, parts[0] == "kepos1", parts[1].utf8.count == 64, parts[2].utf8.count == 64,
+                          parts[1].utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                          parts[2].utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw TunnelFailure.invitation }
+                    if let current, current.receiverKey != parts[1] { throw TunnelFailure.configuration }
+                } else if current == nil { throw TunnelFailure.configuration }
+                let identity = existingPeerIdentity()
+                let seed: Data
+                do {
+                    seed = try identity.readSeed(stateDirectory: managed.directory)
+                    let key = try identity.derivePublicKey(seed)
+                    guard key.count == 32 else { throw TunnelFailure.identity }
+                    self.publicKey = key.map { String(format: "%02x", $0) }.joined()
+                } catch { throw TunnelFailure.identity }
                 let seedHex = seed.map { String(format: "%02x", $0) }.joined()
                 guard let worklet = BareWorklet(configuration: nil),
                       let bundle = Bundle.main.path(forResource: "macos-worklet", ofType: "bundle") else {
@@ -78,10 +105,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
                 self.ipc = ipc
                 self.readIPC()
-                try self.sendControl(["type": "start", "config": config, "seed": seedHex])
+                if let invitation { try self.sendControl(["type": "pair", "invitation": invitation, "seed": seedHex]) }
+                else { try self.sendControl(["type": "start", "config": current!.tunnelConfig, "seed": seedHex]) }
                 let timeout = DispatchWorkItem { [weak self] in
                     guard let self, self.generation == generation else { return }
-                    self.fail(TunnelFailure.timeout)
+                    self.fail(self.pairing ? TunnelFailure.pairingUnknown : TunnelFailure.timeout)
                 }
                 self.timeout = timeout
                 self.queue.asyncAfter(deadline: .now() + 30, execute: timeout)
@@ -123,11 +151,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 #endif
                 return
             }
+            if messageData == ManagedStateMessage.prepare {
+                do {
+                    let state = try self.managedPeer().prepare(holdingLock: self.lockFD >= 0)
+                    completionHandler(ManagedStateMessage.response(state))
+                } catch let error as ManagedVPNError {
+                    completionHandler(ManagedStateMessage.failure(error))
+                } catch { completionHandler(ManagedStateMessage.failure(.localState)) }
+                return
+            }
+            guard messageData == Data([0]) else { completionHandler(nil); return }
             #if KEPOS_STATUS_DIAGNOSTICS
             self.statusDiagnostics.record(cycle, self.running ? .providerRunning : .providerStopped)
             self.statusDiagnostics.record(cycle, .peerCount(self.peers.count))
             #endif
-            let result: [String: Any] = ["running": self.running, "peers": self.peers]
+            var result: [String: Any] = ["running": self.running, "peers": self.peers]
+            if let pairing = self.pairResult { result["pairing"] = pairing }
             let encoded = try? JSONSerialization.data(withJSONObject: result)
             #if KEPOS_STATUS_DIAGNOSTICS
             self.statusDiagnostics.record(cycle, encoded == nil ? .encodeFailed : .encoded)
@@ -136,31 +175,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    private func lockAndReadIdentity(_ directory: URL) throws -> Data {
-        let parent = directory.deletingLastPathComponent()
-        let parentFD = open(parent.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
-        guard parentFD >= 0 else { throw TunnelFailure.identity }
-        defer { _ = close(parentFD) }
-        let directoryFD = openat(parentFD, directory.lastPathComponent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard directoryFD >= 0 else { throw TunnelFailure.identity }
-        defer { _ = close(directoryFD) }
-        var directoryStat = stat()
-        guard fstat(directoryFD, &directoryStat) == 0,
-              (directoryStat.st_mode & mode_t(S_IFMT)) == mode_t(S_IFDIR) else { throw TunnelFailure.identity }
-        let lockName = ".\(directory.lastPathComponent).peer.runtime.lock"
-        let descriptor = openat(parentFD, lockName, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
-        guard descriptor >= 0 else { throw TunnelFailure.identity }
-        var lockStat = stat()
-        guard fstat(descriptor, &lockStat) == 0,
-              (lockStat.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
-              (lockStat.st_mode & 0o777) == 0o600,
-              lockStat.st_uid == directoryStat.st_uid,
-              flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            _ = close(descriptor)
-            throw TunnelFailure.identity
-        }
-        lockFD = descriptor
-        return try existingPeerIdentity().readSeed(directoryDescriptor: directoryFD)
+    private func managedPeer() throws -> ManagedPeerState {
+        guard let group = Bundle.main.object(forInfoDictionaryKey: "KeposAppGroupID") as? String,
+              let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) else { throw ManagedVPNError.localState }
+        let identity = IdentityStore()
+        return ManagedPeerState(root: container.appendingPathComponent("Kepos", isDirectory: true),
+                                existingKey: identity.existingPublicKey, createKey: identity.prepare)
     }
 
     private func readIPC() {
@@ -199,6 +219,50 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private func receiveControl(_ payload: Data) throws {
         let value = try JSONDecoder().decode(WorkletMessage.self, from: payload)
         switch value.type {
+        case "pair-error":
+            guard pairing, !stopping else { throw TunnelFailure.bridge }
+            switch value.reason {
+            case "unusable": throw TunnelFailure.invitation
+            case "unavailable": throw TunnelFailure.receiverUnavailable
+            case "capacity": throw TunnelFailure.capacity
+            case "pool": throw TunnelFailure.pool
+            case "route": throw TunnelFailure.receiverRouteConflict
+            case "excluded": throw TunnelFailure.excludedAddress
+            default: throw TunnelFailure.pairingUnknown
+            }
+        case "paired":
+            guard pairing, !stopping, !settingsRequested, let address = value.address, validAddress(address),
+                  let receiverAddress = value.receiverAddress, validAddress(receiverAddress), receiverAddress != address,
+                  let receiverKey = value.receiverKey, receiverKey.utf8.count == 64,
+                  receiverKey.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw TunnelFailure.pairingUnknown }
+            try checkLocalRoutes(address: address, receivers: [receiverAddress], afterPairing: true)
+            settingsRequested = true
+            guard let config = ManagedConfig(value: ["address": address, "receiverAddress": receiverAddress, "receiverKey": receiverKey]),
+                  let publicKey else { throw TunnelFailure.pairingUnknown }
+            let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
+            let ipv4 = NEIPv4Settings(addresses: [address], subnetMasks: ["255.255.255.255"])
+            ipv4.includedRoutes = []
+            settings.ipv4Settings = ipv4
+            settings.mtu = 1400
+            let generation = generation
+            setTunnelNetworkSettings(settings) { [weak self] error in
+                guard let self else { return }
+                self.queue.async {
+                    guard !self.stopped, !self.stopping, self.generation == generation else { return }
+                    guard error == nil else { self.fail(TunnelFailure.pairingUnknown); return }
+                    let state: ManagedState
+                    do { state = try self.managedPeer().commitPair(config, publicKey: publicKey) }
+                    catch { self.fail(TunnelFailure.pairingUnknown); return }
+                    self.pairResult = ["publicKey": state.publicKey, "paired": state.paired]
+                    self.settingsApplied = true
+                    self.running = true
+                    self.timeout?.cancel()
+                    self.timeout = nil
+                    let completion = self.startCompletion
+                    self.startCompletion = nil
+                    completion?(nil)
+                }
+            }
         #if KEPOS_ACCEPTANCE_DIAGNOSTICS
         case "acceptance-diagnostic":
             guard let event = value.event, acceptanceDiagnostics.worklet(event) else { throw TunnelFailure.bridge }
@@ -219,9 +283,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 addresses.append(peer.address)
                 self.peers.append(["publicKey": peer.publicKey, "label": peer.label, "connected": false])
             }
+            try checkLocalRoutes(address: address, receivers: addresses, afterPairing: false)
             let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
             let ipv4 = NEIPv4Settings(addresses: [address], subnetMasks: ["255.255.255.255"])
-            ipv4.includedRoutes = addresses.map { NEIPv4Route(destinationAddress: $0, subnetMask: "255.255.255.255") }
+            ipv4.includedRoutes = vpnHostRoutes(addresses).map { NEIPv4Route(destinationAddress: $0.address, subnetMask: $0.mask) }
             settings.ipv4Settings = ipv4
             settings.mtu = 1400
             let generation = generation
@@ -262,6 +327,18 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let bytes = parts.compactMap { UInt8($0) }
         guard bytes.count == 4, zip(parts, bytes).allSatisfy({ String($0.1) == $0.0 }) else { return false }
         return bytes[0] != 0 && bytes[0] != 127 && bytes[0] < 224 && !(bytes[0] == 169 && bytes[1] == 254)
+    }
+
+    private func checkLocalRoutes(address: String, receivers: [String], afterPairing: Bool) throws {
+        let snapshot: LocalIPv4Snapshot
+        do { snapshot = try localIPv4Snapshot() }
+        catch { throw afterPairing ? TunnelFailure.pairingUnknown : TunnelFailure.routeInspectionUnavailable }
+        guard let conflict = vpnRouteConflict(local: address, receivers: receivers, snapshot: snapshot) else { return }
+        if afterPairing { throw TunnelFailure.pairingConflictUnknown }
+        switch conflict {
+        case .localAddress: throw TunnelFailure.localAddressConflict
+        case .receiverAddress, .receiverHostRoute: throw TunnelFailure.receiverRouteConflict
+        }
     }
 
     private func readPackets() {
@@ -307,8 +384,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let wasRunning = running
         let completion = startCompletion
         startCompletion = nil
-        completion?(TunnelFailure.bridge)
-        if wasRunning { cancelTunnelWithError(TunnelFailure.bridge) }
+        let safe = (error as? TunnelFailure ?? (pairing ? .pairingUnknown : .bridge)).safeError
+        completion?(safe)
+        if wasRunning { cancelTunnelWithError(safe) }
         if worklet != nil {
             // BareKit v2.5.5 termination is asynchronous and has no public
             // worklet-exit callback. Terminating this dedicated provider process
@@ -333,6 +411,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         worklet = nil
         outgoing = WorkletOutput()
         peers.removeAll()
+        publicKey = nil
         decoder = WorkletFrames()
         if lockFD >= 0 { _ = flock(lockFD, LOCK_UN); _ = close(lockFD); lockFD = -1 }
         let start = startCompletion

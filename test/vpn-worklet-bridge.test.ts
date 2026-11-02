@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { runWorkletBridge } from "../src/vpn/worklet-bridge.js";
 import { IPC_CONTROL, IPC_PACKET, WorkletFraming } from "../src/vpn/worklet-framing.js";
 import type { startVpnEngine } from "../src/vpn/engine.js";
+import { PairError, type pairWithReceiver } from "../src/vpn/pair.js";
 
 class Linked extends Duplex {
   other?: Linked;
@@ -30,6 +31,54 @@ function pair(): [Linked, Linked] {
 const seed = "07".repeat(32);
 const remoteKey = "12".repeat(32);
 const config = `[[peers]]\nlabel = "remote"\npublic_key = "${remoteKey}"\nconnection = "accept"\n[vpn]\naddress = "198.18.0.1"\npeers = [{ peer = "remote", address = "198.18.0.2", allow_tcp = [443] }]\n`;
+
+test("pairing passes the invitation to the worklet and returns only public routing data", async () => {
+  const [client, server] = pair();
+  const secret = "ab".repeat(32);
+  const invitation = `kepos1:${remoteKey}:${secret}`;
+  const frames = new WorkletFraming(client);
+  const messages: string[] = [];
+  let paired!: () => void;
+  let stopped!: () => void;
+  const done = new Promise<void>((resolve) => { paired = resolve; });
+  const stoppedMessage = new Promise<void>((resolve) => { stopped = resolve; });
+  const receiving = frames.receive(async (_kind, payload) => {
+    messages.push(payload.toString());
+    if (JSON.parse(payload.toString()).type === "paired") paired();
+    if (JSON.parse(payload.toString()).type === "stopped") stopped();
+  });
+  const fakePair: typeof pairWithReceiver = async (options) => {
+    assert.equal(options.invitation, invitation);
+    return { peers: [{ label: "receiver", publicKey: remoteKey, connection: "dial" }], vpn: { address: "198.18.113.9", peers: [{ peer: "receiver", address: "192.168.1.88", allowTcp: [] }] } };
+  };
+  const running = runWorkletBridge(server, undefined, fakePair);
+  try {
+    await frames.send(IPC_CONTROL, Buffer.from(JSON.stringify({ type: "pair", seed, invitation })));
+    await done;
+    assert.deepEqual(JSON.parse(messages[0]!), { type: "paired", address: "198.18.113.9", receiverAddress: "192.168.1.88", receiverKey: remoteKey });
+    assert(!messages.join("").includes(secret));
+    await frames.send(IPC_CONTROL, Buffer.from('{"type":"stop"}'));
+    await stoppedMessage;
+    client.destroy();
+    await running;
+  } finally { client.destroy(); await running; await receiving.catch(() => undefined); }
+});
+
+test("worklet forwards only a fixed pre-commit rejection category", async () => {
+  const [client, server] = pair();
+  const frames = new WorkletFraming(client);
+  const secret = "ab".repeat(32);
+  let received!: (value: string) => void;
+  const reply = new Promise<string>((resolve) => { received = resolve; });
+  const receiving = frames.receive(async (_kind, payload) => received(payload.toString()));
+  const running = runWorkletBridge(server, undefined, async () => { throw new PairError("route"); });
+  try {
+    await frames.send(IPC_CONTROL, Buffer.from(JSON.stringify({ type: "pair", seed, invitation: `kepos1:${remoteKey}:${secret}` })));
+    const result = await reply;
+    assert.deepEqual(JSON.parse(result), { type: "pair-error", reason: "route" });
+    assert(!result.includes(secret));
+  } finally { client.destroy(); await running; await receiving.catch(() => undefined); }
+});
 
 test("worklet bridge waits for provider settings and forwards packets and peer state", async () => {
   const [client, server] = pair();

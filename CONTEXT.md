@@ -23,12 +23,23 @@ The peer that initiates a particular connection.
 **Accepting Peer**:
 The peer that accepts a particular connection.
 
+**Receiver**:
+A peer that admits dialing peers to its VPN and assigns their VPN Addresses.
+
+**Peer Invitation**:
+A time-limited, single-use authorization to pair one new Peer Identity with
+an accepting peer.
+
+**Address Allocation**:
+An accepting peer's persistent assignment of a unique VPN Address to an
+authorized Peer Identity.
+
 **Peer VPN**:
 An authenticated IP connection between peers, governed by the receiving
 peer's network access policy.
 
 **VPN Address**:
-The configured IP address associated with a peer identity in a peer VPN. Each
+The IP address associated with a peer identity in a peer VPN. Each
 peer enforces the mapping for traffic received from that identity.
 
 **VPN Port Grant**:

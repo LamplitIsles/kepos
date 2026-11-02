@@ -5,12 +5,13 @@ import { VPN_MTU } from "./packet-policy.js";
 import { startVpnEngine, type PacketDevice } from "./engine.js";
 import { IPC_CONTROL, IPC_PACKET, WorkletFraming } from "./worklet-framing.js";
 import { setAcceptanceSink } from "./acceptance-diagnostics.js";
+import { pairWithReceiver, PairError } from "./pair.js";
 
 type StartEngine = typeof startVpnEngine;
 type Runtime = Awaited<ReturnType<StartEngine>>;
 
 /** Run one provider-owned engine until IPC closes. No secret is sent back. */
-export async function runWorkletBridge(stream: Duplex, startEngine: StartEngine = startVpnEngine): Promise<void> {
+export async function runWorkletBridge(stream: Duplex, startEngine: StartEngine = startVpnEngine, pair: typeof pairWithReceiver = pairWithReceiver): Promise<void> {
   const frames = new WorkletFraming(stream);
   let state: "initial" | "settings" | "starting" | "running" | "stopped" = "initial";
   let runtime: Runtime | undefined;
@@ -58,6 +59,19 @@ export async function runWorkletBridge(stream: Duplex, startEngine: StartEngine 
     catch { throw new Error("invalid control message"); }
     if (!message || typeof message !== "object" || Array.isArray(message)) throw new Error("invalid control message");
     const value = message as Record<string, unknown>;
+    if (value.type === "pair" && state === "initial") {
+      if (Object.keys(value).sort().join(",") !== "invitation,seed,type" || typeof value.invitation !== "string" || value.invitation.length > 256 ||
+          typeof value.seed !== "string" || !/^[0-9a-f]{64}$/.test(value.seed)) throw new Error("invalid pairing message");
+      state = "starting";
+      keyPair = keyPairFromSeed(value.seed);
+      try {
+        const paired = await pair({ invitation: value.invitation, keyPair });
+        await send({ type: "paired", address: paired.vpn!.address, receiverAddress: paired.vpn!.peers[0]!.address, receiverKey: paired.peers[0]!.publicKey });
+      } catch (error) {
+        await send({ type: "pair-error", reason: error instanceof PairError ? error.reason : "unknown" });
+      }
+      return;
+    }
     if (value.type === "start" && state === "initial") {
       if (Object.keys(value).sort().join(",") !== "config,seed,type" || typeof value.config !== "string" ||
           typeof value.seed !== "string" || !/^[0-9a-f]{64}$/.test(value.seed)) throw new Error("invalid startup message");

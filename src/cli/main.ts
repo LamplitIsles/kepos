@@ -71,6 +71,11 @@ export const CLI_USAGE = [
   "  peer status      Inspect identity and configuration",
   "  peer pair        Add an explicitly approved peer to the config",
   "  peer vpn         Run the exclusive Linux VPN runtime",
+  "  peer receiver    Run a managed receiver with a device address pool",
+  "  peer invite      Create a one-use invitation on the running receiver",
+  "  peer devices     List receiver devices",
+  "  peer grant       Set a device's inbound TCP grant",
+  "  peer revoke      Revoke a receiver device",
 ].join("\n");
 
 export async function runCli(
@@ -106,7 +111,58 @@ export async function runCli(
     await peerVpnCommand(rest, dependencies);
     return;
   }
-  throw new Error(`unknown command: ${arguments_.join(" ")}\n\n${CLI_USAGE}`);
+  if (group === "peer" && action === "receiver") {
+    await receiverCommand(rest, dependencies);
+    return;
+  }
+  if (group === "peer" && (action === "invite" || action === "devices" || action === "grant" || action === "revoke")) {
+    await receiverAdminCommand(action, rest, dependencies);
+    return;
+  }
+  throw new Error(`unknown command\n\n${CLI_USAGE}`);
+}
+
+async function receiverCommand(arguments_: readonly string[], dependencies: CliDependencies): Promise<void> {
+  const options = parseArguments(arguments_, ["--state", "--config", "--tun-helper", "--pool"]);
+  const stateDir = path.resolve(options.get("--state") ?? defaultKeposPeerStatePath());
+  const configPath = path.resolve(options.get("--config") ?? defaultKeposConfigPath());
+  const config = requireConfig(await dependencies.loadConfig(configPath));
+  const helper = path.resolve(required(options, "--tun-helper"));
+  const pool = required(options, "--pool");
+  const lock = await dependencies.acquirePeerRuntimeLock(stateDir);
+  let runtime: Awaited<ReturnType<typeof import("../vpn/receiver.js").startReceiver>> | undefined;
+  const abort = new AbortController();
+  try {
+    runtime = await (await import("../vpn/receiver.js")).startReceiver({ stateDir, config, helper, pool, log: dependencies.stderr });
+    dependencies.stdout("Receiver running");
+    const signal = dependencies.waitForSignal(() => runtime!.stop(), abort.signal);
+    const result = await Promise.race([signal.then(() => undefined), runtime.failed]);
+    if (result) throw result;
+  } finally {
+    abort.abort();
+    try { await runtime?.stop(); } finally { await lock.release(); }
+  }
+}
+
+async function receiverAdminCommand(action: "invite" | "devices" | "grant" | "revoke", arguments_: readonly string[], dependencies: CliDependencies): Promise<void> {
+  const options = parseArguments(arguments_, action === "grant" ? ["--state", "--key", "--ports"] : action === "revoke" ? ["--state", "--key"] : action === "invite" ? ["--state", "--exclude-address"] : ["--state"]);
+  const stateDir = path.resolve(options.get("--state") ?? defaultKeposPeerStatePath());
+  const request: Parameters<typeof import("../vpn/receiver.js").receiverRequest>[1] = action === "devices" ? { action: "list" } : action === "invite" ? { action } : { action, key: required(options, "--key") };
+  if (action === "invite" && options.has("--exclude-address")) request.excludeAddress = required(options, "--exclude-address");
+  if (action === "grant") {
+    const input = required(options, "--ports");
+    if (input === "all") request.ports = "all";
+    else {
+      const parts = input.split(",");
+      if (parts.some((part) => !/^[1-9][0-9]{0,4}$/.test(part) || Number(part) > 65535) || new Set(parts).size !== parts.length) throw new Error("--ports must be all or comma-separated TCP ports");
+      request.ports = parts.map(Number);
+    }
+  }
+  const result = await (await import("../vpn/receiver.js")).receiverRequest(stateDir, request);
+  if (action === "invite") {
+    if (!result || typeof result !== "object" || !("invitation" in result) || typeof result.invitation !== "string") throw new Error("receiver request failed");
+    dependencies.stdout(result.invitation);
+  } else dependencies.stdout(JSON.stringify(result));
 }
 
 async function setupPeerCommand(
@@ -285,7 +341,7 @@ function parseArguments(
   for (let index = 0; index < arguments_.length; index += 2) {
     const option = arguments_[index];
     if (!option || !allowedSet.has(option)) {
-      throw new Error(`unknown option: ${option ?? ""}`);
+      throw new Error("unknown option");
     }
     const value = arguments_[index + 1];
     if (!value || value.startsWith("--")) {

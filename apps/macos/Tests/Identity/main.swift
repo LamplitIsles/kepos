@@ -47,4 +47,21 @@ do {
     _ = try identity.publicKey(stateDirectory: directory)
     fatalError("symlinked seed was accepted")
 } catch IdentityError.unavailable {}
+let managed = ManagedConfigStore(root: root.appendingPathComponent("managed"))
+let template = try managed.read()
+require(template == nil)
+let settings = ManagedConfig(value: ["address": "198.18.8.2", "receiverAddress": "198.18.8.1", "receiverKey": String(repeating: "ab", count: 32)])!
+try managed.save(settings)
+let restored = try managed.read()
+require(restored == settings)
+require(settings.tunnelConfig.contains("198.18.8.1"))
+require(ManagedConfig(value: ["address": "198.18.8.1", "receiverAddress": "198.18.8.1", "receiverKey": String(repeating: "ab", count: 32)]) == nil)
+let managedFile = managed.root.appendingPathComponent("config.json")
+try Data("invalid".utf8).write(to: managedFile)
+do {
+    _ = try managed.read()
+    fatalError("corrupt managed config was accepted")
+} catch ManagedVPNError.localState {}
+let corrupt = try Data(contentsOf: managedFile)
+require(corrupt == Data("invalid".utf8))
 print("existing identity tests passed")

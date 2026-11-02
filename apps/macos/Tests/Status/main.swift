@@ -3,6 +3,24 @@ import Foundation
 func require(_ condition: @autoclosure () -> Bool) {
     if !condition() { fatalError("Provider status test failed") }
 }
+require(managedProviderFailure(ProviderFailure.identity.safeError, pairing: true) == .localState)
+require(managedProviderFailure(ProviderFailure.configuration.safeError, pairing: true) == .localState)
+require(managedProviderFailure(ProviderFailure.permission.safeError, pairing: true) == .permission)
+require(managedProviderFailure(ProviderFailure.identityInUse.safeError, pairing: true) == .identityInUse)
+require(managedProviderFailure(ProviderFailure.extensionUnavailable.safeError, pairing: true) == .providerUnavailable)
+require(managedProviderFailure(ProviderFailure.bridge.safeError, pairing: true) == .outcomeUnknown)
+require(managedProviderFailure(ProviderFailure.pairingConflictUnknown.safeError, pairing: true) == .pairingConflictUnknown)
+require(managedProviderFailure(ProviderFailure.capacity.safeError, pairing: true) == .receiverCapacity)
+require(managedProviderFailure(ProviderFailure.pool.safeError, pairing: true) == .receiverCapacity)
+require(managedProviderFailure(ProviderFailure.excludedAddress.safeError, pairing: true) == .receiverExcludedAddress)
+require(managedProviderFailure(ProviderFailure.receiverRouteConflict.safeError, pairing: true) == .receiverRouteConflict)
+require(managedProviderFailure(ProviderFailure.localAddressConflict.safeError, pairing: false) == .localAddressConflict)
+require(managedProviderFailure(ProviderFailure.routeInspectionUnavailable.safeError, pairing: false) == .routeInspectionUnavailable)
+require(managedProviderFailure(ProviderFailure.localAddressConflict.safeError, pairing: true) == .pairingConflictUnknown)
+require(managedProviderFailure(ProviderFailure.routeInspectionUnavailable.safeError, pairing: true) == .outcomeUnknown)
+let untrusted = NSError(domain: "untrusted invitation secret", code: ProviderFailure.identity.rawValue)
+require(managedProviderFailure(untrusted, pairing: true) == .outcomeUnknown)
+require(!managedProviderFailure(untrusted, pairing: true).localizedDescription.contains("secret"))
 let key = String(repeating: "ab", count: 32)
 func message(_ peers: String, running: String = "true") -> Data {
     Data("{\"running\":\(running),\"peers\":\(peers)}".utf8)
@@ -18,14 +36,6 @@ require(ProviderStatus.peers(from: message("[\(peer),\(peer)]")) == nil)
 require(ProviderStatus.peers(from: message("[\(peer)]", running: "false")) == nil)
 require(ProviderStatus.peers(from: message("[{\"publicKey\":\"\(key)\",\"label\":\"remote\",\"connected\":1}]")) == nil)
 require(ProviderStatus.peers(from: Data(repeating: 0x20, count: 32_769)) == nil)
-let provider = "io.example.kepos.tunnel"
-require(mayReplaceExtension(expected: provider, request: provider, existing: provider, incoming: provider))
-require(!mayReplaceExtension(expected: nil, request: provider, existing: provider, incoming: provider))
-require(!mayReplaceExtension(expected: "", request: "", existing: "", incoming: ""))
-require(!mayReplaceExtension(expected: provider, request: "other", existing: provider, incoming: provider))
-require(!mayReplaceExtension(expected: provider, request: provider, existing: "other", incoming: provider))
-require(!mayReplaceExtension(expected: provider, request: provider, existing: provider, incoming: "other"))
-
 var gate = StatusRequestGate()
 var attempts: [Int] = []
 for millisecond in 0...6_000 {

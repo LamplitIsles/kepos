@@ -1,5 +1,32 @@
 import Foundation
 
+let sameLANReceiver = vpnHostRoutes(["192.168.1.88"])
+assert(sameLANReceiver == [VPNHostRoute(address: "192.168.1.88", mask: "255.255.255.255")])
+assert(vpnHostRoutes([]).isEmpty)
+let lan = ExistingIPv4Route(destination: "192.168.1.0", isUp: true, isHost: false, isLinkLayer: false, isCloned: false)
+let arp = ExistingIPv4Route(destination: "192.168.1.88", isUp: true, isHost: true, isLinkLayer: true, isCloned: true)
+let competing = ExistingIPv4Route(destination: "192.168.1.88", isUp: true, isHost: true, isLinkLayer: false, isCloned: false)
+let inactive = ExistingIPv4Route(destination: "192.168.1.88", isUp: false, isHost: true, isLinkLayer: false, isCloned: false)
+let other = ExistingIPv4Route(destination: "192.168.1.89", isUp: true, isHost: true, isLinkLayer: false, isCloned: false)
+let snapshot = LocalIPv4Snapshot(interfaceAddresses: ["192.168.1.124"], routes: [lan, arp])
+assert(vpnRouteConflict(local: "198.18.113.9", receivers: ["192.168.1.88"], snapshot: snapshot) == nil)
+assert(vpnRouteConflict(local: "192.168.1.124", receivers: ["192.168.1.88"], snapshot: snapshot) == .localAddress)
+assert(vpnRouteConflict(local: "198.18.113.9", receivers: ["192.168.1.124"], snapshot: snapshot) == .receiverAddress)
+assert(vpnRouteConflict(local: "198.18.113.9", receivers: ["192.168.1.88"], snapshot: LocalIPv4Snapshot(interfaceAddresses: [], routes: [competing])) == .receiverHostRoute)
+assert(vpnRouteConflict(local: "198.18.113.9", receivers: ["192.168.1.88"], snapshot: LocalIPv4Snapshot(interfaceAddresses: [], routes: [inactive, other])) == nil)
+let destinationSockaddr: [UInt8] = [16, 2, 0, 0, 192, 168, 1, 88, 0, 0, 0, 0, 0, 0, 0, 0]
+let gatewaySockaddr: [UInt8] = [8, 18, 0, 0, 1, 2, 3, 4]
+let hostMaskSockaddr: [UInt8] = [8, 0, 0, 0, 255, 255, 255, 255]
+let decodedHost = try parseDarwinRouteAddresses(destinationSockaddr + gatewaySockaddr + hostMaskSockaddr, addressBits: 7)
+assert(decodedHost.destination == "192.168.1.88" && decodedHost.hasHostMask)
+let subnetMaskSockaddr: [UInt8] = [7, 0, 0, 0, 255, 255, 255, 0]
+let decodedSubnet = try parseDarwinRouteAddresses(destinationSockaddr + subnetMaskSockaddr, addressBits: 5)
+assert(decodedSubnet.destination == "192.168.1.88" && !decodedSubnet.hasHostMask)
+do {
+    _ = try parseDarwinRouteAddresses([16, 2, 0], addressBits: 1)
+    fatalError("truncated route accepted")
+} catch RouteSnapshotError.invalid {}
+
 func require(_ condition: @autoclosure () -> Bool) {
     if !condition() { fatalError("Worklet framing test failed") }
 }

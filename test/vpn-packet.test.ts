@@ -72,6 +72,13 @@ test("outgoing flows admit replies only after a valid SYN-ACK and clear on recon
   assert.equal(policy.admit(tcp(remote, local, 443, 53000, 16), "in"), false);
 });
 
+test("managed receiver permits replies but never initiates a device connection", () => {
+  const policy = new PacketPolicy(local, remote, [443], Date.now, false);
+  assert.equal(policy.admit(tcp(local, remote, 53000, 443, 2), "out"), false);
+  assert.equal(policy.admit(tcp(remote, local, 53001, 443, 2), "in"), true);
+  assert.equal(policy.admit(tcp(local, remote, 443, 53001, 18, 50, 101), "out"), true);
+});
+
 test("established and half-closed flows survive idle while unsolicited traffic remains denied", () => {
   let now = 0;
   const policy = new PacketPolicy(local, remote, [443], () => now);

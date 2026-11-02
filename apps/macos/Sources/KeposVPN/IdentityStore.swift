@@ -41,18 +41,4 @@ struct IdentityStore {
         return try existingPublicKey(at: directory)
     }
 
-    /// Create the stable user-owned lock file expected by both the CLI and the
-    /// system provider; the provider itself holds the exclusive flock.
-    func prepareLock(at directory: URL) throws {
-        let lock = directory.deletingLastPathComponent()
-            .appendingPathComponent(".\(directory.lastPathComponent).peer.runtime.lock")
-        let descriptor = open(lock.path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else { throw IdentityError.unavailable }
-        defer { _ = close(descriptor) }
-        var info = stat()
-        guard fstat(descriptor, &info) == 0,
-              (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
-              (info.st_mode & 0o777) == 0o600,
-              info.st_uid == getuid() else { throw IdentityError.invalid }
-    }
 }

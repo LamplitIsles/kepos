@@ -26,6 +26,13 @@ struct TunnelLifecycle {
     mutating func startFailed() { phase = .failed(.start) }
     mutating func requestStop() { phase = .stopping }
 
+    /// Mark the stop before calling into NetworkExtension, which can report a
+    /// status transition immediately.
+    mutating func stop(using action: () -> Void) {
+        requestStop()
+        action()
+    }
+
     mutating func observe(_ system: VPNProviderState, at now: TimeInterval) -> VPNStatus {
         switch phase {
         case .preparing:

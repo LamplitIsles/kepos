@@ -6,6 +6,8 @@ import { cleanupAll } from "../runtime/cleanup.js";
 import { PacketFraming } from "./framing.js";
 import { PacketPolicy } from "./packet-policy.js";
 import { acceptanceEvent } from "./acceptance-diagnostics.js";
+import { enrollmentSecret, ENROLLMENT_PREFIX } from "./invitation.js";
+import { EnrollmentRejected, type EnrollmentRejection } from "./enrollment-errors.js";
 
 const hello = Buffer.from("Kepos VPN IPv4 v1\0\0\0", "ascii");
 // A packet device need not be backed by the Linux helper's byte streams.
@@ -53,6 +55,10 @@ export async function startVpnEngine(options: {
   log?: (message: string) => void;
   onPeerStatus?: (peer: { key: string; label: string; connected: boolean }) => void;
   now: () => number;
+  enrollment?: {
+    enroll: (publicKey: string, secret: string, isOpen: () => boolean) => Promise<{ address: string }>;
+    changed: () => void;
+  };
 }): Promise<{ peerKey: string; interfaceName: string; failed: Promise<Error>; stop: () => Promise<void> }> {
   const vpn = options.config.vpn;
   if (!vpn) throw new Error("VPN mode requires a [vpn] configuration");
@@ -72,6 +78,10 @@ export async function startVpnEngine(options: {
   const admissionLogs = new Map<string, number>();
   let lastUnknownAdmissionLog: number | undefined;
   const streams = new Set<DhtStream>();
+  const enrollmentReservations = new Map<string, number>();
+  const enrollmentStreams = new Set<DhtStream>();
+  const enrollmentAttempts: number[] = [];
+  const enrollmentRejectionLogs = new Map<EnrollmentRejection, number>();
   let stopping = false;
   let stopTask: Promise<void> | undefined;
   let tun: PacketDevice | undefined;
@@ -95,11 +105,56 @@ export async function startVpnEngine(options: {
     admissionLogs.set(logKey, timestamp);
     options.log?.(`VPN admission for ${peer.label}: ${message}`);
   }
+  async function enroll(key: string, stream: DhtStream, frames: PacketFraming, packet: Buffer): Promise<void> {
+    let result: Record<string, string>;
+    let committed = false;
+    try {
+      const secret = enrollmentSecret(packet);
+      if (!secret || !options.enrollment) throw new Error("unusable invitation");
+      const device = await options.enrollment.enroll(key, secret, () => !stopping && !stream.destroyed);
+      committed = true;
+      result = { type: "accepted", address: device.address, receiverAddress: vpn!.address, receiverKey: peerKey };
+    } catch (error) {
+      if (error instanceof EnrollmentRejected) {
+        const last = enrollmentRejectionLogs.get(error.reason), timestamp = now();
+        if (last === undefined || timestamp - last >= 5_000) {
+          enrollmentRejectionLogs.set(error.reason, timestamp);
+          const detail = { capacity: "device capacity exhausted", pool: "address pool exhausted", route: "address pool conflicts with an existing route", excluded: "device already has the excluded address; inspect and revoke it before re-admission" }[error.reason];
+          options.log?.(`VPN enrollment rejected: ${detail}`);
+        }
+        result = { type: "rejected", reason: error.reason, version: "1" };
+      } else result = { type: error instanceof Error && error.message === "unusable invitation" ? "unusable" : "unknown", version: "1" };
+    }
+    try { await frames.send(Buffer.from(JSON.stringify(result))); }
+    finally { if (committed) options.enrollment!.changed(); }
+  }
+
+  function attachEnrollment(key: string, stream: DhtStream): void {
+    if (stopping || enrollmentStreams.size >= 8) { stream.destroy(); return; }
+    streams.add(stream);
+    enrollmentStreams.add(stream);
+    stream.on("error", () => undefined);
+    const frames = new PacketFraming(stream);
+    const timeout = setTimeout(() => stream.destroy(), 10_000);
+    let first = true;
+    void frames.receive(async (packet) => {
+      if (!first) throw new Error("enrollment complete");
+      first = false;
+      await enroll(key, stream, frames, packet);
+      // Each stream can carry only one enrollment attempt.
+      stream.end();
+    }).catch(() => undefined).finally(() => {
+      clearTimeout(timeout);
+      enrollmentStreams.delete(stream);
+      streams.delete(stream);
+      stream.destroy();
+    });
+  }
   function attach(peer: Peer, stream: DhtStream): void {
     if (stopping || sessions.has(peer.key)) { stream.destroy(); return; }
     streams.add(stream);
     stream.on("error", () => undefined);
-    const session: Session = { stream, frames: new PacketFraming(stream), policy: new PacketPolicy(vpn!.address, peer.address, peer.allowTcp), ready: false };
+    const session: Session = { stream, frames: new PacketFraming(stream), policy: new PacketPolicy(vpn!.address, peer.address, peer.allowTcp, Date.now, !options.enrollment), ready: false };
     sessions.set(peer.key, session);
     const timeout = setTimeout(() => {
       if (!session.ready) {
@@ -126,6 +181,11 @@ export async function startVpnEngine(options: {
         if (sessions.get(peer.key) !== session || stopping) return;
         if (first) {
           first = false;
+          if (options.enrollment && packet.subarray(0, ENROLLMENT_PREFIX.length).toString("ascii") === ENROLLMENT_PREFIX) {
+            await enroll(peer.key, stream, session.frames, packet);
+            stream.end();
+            return;
+          }
           if (!packet.equals(hello)) throw new Error("VPN protocol mismatch");
           session.ready = true;
           clearTimeout(timeout);
@@ -133,6 +193,7 @@ export async function startVpnEngine(options: {
           options.log?.(`VPN peer connected: ${peer.label}`);
           return;
         }
+        if (!session.ready) throw new Error("VPN protocol handshake missing");
         if (tunWriting || !tun) { acceptanceEvent("packet_busy"); return; }
         if (!session.policy.admit(packet, "in")) { acceptanceEvent("policy_rejected"); return; }
         acceptanceEvent("policy_admitted");
@@ -204,6 +265,15 @@ export async function startVpnEngine(options: {
       const key = b4a.toString(publicKey, "hex");
       const peer = byKey.get(key);
       if (!peer || peer.direction !== "accept") {
+        if (!peer && options.enrollment && !stopping) {
+          const timestamp = now();
+          for (const [reserved, expiry] of enrollmentReservations) if (expiry <= timestamp) enrollmentReservations.delete(reserved);
+          while (enrollmentAttempts.length && timestamp - enrollmentAttempts[0]! >= 60_000) enrollmentAttempts.shift();
+          if (enrollmentAttempts.length >= 32 || enrollmentStreams.size + enrollmentReservations.size >= 8 || enrollmentReservations.has(key)) return true;
+          enrollmentAttempts.push(timestamp);
+          enrollmentReservations.set(key, timestamp + 10_000);
+          return false;
+        }
         if (!peer) acceptanceEvent("admission_unknown");
         const timestamp = now();
         if (lastUnknownAdmissionLog === undefined || timestamp - lastUnknownAdmissionLog >= 5_000) {
@@ -228,7 +298,9 @@ export async function startVpnEngine(options: {
       return false;
     } }, (stream) => {
       const key = b4a.toString(stream.remotePublicKey, "hex");
+      const reserved = enrollmentReservations.delete(key);
       const peer = byKey.get(key);
+      if (!peer && options.enrollment && reserved && !stopping) { attachEnrollment(key, stream); return; }
       if (!peer || peer.direction !== "accept" || stopping) { stream.destroy(); return; }
       options.log?.(`VPN transport accepted from ${peer.label}; awaiting protocol handshake`);
       attach(peer, stream);
