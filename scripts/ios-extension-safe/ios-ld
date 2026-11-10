@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Linux Clang emits a legacy iOS deployment option that ld64.lld ignores.
+# Replace it with the equivalent supported option; preserve all other flags.
+: "${KEPOS_LD64:?Set KEPOS_LD64 to ld64.lld}"
+: "${KEPOS_IOS_SDK_VERSION:?Set KEPOS_IOS_SDK_VERSION to the SDK version}"
+args=()
+while (($#)); do
+  case "$1" in
+    -iphoneos_version_min|-ios_version_min)
+      (($# >= 2)) || { printf 'Missing iOS minimum version\n' >&2; exit 1; }
+      args+=(-platform_version ios "$2" "$KEPOS_IOS_SDK_VERSION")
+      shift 2
+      ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+exec "$KEPOS_LD64" "${args[@]}"

@@ -1,0 +1,5 @@
+--- a/cmake-ucd.cmake
++++ b/cmake-ucd.cmake
+@@ -113 +113 @@
+-      file(DOWNLOAD "${url}" "${path}" STATUS status)
++      message(FATAL_ERROR "Offline build: missing verified Unicode input ${path}")

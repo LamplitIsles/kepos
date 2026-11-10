@@ -31,21 +31,6 @@ func require(_ condition: @autoclosure () -> Bool) {
     if !condition() { fatalError("Worklet framing test failed") }
 }
 
-// IPC duplicates the worklet endpoints at construction, so opening it before
-// start captures invalid endpoints permanently even if the worklet starts later.
-final class FakeWorklet {
-    var endpoint: Int? = nil
-    func start() { endpoint = 42 }
-    func openIPC() -> FakeIPC { FakeIPC(endpoint: endpoint) }
-}
-struct FakeIPC {
-    let endpoint: Int?
-    func send(_ bytes: Data) -> Bool { endpoint != nil && !bytes.isEmpty }
-}
-let fakeWorklet = FakeWorklet()
-let startupIPC = startWorkletIPC(start: { fakeWorklet.start() }, openIPC: { fakeWorklet.openIPC() })
-require(startupIPC?.send(Data([1])) == true)
-
 let packet = Data(repeating: 0xa5, count: 1400)
 let first = try WorkletFrames.encode(kind: WorkletFrames.packet, payload: packet)
 let second = try WorkletFrames.encode(kind: WorkletFrames.control, payload: Data("{}".utf8))

@@ -18,6 +18,7 @@ require(managedProviderFailure(ProviderFailure.localAddressConflict.safeError, p
 require(managedProviderFailure(ProviderFailure.routeInspectionUnavailable.safeError, pairing: false) == .routeInspectionUnavailable)
 require(managedProviderFailure(ProviderFailure.localAddressConflict.safeError, pairing: true) == .pairingConflictUnknown)
 require(managedProviderFailure(ProviderFailure.routeInspectionUnavailable.safeError, pairing: true) == .outcomeUnknown)
+require(managedProviderFailure(ProviderFailure.routeInspectionBeforePair.safeError, pairing: true) == .routeInspectionUnavailable)
 let untrusted = NSError(domain: "untrusted invitation secret", code: ProviderFailure.identity.rawValue)
 require(managedProviderFailure(untrusted, pairing: true) == .outcomeUnknown)
 require(!managedProviderFailure(untrusted, pairing: true).localizedDescription.contains("secret"))

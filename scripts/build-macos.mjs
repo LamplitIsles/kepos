@@ -1,7 +1,9 @@
-import { cpSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireMacExtensionSafe } from "./ios-framework-safety.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const output = path.resolve(root, ".build/macos-unsigned");
@@ -16,8 +18,17 @@ if (!team || !/^[A-Z0-9]{10}$/.test(team) || !/^[A-Za-z0-9.-]+$/.test(bundle)) {
   throw new Error("Set KEPOS_TEAM_ID to a 10-character team ID and KEPOS_BUNDLE_ID to the intended app identifier");
 }
 if (existsSync(output)) throw new Error(`Build output already exists: ${output}; preserve or remove it before rebuilding`);
-const kitRoot = path.resolve(root, ".build/macos-deps/BareKit.xcframework/macos-arm64_x86_64/BareKit.framework");
-if (!existsSync(path.join(kitRoot, "Headers/BareKit.h"))) throw new Error("BareKit macOS framework is missing");
+const kitSource = path.resolve(root, ".build/ios-deps/bare-kit-swift-v2.2.0");
+const kitRoot = path.join(kitSource, "extension-safe-macos/BareKit.framework");
+if (!existsSync(path.join(kitRoot, "Headers/bare-kit.h"))) throw new Error("Extension-safe BareKit 3 macOS framework is required; the official v2.2.0 macOS framework is not extension-safe");
+requireMacExtensionSafe(path.join(kitRoot, "BareKit"));
+const addonRoot = path.join(kitSource, "extension-safe-macos/addons");
+if (!existsSync(addonRoot)) throw new Error("Extension-safe macOS addon frameworks are required");
+const addonFrameworks = readdirSync(addonRoot);
+for (const name of addonFrameworks) {
+  if (!name.endsWith(".framework")) throw new Error(`Unexpected macOS linked artifact: ${name}`);
+  requireMacExtensionSafe(path.join(addonRoot, name, name.slice(0, -".framework".length)));
+}
 const app = path.join(output, "Kepos.app/Contents");
 const extensionID = `${bundle}.tunnel`;
 const ext = path.join(app, "PlugIns", `${extensionID}.appex/Contents`);
@@ -30,10 +41,19 @@ const worklet = path.join(output, "macos-worklet.cjs");
 run(npmBin("esbuild"), ["src/vpn/worklet-entry.ts", "--platform=node", "--format=cjs", "--packages=external", "--bundle", "--minify-syntax",
   `--define:KEPOS_ACCEPTANCE_DIAGNOSTICS=${acceptanceDiagnostics}`, `--outfile=${worklet}`]);
 run(npmBin("bare-pack"), ["--host", "darwin-arm64", "--linked", "--out", path.join(ext, "Resources/macos-worklet.bundle"), worklet]);
-run(npmBin("bare-link"), ["--host", "darwin-arm64", "--out", path.join(ext, "Frameworks"), worklet]);
+const packed = createRequire(import.meta.url)("bare-bundle").from(readFileSync(path.join(ext, "Resources/macos-worklet.bundle")));
+if (!packed.addons.length) throw new Error("The macOS worklet has no linked addons");
+for (const addon of packed.addons) {
+  const match = /^linked:([A-Za-z0-9._-]+\.framework)\/([A-Za-z0-9._-]+)$/.exec(addon);
+  if (!match || !addonFrameworks.includes(match[1]) || !existsSync(path.join(addonRoot, match[1], match[2]))) {
+    throw new Error(`Missing macOS linked addon: ${addon}`);
+  }
+}
+for (const name of addonFrameworks) {
+  cpSync(path.join(addonRoot, name), path.join(ext, "Frameworks", name), { recursive: true, verbatimSymlinks: true });
+}
 
-// The release contains both a universal root binary and an arm64 Versions/A
-// binary. This application targets arm64; reconstruct standard framework links.
+// Reconstruct the standard framework links around the arm64 binary.
 const framework = path.join(ext, "Frameworks/BareKit.framework");
 mkdirSync(path.join(framework, "Versions/A"), { recursive: true });
 for (const name of ["BareKit", "Headers", "Resources"]) {
@@ -61,10 +81,13 @@ const source = (name) => `apps/macos/Sources/KeposVPN/${name}.swift`;
 run(swift, [...flags, "-module-name", "Kepos",
   ...["VPNControl", "ManagedStateMessage", "ProviderStatus", "StatusDiagnostics", "ConnectionMonitor", "TunnelLifecycle", "VPNController", "MenuPresentation", "KeposMenuBar"].map(source),
   "apps/macos/App/AppMain.swift", "-o", path.join(app, "MacOS/Kepos")]);
-run(swift, [...flags, "-parse-as-library", "-module-name", "KeposTunnel", "-import-objc-header", path.join(kitRoot, "Headers/BareKit.h"),
+run(swift, [...flags, "-parse-as-library", "-module-name", "KeposTunnel", "-import-objc-header", path.join(kitRoot, "Headers/bare-kit.h"),
+  "-application-extension", "-Xlinker", "-application_extension", "-Xlinker", "-fatal_warnings",
+  "-I", "apps/macos/Sources/BareKitBridge",
   "-Xlinker", "-e", "-Xlinker", "_NSExtensionMain",
   "-F", path.dirname(kitRoot), "-framework", "BareKit", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
   ...["VPNControl", "ManagedStateMessage", "ManagedConfig", "ManagedPeerState", "IdentityStore", "ExistingIdentity", "PeerIdentityCrypto", "WorkletFrames", "WorkletStartup", "RoutePlan", "LocalRouteSnapshot", "StatusDiagnostics", "AcceptanceDiagnostics", "PacketTunnelProvider"].map(source),
+  ...["Worklet", "IPC"].map((name) => path.join(kitSource, "src/bare-kit-swift/Sources/BareKit", `${name}.swift`)),
   "-o", path.join(ext, "MacOS/KeposTunnel")]);
 
 const xml = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");

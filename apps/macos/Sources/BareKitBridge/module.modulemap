@@ -1,0 +1,4 @@
+module BareKitBridge {
+    header "BareKitBridge.h"
+    export *
+}

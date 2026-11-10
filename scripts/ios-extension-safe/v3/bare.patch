@@ -1,0 +1,34 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -34,8 +34,4 @@
+-  set(prebuilds "${CMAKE_CURRENT_BINARY_DIR}")
+-
+-  mirror_drive(
+-    SOURCE krmguqnh75rud4iieqgmzyqoza415cbu68payoww65ii9fzt5n4o
+-    DESTINATION "${prebuilds}"
+-    PREFIX /${target}
+-    CHECKOUT 198
+-  )
++  if(NOT KEPOS_LOCAL_PREBUILDS)
++    message(FATAL_ERROR "Offline local prebuilds are required")
++  endif()
++  set(prebuilds "${KEPOS_LOCAL_PREBUILDS}")
+@@ -181 +177 @@
+-  OUT src/bare.js.h
++  OUT "${CMAKE_CURRENT_BINARY_DIR}/bare.js.h"
+@@ -211 +207 @@
+-    src/bare.js.h
++    "${CMAKE_CURRENT_BINARY_DIR}/bare.js.h"
+@@ -228,0 +225,2 @@
++  PRIVATE
++    "${CMAKE_CURRENT_BINARY_DIR}"
+@@ -433 +431,3 @@
+-add_subdirectory(bin)
++if(NOT KEPOS_EXTENSION_ONLY)
++  add_subdirectory(bin)
++endif()
+--- a/src/runtime.c
++++ b/src/runtime.c
+@@ -15 +15 @@
+-#include "bare.js.h"
++#include <bare.js.h>

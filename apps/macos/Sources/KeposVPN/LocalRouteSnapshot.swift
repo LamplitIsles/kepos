@@ -21,6 +21,11 @@ func localIPv4Snapshot() throws -> LocalIPv4Snapshot {
     var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0]
     var size = 0
     guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size <= 8 * 1024 * 1024 else { throw ProviderFailure.routeInspectionUnavailable }
+    #if os(iOS)
+    // A sandbox that returns no routing data cannot establish that the
+    // requested host route is free; do not treat it as an empty safe table.
+    guard size > 0 else { throw ProviderFailure.routeInspectionUnavailable }
+    #endif
     var bytes = [UInt8](repeating: 0, count: size)
     let readResult = bytes.withUnsafeMutableBytes { buffer in
         sysctl(&mib, u_int(mib.count), buffer.baseAddress, &size, nil, 0)

@@ -1,0 +1,27 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -32,8 +32,11 @@
+-  set(prebuilds "${CMAKE_CURRENT_BINARY_DIR}")
+-
+-  mirror_drive(
+-    SOURCE krmguqnh75rud4iieqgmzyqoza415cbu68payoww65ii9fzt5n4o
+-    DESTINATION "${prebuilds}"
+-    PREFIX /${target}
+-    CHECKOUT 159
+-  )
++  if(KEPOS_LOCAL_PREBUILDS)
++    set(prebuilds "${KEPOS_LOCAL_PREBUILDS}")
++  else()
++    set(prebuilds "${CMAKE_CURRENT_BINARY_DIR}")
++    mirror_drive(
++      SOURCE krmguqnh75rud4iieqgmzyqoza415cbu68payoww65ii9fzt5n4o
++      DESTINATION "${prebuilds}"
++      PREFIX /${target}
++      CHECKOUT 159
++    )
++  endif()
+@@ -335 +338,3 @@
+-add_subdirectory(bin)
++if(NOT KEPOS_EXTENSION_ONLY)
++  add_subdirectory(bin)
++endif()

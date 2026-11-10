@@ -50,6 +50,58 @@ Replace the example address with the affected device's actual allocation, and sh
 
 The Mac app extension owns the private `Kepos` directory in its app-group container, including the seed-only `peer` identity, runtime lock and `config.json`. The menu asks the provider for public state and does not read or transfer the seed or lock. The provider preserves an existing managed identity; a paired configuration with a missing identity fails rather than generating a replacement. If a previously selected identity is outside this location, setup stops with guidance; any migration or cutover requires a separately authorized operation. The invitation is passed to the provider only for temporary pairing; neither the template nor the receiver store contains its text. The provider saves the public pairing result before reporting success. Disconnect before pairing, and connect separately afterward.
 
+The iPhone client targets iOS 17 or later and uses its own app-group identity,
+not a copy of the Mac or receiver identity. Its native screen shows pairing,
+system VPN, and receiver connectivity separately. An unavailable receiver
+status is not evidence that the peer is disconnected. If pairing may have
+completed but the result cannot be confirmed, ask the receiver operator to
+inspect authorized devices using the iPhone's public key before retrying; the
+app does not replay the invitation. The extension owns the tunnel while the
+app is backgrounded. DNS, TLS and service login remain external, and the
+overlay supports IPv4 TCP only; its UDP carrier still needs underlay access.
+
+The iOS source project is `apps/ios/Kepos.xcodeproj`. It uses the root npm
+workspace and expects an **extension-safe** iOS arm64 BareKit 3 framework at
+`.build/ios-deps/bare-kit-swift-v2.2.0/extension-safe/BareKit.framework` and
+extension-safe addon frameworks in its `addons/` directory. The official
+bare-kit-swift v2.2.0 iOS prebuild is not suitable: it lacks the extension-safe Mach-O flag
+and calls `UIApplication.sharedApplication`, including during worklet teardown.
+The local build described in [iOS extension-safe build](ios-extension-safe.md)
+compiles the runtime and addons with extension checks enabled; the packaging step
+rejects artifacts without the required metadata. Do not patch Mach-O flags to
+bypass it or substitute the Mac-only slice or an older worklet bundle.
+
+The project builds the current worklet with `esbuild` and
+`bare-pack --host ios-arm64 --linked`, and checks its addon references against
+the separately built extension-safe frameworks. Its packaging steps are intended
+to embed and sign runtime frameworks with the app and embed the worklet before
+signing the extension. The initial target is a physical arm64 device, not the
+simulator. The packaging scripts and provider have been cross-linked with
+extension-safe runtime artifacts. A signed Xcode build and device
+execution remain unverified.
+
+On the Mac, the developer opens the project in Xcode, selects their own team,
+and configures a unique `KEPOS_BUNDLE_ID` and matching `KEPOS_APP_GROUP` in
+the project build settings. The team must authorize Network Extensions and the
+same App Group for both app and extension provisioning profiles. The checked-in
+entitlements are signing inputs, not proof that a developer account or device
+is eligible. Signing, installation, VPN permission prompts and iPhone UI are
+performed by the user. A build alone does not verify a signed extension, the
+route snapshot in the iOS sandbox, Bare native addons, lock-screen protected
+storage, mobile NAT, memory use, or Safari traffic. When route inspection is
+unavailable, Kepos reports the failure instead of silently skipping the check.
+Test only with isolated identities and services unless separate authorization
+has been granted for a particular real-device operation.
+
+Passive state loading does not create or enable a VPN manager. If the existing
+Kepos manager is enabled, the app may ask its provider for public managed state;
+otherwise setup requires an explicit user action. Setup, pairing and connection
+can enable the owned Kepos configuration. iOS may then disable another enabled
+enterprise VPN, so selecting Kepos can affect an existing VPN connection. The
+app does not delete other VPN configurations or replay an uncertain invitation.
+Enabling and reloading the Kepos manager does not by itself prove that iOS has
+selected or connected it; device behavior remains to be verified.
+
 Linux checks the pool against existing non-default routes on startup and before enrollment, and checks allocated peer addresses before adding routes. A pre-commit device-capacity, pool-exhaustion or receiver-route conflict reports a fixed reason to the device and a rate-limited diagnostic to the operator; storage failures and lost responses remain unknown outcomes. The Mac snapshots local IPv4 interface addresses with [getifaddrs](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/freeifaddrs.3.html) and the routing table with [NET_RT_DUMP](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/sysctl.3.html) before applying tunnel settings. It rejects an assigned address already on an interface, a receiver address belonging to the Mac, and an active explicit host route for the receiver. It permits a receiver in an attached LAN subnet and ignores link-layer/cloned host routes such as ARP entries. If a conflict is found after the receiver commits pairing, the Mac reports the conflict and asks the operator to inspect the possible admission before retrying.
 
 These checks are snapshots: they cannot prove later route stability, route precedence, or which physical carrier path HyperDHT will use. An unsigned 0.1/28 App Extension bundle was built on N5 from `daaa0d35cd79c67f6def305ba8b731b8c82ed79f`. The user signed a development build, which was installed in an approved operation, and reported a connection and access. Orc separately observed the installed 0.1/28 `.appex`, connected status, a route to `192.168.1.88` through `utun8`, and trusted TLS and HTTP 200 access to FlickGrove over the VPN on the same LAN, with a transient N5 service. The installed signed executable was not independently byte-matched to that unsigned build. These observations do not establish invitation pairing, WAN/NAT paths, reboot behavior, negative security tests, or accessibility (AX) behavior. A previously approved isolated Mac/N5 test also succeeded with the same receiver and carrier address; neither test proves other routing paths. The prior system-extension implementation failed twice accessing the user's managed group container, and an isolated fixture reproduced the visible failure once; the precise errno was not observed. This app-extension design changes that context but has not reproduced the same red/green result. The earlier generic bridge failure has no established root cause and is not claimed fixed.
@@ -67,8 +119,9 @@ subnets, act as an exit node, forward application UDP, or provide an IPv6
 overlay. HyperDHT discovery and the UDX carrier still require UDP on the
 physical network. A direct path is required; no relay is provisioned here.
 An experimental macOS packet-tunnel implementation has undergone limited
-Mac–Linux peer tests on a LAN. iOS, Android, and Windows VPN implementations
-are not supplied.
+Mac–Linux peer tests on a LAN. The iOS source project is present but has not
+been validated on a device; Android and Windows VPN implementations are not
+supplied.
 
 Build the helper in the checkout with a Linux C compiler and kernel headers:
 
@@ -165,11 +218,10 @@ unauthenticated floods or native transport queues. Limit exposure at the host
 and network boundary and review this residual risk before deployment.
 
 The packet-policy and stream framing code are separate from the Linux helper so
-future packet interfaces can reuse them. This does not establish an iOS Network
-Extension integration: a minimal SDK provider typecheck and worklet/addon bundle
-generation have been observed separately, but extension packaging, signing,
-runtime loading, Apple policy compliance, IPv6-only underlay, and device behavior
-remain unverified. One separately approved local Linux test with two peers and
+packet interfaces can reuse them. The iOS provider and worklet have been
+cross-linked and assembled into an unsigned app. Signing, runtime loading, Apple
+policy compliance, IPv6-only underlay, and device behavior remain unverified.
+One separately approved local Linux test with two peers and
 a private four-node DHT exercised real TUN interfaces and host routes, allowed
 and denied TCP, revocation and reconnection, peer removal, and shutdown cleanup.
 Its authenticated spoof test observed a subsequent valid control SYN at the
@@ -358,16 +410,12 @@ replace an existing output. Set `KEPOS_TEAM_ID` to the intended ten-character
 Apple team identifier and, if needed, `KEPOS_BUNDLE_ID` to the intended app
 identifier. A placeholder team ID can be used for build inspection only.
 
-The build expects the macOS slice of the official BareKit v2.5.5
-`prebuilds.zip` at `.build/macos-deps/BareKit.xcframework`. The complete
-release archive's published SHA-256 is
-`fc68740347c8532ba49d45bf61fae9ca1f1040dc7d6c99f2f92dc30c40e84e46`;
-verify the complete archive against the release metadata before extracting the
-`darwin/BareKit.xcframework` directory. Selectively downloading archive ranges
-does not verify that full-archive digest. The archive is approximately 399 MiB
-and its extracted macOS directory approximately 266 MiB. The build uses the
-root npm workspace and, on Linux, the configured Swift Darwin SDK and the
-workspace's macOS-capable LLVM linker. The generated host entitlements include
+The Mac packet extension also requires its own extension-safe BareKit 3 and
+addon frameworks under `.build/ios-deps/bare-kit-swift-v2.2.0/extension-safe-macos`;
+the official v2.2.0 macOS framework lacks the extension-safe flag and fails
+the extension linker check. See [extension-safe build](ios-extension-safe.md).
+The build uses the root npm workspace and, on Linux, the configured Swift Darwin
+SDK and the workspace's macOS-capable LLVM linker. The generated host entitlements include
 `com.apple.application-identifier` with the selected team and bundle identifier;
 the host provisioning profile must authorize that claim. The generated
 entitlement files are signing inputs, not evidence of an authorized capability

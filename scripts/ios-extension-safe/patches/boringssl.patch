@@ -1,0 +1,12 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -43 +43,5 @@
+-set(INSTALL_ENABLED 1)
++if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++  set(INSTALL_ENABLED 0)
++else()
++  set(INSTALL_ENABLED 1)
++endif()
+@@ -283 +287 @@
+-    if(NOT WIN32)
++    if(NOT WIN32 AND NOT APPLE)

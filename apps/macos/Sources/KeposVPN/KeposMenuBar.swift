@@ -27,7 +27,7 @@ final class KeposMenuBar: NSObject, NSMenuDelegate {
         control.onStatusChange = { [weak self] _ in self?.render() }
         render()
         Task { await control.refresh() }
-        prepare()
+        load()
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -65,6 +65,12 @@ final class KeposMenuBar: NSObject, NSMenuDelegate {
         add("Copy public key", action: #selector(copyPublicKey), enabled: presentation.canCopyPublicKey)
         menu.addItem(.separator())
         add("Quit Kepos", action: #selector(quit), enabled: !pairing)
+    }
+
+    private func load() {
+        perform(fallback: "Unable to load Kepos. Check its local storage and try again.") {
+            self.managed = try await self.control.loadManagedState()
+        }
     }
 
     private func prepare() {

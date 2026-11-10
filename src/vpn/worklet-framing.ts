@@ -45,19 +45,26 @@ export class WorkletFraming {
 
   private async write(frame: Buffer): Promise<void> {
     if (this.stream.destroyed) throw new Error("IPC is closed");
-    if (this.stream.write(frame)) return;
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
       const cleanup = (): void => {
-        this.stream.off("drain", onDrain);
         this.stream.off("close", onClose);
         this.stream.off("error", onError);
       };
-      const onDrain = (): void => { cleanup(); resolve(); };
-      const onClose = (): void => { cleanup(); reject(new Error("IPC is closed")); };
-      const onError = (error: Error): void => { cleanup(); reject(error); };
-      this.stream.once("drain", onDrain);
+      const finish = (error?: Error | null): void => {
+        if (settled) return;
+        settled = true;
+        // A failed write can still emit an error before close; keep its
+        // listeners until close so the stream failure remains handled.
+        if (error) reject(error);
+        else { cleanup(); resolve(); }
+      };
+      const onClose = (): void => { finish(new Error("IPC is closed")); cleanup(); };
+      const onError = (error: Error): void => { finish(error); };
       this.stream.once("close", onClose);
       this.stream.once("error", onError);
+      try { this.stream.write(frame, finish); }
+      catch (error) { finish(error instanceof Error ? error : new Error("IPC write failed")); cleanup(); }
       if (this.stream.destroyed) onClose();
     });
   }

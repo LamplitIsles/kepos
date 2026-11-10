@@ -1,0 +1,32 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -55,0 +56,21 @@
++
++# Link the four addons used by the Kepos worklet against this runtime.
++if(KEPOS_ADDON_ROOT)
++  foreach(addon IN ITEMS bare-inspect bare-type sodium-native udx-native)
++    add_subdirectory("${KEPOS_ADDON_ROOT}/${addon}" "${CMAKE_BINARY_DIR}/kepos-addons/${addon}")
++    bare_module_target("${KEPOS_ADDON_ROOT}/${addon}" addon_target NAME addon_name VERSION addon_version)
++    string(REPLACE "-" "_" target_suffix "${addon}")
++    target_compile_definitions("${addon_target}" PRIVATE "BARE_MODULE_NAME=\"${addon_name}@${addon_version}\"")
++    add_library("kepos_${target_suffix}" SHARED)
++    target_link_libraries("kepos_${target_suffix}" PRIVATE "${addon_target}" bare_kit_framework)
++    if(addon STREQUAL "sodium-native" OR addon STREQUAL "udx-native")
++      target_link_options("kepos_${target_suffix}" PRIVATE "LINKER:-install_name,@rpath/${addon_name}.${addon_version}.framework/${addon_name}.${addon_version}")
++    endif()
++    set_target_properties("kepos_${target_suffix}" PROPERTIES
++      FRAMEWORK TRUE
++      OUTPUT_NAME "${addon_name}.${addon_version}"
++      MACOSX_FRAMEWORK_IDENTIFIER "io.lamplitisles.kepos.addon.${addon}"
++      MACOSX_FRAMEWORK_BUNDLE_VERSION "${addon_version}"
++      MACOSX_FRAMEWORK_SHORT_VERSION_STRING "${addon_version}")
++  endforeach()
++endif()
+--- a/lib/iOS.plist
++++ b/lib/iOS.plist
+@@ -22 +22 @@
+-	<string>${MACOSX_FRAMEWORK_BUNDLE_VERSION}</string>
++	<string>2.2.0</string>
+@@ -24 +24 @@
+-	<string>${MACOSX_FRAMEWORK_SHORT_VERSION_STRING}</string>
++	<string>2.2.0</string>

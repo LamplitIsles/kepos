@@ -74,7 +74,7 @@ enum ProviderFailure: Int, Error {
     case configuration = 1, identity, extensionUnavailable, bridge, settings, timeout
     case invitation, receiverUnavailable, pairingUnknown, permission, identityInUse
     case capacity, pool, receiverRouteConflict, localAddressConflict, routeInspectionUnavailable, pairingConflictUnknown
-    case excludedAddress
+    case excludedAddress, routeInspectionBeforePair
 
     var safeError: NSError { NSError(domain: "io.lamplitisles.kepos.tunnel", code: rawValue) }
 }
@@ -94,6 +94,7 @@ func managedProviderFailure(_ error: NSError?, pairing: Bool) -> ManagedVPNError
     case .receiverRouteConflict: return .receiverRouteConflict
     case .localAddressConflict: return pairing ? .pairingConflictUnknown : .localAddressConflict
     case .routeInspectionUnavailable: return pairing ? .outcomeUnknown : .routeInspectionUnavailable
+    case .routeInspectionBeforePair: return .routeInspectionUnavailable
     case .pairingConflictUnknown: return .pairingConflictUnknown
     case .excludedAddress: return .receiverExcludedAddress
     case .pairingUnknown, .bridge, .settings, .timeout: return pairing ? .outcomeUnknown : .providerUnavailable
@@ -107,7 +108,11 @@ protocol VPNControlling: AnyObject {
     var onStatusChange: ((VPNStatus) -> Void)? { get set }
 
     func refresh() async
-    /// May launch the provider to read state, without starting a tunnel.
+    /// Read an already enabled owned configuration, without enabling or creating one.
+    /// Returns nil when the user needs to set up or select Kepos.
+    func loadManagedState() async throws -> ManagedState?
+    /// A user-initiated setup may enable the owned VPN configuration and launch
+    /// the provider to read state, without starting a tunnel.
     /// Existing external identity must not be replaced.
     func prepareManagedState() async throws -> ManagedState
     /// Requires a disconnected provider. The UI treats this as an in-progress

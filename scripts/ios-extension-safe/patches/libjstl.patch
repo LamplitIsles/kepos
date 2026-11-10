@@ -1,0 +1,29 @@
+--- a/include/jstl.h
++++ b/include/jstl.h
+@@ -2399 +2399 @@
+-    return js_set_array_elements(env, result, const_cast<const js_value_t **>(values), N, 0);
++    return js_set_array_elements(env, result, values, N, 0);
+@@ -2449 +2449 @@
+-    return js_set_array_elements(env, result, const_cast<const js_value_t **>(values), N, 0);
++    return js_set_array_elements(env, result, values, N, 0);
+@@ -2474 +2474 @@
+-    return js_set_array_elements(env, result, const_cast<const js_value_t **>(values), N, 0);
++    return js_set_array_elements(env, result, values, N, 0);
+@@ -2526 +2526 @@
+-    return js_set_array_elements(env, result, const_cast<const js_value_t **>(values.data()), len, 0);
++    return js_set_array_elements(env, result, values.data(), len, 0);
+@@ -2576 +2576 @@
+-      return js_set_array_elements(env, result, const_cast<const js_value_t **>(values), sizeof...(T), 0);
++      return js_set_array_elements(env, result, values, sizeof...(T), 0);
+@@ -4745 +4745 @@
+-  return js_set_array_elements(env, static_cast<js_value_t *>(array), const_cast<const js_value_t **>(marshalled), N, offset);
++  return js_set_array_elements(env, static_cast<js_value_t *>(array), marshalled, N, offset);
+@@ -4760 +4760 @@
+-  return js_set_array_elements(env, static_cast<js_value_t *>(array), const_cast<const js_value_t **>(marshalled), N, offset);
++  return js_set_array_elements(env, static_cast<js_value_t *>(array), marshalled, N, offset);
+@@ -4777 +4777 @@
+-  return js_set_array_elements(env, static_cast<js_value_t *>(array), const_cast<const js_value_t **>(marshalled.data()), len, offset);
++  return js_set_array_elements(env, static_cast<js_value_t *>(array), marshalled.data(), len, offset);
+@@ -4788 +4788 @@
+-    return js_set_array_elements(env, static_cast<js_value_t *>(array), const_cast<const js_value_t **>(values), sizeof...(T), offset);
++    return js_set_array_elements(env, static_cast<js_value_t *>(array), values, sizeof...(T), offset);

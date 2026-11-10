@@ -1,0 +1,19 @@
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -4 +4 @@
+-  OUT src/worklet.bundle.h
++  OUT "${CMAKE_CURRENT_BINARY_DIR}/worklet.bundle.h"
+@@ -34 +34 @@
+-    worklet.bundle.h
++    "${CMAKE_CURRENT_BINARY_DIR}/worklet.bundle.h"
+@@ -39,0 +40,2 @@
++  PRIVATE
++    "${CMAKE_CURRENT_BINARY_DIR}"
+@@ -96 +98 @@
+-if(IOS)
++if(IOS AND NOT KEPOS_EXTENSION_ONLY)
+--- a/src/worklet.c
++++ b/src/worklet.c
+@@ -16 +16 @@
+-#include "worklet.bundle.h"
++#include <worklet.bundle.h>

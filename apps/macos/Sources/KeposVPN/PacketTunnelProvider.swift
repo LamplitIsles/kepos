@@ -26,7 +26,8 @@ private struct WorkletMessage: Decodable {
 }
 
 /// The user-context app extension owns identity, configuration, lock and worklet.
-final class PacketTunnelProvider: NEPacketTunnelProvider {
+/// Mutable provider state is confined to `queue`.
+final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private let queue = DispatchQueue(label: "kepos.packet-tunnel")
     #if KEPOS_ACCEPTANCE_DIAGNOSTICS
     private let acceptanceDiagnostics = AcceptanceDiagnostics.systemLogger()
@@ -34,8 +35,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     #if KEPOS_STATUS_DIAGNOSTICS
     private let statusDiagnostics = StatusDiagnostics.systemLogger(.provider)
     #endif
-    private var worklet: BareWorklet?
-    private var ipc: BareIPC?
+    private var worklet: Worklet?
+    private var ipc: IPC?
+    private var workletTornDown = false
+    private var shutdown = WorkletShutdown()
     private var decoder = WorkletFrames()
     private var lockFD: Int32 = -1
     private var outgoing = WorkletOutput()
@@ -60,6 +63,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             self.generation += 1
             let generation = self.generation
             self.stopping = false
+            self.workletTornDown = false
+            self.shutdown = WorkletShutdown()
             self.settingsRequested = false
             self.settingsApplied = false
             self.pairing = false
@@ -94,16 +99,38 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     self.publicKey = key.map { String(format: "%02x", $0) }.joined()
                 } catch { throw TunnelFailure.identity }
                 let seedHex = seed.map { String(format: "%02x", $0) }.joined()
-                guard let worklet = BareWorklet(configuration: nil),
-                      let bundle = Bundle.main.path(forResource: "macos-worklet", ofType: "bundle") else {
+                #if os(iOS)
+                // Fail before sending a single-use invitation when the iOS
+                // sandbox cannot inspect routes at all. Pairing validates the
+                // assigned addresses again after the receiver replies.
+                if invitation != nil {
+                    do { _ = try localIPv4Snapshot() }
+                    catch { throw TunnelFailure.routeInspectionBeforePair }
+                }
+                let workletResource = "ios-worklet"
+                #else
+                let workletResource = "macos-worklet"
+                #endif
+                guard let bundle = Bundle.main.path(forResource: workletResource, ofType: "bundle") else {
                     throw TunnelFailure.extensionUnavailable
                 }
+                let worklet = try Worklet()
+                let ipc = try IPC(worklet: worklet)
+                try worklet.start(bundle, arguments: [])
                 self.worklet = worklet
-                guard let ipc = startWorkletIPC(start: { worklet.start(bundle, arguments: []) },
-                                                openIPC: { BareIPC(worklet: worklet) }) else {
-                    throw TunnelFailure.extensionUnavailable
-                }
                 self.ipc = ipc
+                Task { [weak self] in
+                    let code = await worklet.wait()
+                    guard let self else { return }
+                    self.queue.async {
+                        guard !self.stopped, self.generation == generation else { return }
+                        // Bare Kit invokes its exit callback after runtime
+                        // teardown, before the native thread finally returns.
+                        self.workletTornDown = true
+                        guard self.stopping else { self.fail(TunnelFailure.bridge); return }
+                        self.completeStop(self.shutdown.exited(code))
+                    }
+                }
                 self.readIPC()
                 if let invitation { try self.sendControl(["type": "pair", "invitation": invitation, "seed": seedHex]) }
                 else { try self.sendControl(["type": "start", "config": current!.tunnelConfig, "seed": seedHex]) }
@@ -186,11 +213,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private func readIPC() {
         guard !stopped, let ipc else { return }
         let generation = generation
-        ipc.read { [weak self] data, error in
+        Task { [weak self] in
+            let data = await ipc.makeAsyncIterator().next()
             guard let self else { return }
             self.queue.async {
                 guard !self.stopped, self.generation == generation else { return }
-                guard error == nil, let data, !data.isEmpty else { self.fail(TunnelFailure.bridge); return }
+                guard let data, !data.isEmpty else {
+                    if self.stopping && self.shutdown.hasAcknowledged { return }
+                    self.fail(TunnelFailure.bridge)
+                    return
+                }
                 do {
                     // A stopped control frame can reset provider state during
                     // delivery; do not mutate the stored decoder in its callback.
@@ -316,7 +348,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             if !stopping { peers[index]["connected"] = connected }
         case "stopped":
             guard stopping else { throw TunnelFailure.bridge }
-            finish()
+            let decision = shutdown.acknowledge()
+            ipc?.end()
+            completeStop(decision)
         default: throw TunnelFailure.bridge
         }
     }
@@ -367,15 +401,26 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private func writeNext() {
         guard let ipc, let data = outgoing.next() else { return }
         let generation = generation
-        ipc.write(data) { [weak self] error in
+        Task { [weak self] in
+            let failed: Bool
+            do { try await ipc.write(data); failed = false }
+            catch { failed = true }
             guard let self else { return }
             self.queue.async {
                 guard !self.stopped, self.generation == generation else { return }
                 self.outgoing.complete()
-                if error != nil { self.fail(TunnelFailure.bridge); return }
+                if failed { self.fail(TunnelFailure.bridge); return }
                 self.writeNext()
                 if self.outgoing.isIdle { self.readPackets() }
             }
+        }
+    }
+
+    private func completeStop(_ decision: WorkletShutdown.Decision) {
+        switch decision {
+        case .wait: break
+        case .finish: finish()
+        case .fail: fail(TunnelFailure.bridge)
         }
     }
 
@@ -387,12 +432,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let safe = (error as? TunnelFailure ?? (pairing ? .pairingUnknown : .bridge)).safeError
         completion?(safe)
         if wasRunning { cancelTunnelWithError(safe) }
-        if worklet != nil {
-            // BareKit v2.5.5 termination is asynchronous and has no public
-            // worklet-exit callback. Terminating this dedicated provider process
-            // keeps the identity lock until the OS has stopped every thread and
-            // closed its descriptors. A graceful "stopped" reply takes the
-            // normal finish path only after engine.stop() has completed.
+        if worklet != nil && !workletTornDown {
+            // A missing exit callback must never release the identity lock
+            // while worklet threads might still hold the identity.
             _exit(1)
         }
         finish()
