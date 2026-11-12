@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">Kepos</string>
+
+  <!-- Foreground notification text. Placeholder copy; the UI owner maintains it. -->
+  <string name="vpn_channel_name">Peer connection</string>
+  <string name="vpn_notification_pairing">Pairing with receiver</string>
+  <string name="vpn_notification_connected">Peer connection active</string>
+  <string name="vpn_notification_disconnecting">Disconnecting</string>
+</resources>

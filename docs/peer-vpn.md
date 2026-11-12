@@ -120,7 +120,9 @@ overlay. HyperDHT discovery and the UDX carrier still require UDP on the
 physical network. A direct path is required; no relay is provisioned here.
 An experimental macOS packet-tunnel implementation has undergone limited
 Mac–Linux peer tests on a LAN. The iOS source project is present but has not
-been validated on a device; Android and Windows VPN implementations are not
+been validated on a device. An Android `VpnService` client builds on Linux as an
+`arm64-v8a` debug APK but has not been run on a device; see
+[android-peer-vpn.md](android-peer-vpn.md). No Windows VPN implementation is
 supplied.
 
 Build the helper in the checkout with a Linux C compiler and kernel headers:
