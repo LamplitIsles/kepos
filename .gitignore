@@ -20,6 +20,7 @@ lcov.info
 !.env.example
 *.local.json
 .build/
+apps/windows/target/
 dist/desktop/
 dist/windows/
 dist/release/

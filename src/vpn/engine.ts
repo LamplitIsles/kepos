@@ -47,12 +47,29 @@ function diagnosticError(error: unknown): string {
   return "transport error";
 }
 
+export type EngineStage =
+  | "config"
+  | "peers"
+  | "tun"
+  | "dht"
+  | "listen"
+  // The listen call itself returned, so the server is up.
+  | "listen-return"
+  // An error reached the startup catch, before any cleanup is awaited.
+  | "listen-reject"
+  // The startup catch ran after a boundary other than listen.
+  | "startup-reject"
+  | "cleanup-begin"
+  | "cleanup-end";
+
 export async function startVpnEngine(options: {
   keyPair: DhtKeyPair;
   config: PeerConfig;
   dht?: DhtNode;
   openTun: (options: { address: string; peerAddresses: readonly string[] }) => Promise<PacketDevice>;
   log?: (message: string) => void;
+  /** Reports the last real call boundary reached, for fixed-stage diagnostics. */
+  stage?: (stage: EngineStage) => void;
   onPeerStatus?: (peer: { key: string; label: string; connected: boolean }) => void;
   now: () => number;
   enrollment?: {
@@ -60,8 +77,15 @@ export async function startVpnEngine(options: {
     changed: () => void;
   };
 }): Promise<{ peerKey: string; interfaceName: string; failed: Promise<Error>; stop: () => Promise<void> }> {
+  // Track the last real boundary so the catch can name what actually failed.
+  let reached: EngineStage | undefined;
+  const mark = (stage: EngineStage): void => {
+    reached = stage;
+    options.stage?.(stage);
+  };
   const vpn = options.config.vpn;
   if (!vpn) throw new Error("VPN mode requires a [vpn] configuration");
+  mark("config");
   const keyPair = options.keyPair;
   const peerKey = b4a.toString(keyPair.publicKey, "hex");
   const peers: Peer[] = vpn.peers.map((entry) => {
@@ -249,18 +273,23 @@ export async function startVpnEngine(options: {
       }
       sessions.clear();
       for (const stream of streams) stream.destroy();
+      mark("cleanup-begin");
       await cleanupAll([
         () => server?.close(),
         () => tun?.close(),
         () => options.dht ? undefined : dht.destroy({ force: true }),
       ]);
+      mark("cleanup-end");
     })();
     await stopTask;
   }
+  mark("peers");
   try {
+    mark("tun");
     tun = await options.openTun({ address: vpn.address, peerAddresses: peers.map((peer) => peer.address) });
     const device = tun;
     void device.closed.then((error) => { if (!stopping) rejectFailure(error); });
+    mark("dht");
     server = dht.createServer({ reusableSocket: true, firewall: (publicKey) => {
       const key = b4a.toString(publicKey, "hex");
       const peer = byKey.get(key);
@@ -305,7 +334,9 @@ export async function startVpnEngine(options: {
       options.log?.(`VPN transport accepted from ${peer.label}; awaiting protocol handshake`);
       attach(peer, stream);
     });
+    mark("listen");
     await server.listen(keyPair);
+    mark("listen-return");
     options.log?.(`VPN DHT listening: bootstrap=${options.config.network?.bootstrap?.length ? "configured" : "default"} route=${options.config.network?.route ?? "auto"} peers=${peers.length}`);
     void device.packets.receive(async (packet) => {
       if (packet.length < 20 || packet[0]! >>> 4 !== 4) return;
@@ -321,5 +352,11 @@ export async function startVpnEngine(options: {
     });
     for (const peer of peers) if (peer.direction === "dial") void dial(peer);
     return { peerKey, interfaceName: device.name, failed, stop };
-  } catch (error) { await stop(); throw error; }
+  } catch (error) {
+    // Report the failure before any cleanup is awaited, so a hang in cleanup
+    // cannot hide it.
+    mark(reached === "listen" ? "listen-reject" : "startup-reject");
+    await stop();
+    throw error;
+  }
 }

@@ -121,9 +121,27 @@ physical network. A direct path is required; no relay is provisioned here.
 An experimental macOS packet-tunnel implementation has undergone limited
 Mac–Linux peer tests on a LAN. The iOS source project is present but has not
 been validated on a device. An Android `VpnService` client builds on Linux as an
-`arm64-v8a` debug APK but has not been run on a device; see
-[android-peer-vpn.md](android-peer-vpn.md). No Windows VPN implementation is
-supplied.
+`arm64-v8a` debug APK; the operator reported pairing succeeded on an Android
+device, while the installed package was not byte-matched to a recorded artifact
+and TUN packet flow, native addon loading and the remaining device behaviour are
+unconfirmed — see [android-peer-vpn.md](android-peer-vpn.md).
+
+A Windows x64 client, **Kepos VPN** (`KeposVPN.exe`), is present as source, a
+per-user NSIS setup and a statically checked package;
+see [windows-peer-vpn.md](windows-peer-vpn.md). It is a personal test build: it
+runs the same worklet engine with a Wintun overlay device, requires the
+application to start as administrator, and assumes Clash TUN is off. A user
+paired it with the real receiver from the NUC, and two connection attempts were
+observed in the client's own event log. One attempt ended in a silent exit
+before the engine reported `running`; in the later attempt the engine reached
+`worklet:running`, the session became `connected`, and the log recorded
+`diag-listen-returned`. At the same time the receiver's service log recorded the
+client key as an authenticated handshake, then `transport accepted` and
+`VPN peer connected`, so the authenticated peer session did come up. Real
+application TCP traffic through the tunnel, the adapter and route lifecycle,
+disconnect and exit cleanup, and the cause of the earlier silent exit are still
+unverified. The client replaces nothing on the Linux/macOS/iOS/Android side and
+uses its own identity directory.
 
 Build the helper in the checkout with a Linux C compiler and kernel headers:
 

@@ -42,7 +42,8 @@
     "kepos": "tsx src/cli/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
-    "check": "npm run vpn:build && npm run typecheck && npm test && npm run macos:test && npm run web:verify"
+    "check": "npm run vpn:build && npm run typecheck && npm test && npm run macos:test && npm run web:verify",
+    "windows:build": "node scripts/build-windows.mjs"
   },
   "dependencies": {
     "b4a": "^1.9.0",

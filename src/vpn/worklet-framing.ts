@@ -29,6 +29,11 @@ export class WorkletFraming {
     return task.finally(() => { this.pending--; });
   }
 
+  /** Whether a diagnostic frame would be accepted right now. */
+  canSendDiagnostic(): boolean {
+    return !this.pending && !this.diagnosticPending && !this.stream.destroyed;
+  }
+
   // Diagnostics are best effort: never occupy a normal message queue slot or
   // cause the VPN to fail if the IPC stream is busy or closed.
   sendDiagnostic(payload: Uint8Array): void {
